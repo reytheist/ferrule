@@ -42,7 +42,11 @@ impl SpaceColor {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Scope {
     Unified,
     Account { account_id: AccountId },
@@ -57,8 +61,31 @@ pub enum InboxCategory {
     All,
 }
 
+impl InboxCategory {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Primary => "primary",
+            Self::Receipts => "receipts",
+            Self::Newsletters => "newsletters",
+            Self::All => "all",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "receipts" => Self::Receipts,
+            "newsletters" => Self::Newsletters,
+            _ => Self::Primary,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum MailboxView {
     Inbox { category: InboxCategory },
     Snoozed,
@@ -74,7 +101,11 @@ pub enum MailboxView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum SyncState {
     Idle { last_ok: Option<UnixMs> },
     Connecting,
@@ -170,7 +201,11 @@ pub enum RemoteContent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum RemoteImagesStatus {
     None,
     Blocked { count: u32 },
@@ -250,7 +285,11 @@ pub struct ThreadView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum MailAction {
     Archive,
     Unarchive,
@@ -267,14 +306,22 @@ pub struct ActionOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum DraftOrigin {
     Human,
     Agent { agent_id: String, rationale: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum DraftState {
     Editing,
     PendingApproval,
@@ -315,7 +362,11 @@ pub struct CreateDraftInput {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum SendMode {
     Undoable { undo_secs: u32 },
     Scheduled { send_at: UnixMs },

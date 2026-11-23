@@ -8,7 +8,9 @@ use crate::error::CoreError;
 
 macro_rules! define_id {
     ($name:ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[derive(
+            Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+        )]
         #[serde(transparent)]
         pub struct $name(Uuid);
 
@@ -44,10 +46,12 @@ macro_rules! define_id {
             type Err = CoreError;
 
             fn from_str(s: &str) -> Result<Self, Self::Err> {
-                Uuid::parse_str(s).map(Self).map_err(|_| CoreError::InvalidInput {
-                    field: stringify!($name).to_string(),
-                    reason: format!("invalid UUID: {s}"),
-                })
+                Uuid::parse_str(s)
+                    .map(Self)
+                    .map_err(|_| CoreError::InvalidInput {
+                        field: stringify!($name).to_string(),
+                        reason: format!("invalid UUID: {s}"),
+                    })
             }
         }
     };

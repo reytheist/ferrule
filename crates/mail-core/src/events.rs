@@ -4,7 +4,11 @@ use crate::ids::{AccountId, DraftId, JobId, ThreadId};
 use crate::types::{JobView, SyncState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Alert {
     SnoozeWoke { thread_id: ThreadId },
     FollowUpDue { thread_id: ThreadId },
@@ -13,7 +17,11 @@ pub enum Alert {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum CoreEvent {
     MailChanged {
         account_id: AccountId,
