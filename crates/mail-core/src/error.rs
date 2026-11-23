@@ -22,8 +22,11 @@ pub enum CoreError {
     TooLate,
     #[error("illegal state transition: {reason}")]
     IllegalState { reason: String },
-    #[error("account requires re-authentication")]
-    AuthRequired { account_id: AccountId },
+    #[error("account requires re-authentication: {reason}")]
+    AuthRequired {
+        account_id: AccountId,
+        reason: String,
+    },
     #[error("OS keychain unavailable: {reason}")]
     KeychainUnavailable { reason: String },
     #[error("network error: {reason}")]

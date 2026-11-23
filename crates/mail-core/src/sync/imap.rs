@@ -46,9 +46,10 @@ pub(crate) struct FetchedWindow {
 
 fn map_imap_err(err: &imap::Error, account_id: AccountId, auth_phase: bool) -> CoreError {
     match err {
-        imap::Error::No(_) | imap::Error::Bad(_) if auth_phase => {
-            CoreError::AuthRequired { account_id }
-        }
+        imap::Error::No(_) | imap::Error::Bad(_) if auth_phase => CoreError::AuthRequired {
+            account_id,
+            reason: format!("IMAP server rejected login: {err}"),
+        },
         imap::Error::Io(e) => CoreError::Network {
             reason: e.to_string(),
             retryable: true,

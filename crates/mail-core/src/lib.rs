@@ -1257,6 +1257,7 @@ impl MailCore {
         let Some(secret) = self.secret_for(job.account_id, &account.auth)? else {
             return Err(CoreError::AuthRequired {
                 account_id: job.account_id,
+                reason: "no saved credential in OS keychain".to_string(),
             });
         };
         let plan = sync::imap::plan_for(
@@ -1313,12 +1314,12 @@ impl MailCore {
         let secret = match self.secret_for(account_id, &auth)? {
             Some(secret) => secret,
             None => {
-                self.persist_sync_failure(
+                let err = CoreError::AuthRequired {
                     account_id,
-                    &CoreError::AuthRequired { account_id },
-                    now,
-                )?;
-                return Err(CoreError::AuthRequired { account_id });
+                    reason: "no saved credential in OS keychain".to_string(),
+                };
+                self.persist_sync_failure(account_id, &err, now)?;
+                return Err(err);
             }
         };
 
@@ -1404,8 +1405,8 @@ impl MailCore {
         now: UnixMs,
     ) -> Result<(), CoreError> {
         let state = match err {
-            CoreError::AuthRequired { .. } => SyncState::Blocked {
-                reason: "account requires re-authentication".to_string(),
+            CoreError::AuthRequired { reason, .. } => SyncState::Blocked {
+                reason: reason.clone(),
             },
             CoreError::Network { .. } => SyncState::Backoff {
                 retry_at: now.add_secs(30),
