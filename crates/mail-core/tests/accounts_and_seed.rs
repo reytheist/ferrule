@@ -334,3 +334,61 @@ async fn template_crud_roundtrip() {
         Err(mail_core::error::CoreError::NotFound { .. })
     ));
 }
+
+#[test]
+fn os_keychain_roundtrips_secret_and_cleans_up() {
+    use mail_core::auth::{CredentialKind, SecretKey, SecretStore, SecretString};
+    use mail_core::host::OsKeychain;
+    use mail_core::ids::AccountId;
+
+    let store = OsKeychain::default();
+    let key = SecretKey {
+        account_id: AccountId::fresh(),
+        kind: CredentialKind::Password,
+    };
+    let expected = "galapaghost-keychain-roundtrip-check";
+
+    store
+        .put(&key, &SecretString::new(expected))
+        .expect("OsKeychain put");
+    let fetched = store
+        .get(&key)
+        .expect("OsKeychain get")
+        .expect("OsKeychain returned None immediately after put (mock backend active?)");
+    assert_eq!(fetched.expose(), expected);
+
+    store.delete(&key).expect("OsKeychain delete");
+    assert!(store.get(&key).expect("OsKeychain get after delete").is_none());
+}
+
+#[tokio::test]
+async fn gmail_app_password_strips_spaces() {
+    let secrets = Arc::new(MemorySecretStore::default());
+    let core = MailCore::open(
+        CoreConfig::default(),
+        Host {
+            secrets: secrets.clone(),
+            clock: Arc::new(ManualClock::new(UnixMs(1_795_000_000_000))),
+        },
+    )
+    .expect("open");
+
+    let account = core
+        .add_account(NewAccountInput {
+            display_name: "Personal".into(),
+            color: SpaceColor::Azure,
+            auth: ProviderAuth::GmailAppPassword {
+                address: "person@gmail.com".into(),
+            },
+            secret: Some("abcd efgh ijkl mnop".into()),
+        })
+        .await
+        .expect("add");
+
+    let key = SecretKey {
+        account_id: account.id,
+        kind: mail_core::auth::CredentialKind::Password,
+    };
+    let stored = secrets.get(&key).expect("get").expect("present");
+    assert_eq!(stored.expose(), "abcdefghijklmnop");
+}

@@ -169,7 +169,19 @@ impl MailCore {
             });
         }
         input.auth.validate()?;
-        let secret = input.secret.filter(|s| !s.trim().is_empty());
+        let secret = input.secret.and_then(|raw| {
+            let normalized = match &input.auth {
+                ProviderAuth::GmailAppPassword { .. } => {
+                    raw.chars().filter(|c| !c.is_whitespace()).collect::<String>()
+                }
+                _ => raw.trim().to_string(),
+            };
+            if normalized.is_empty() {
+                None
+            } else {
+                Some(normalized)
+            }
+        });
         if matches!(input.auth.credential_kind(), CredentialKind::Password) && secret.is_none() {
             return Err(CoreError::InvalidInput {
                 field: "secret".to_string(),

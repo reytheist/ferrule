@@ -17,7 +17,7 @@ uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite"] }
 ammonia = "4"
 zeroize = { version = "1", features = ["derive"] }
-keyring = "3"
+keyring = { version = "3", features = ["windows-native", "sync-secret-service", "crypto-rust", "apple-native"] }
 mail-parser = "0.9"
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-rustls-tls", "hostname"] }
 imap = { version = "3.0.0-alpha.15", default-features = false, features = ["rustls-tls"] }

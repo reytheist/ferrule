@@ -27,8 +27,7 @@ impl Dialect {
 
     pub(crate) fn primary_sync_folder(self) -> &'static str {
         match self {
-            Self::Gmail => "[Gmail]/All Mail",
-            Self::Outlook | Self::Generic => "INBOX",
+            Self::Gmail | Self::Outlook | Self::Generic => "INBOX",
         }
     }
 }

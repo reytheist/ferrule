@@ -8,7 +8,8 @@ use crate::error::CoreError;
 use crate::ids::{AccountId, UnixMs};
 use crate::sync::{parse_raw, IngestMessage};
 
-const MAX_MESSAGES_PER_SYNC: usize = 500;
+const MAX_MESSAGES_PER_SYNC: usize = 50;
+const FETCH_BATCH_SIZE: usize = 20;
 
 #[derive(Debug, Clone)]
 pub(crate) struct FetchPlan {
@@ -118,31 +119,33 @@ pub(crate) fn fetch_window(plan: &FetchPlan) -> Result<FetchedWindow, CoreError>
         });
     }
 
-    let uid_set = uids
-        .iter()
-        .map(|uid| uid.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
-    let fetches = session
-        .uid_fetch(uid_set, "RFC822 FLAGS")
-        .map_err(|e| map_imap_err(&e, plan.account_id, false))?;
-
     let mut messages = Vec::new();
-    for item in fetches.iter() {
-        let Some(body) = item.body() else {
-            continue;
-        };
-        let is_read = item
-            .flags()
+    for chunk in uids.chunks(FETCH_BATCH_SIZE) {
+        let uid_set = chunk
             .iter()
-            .any(|flag| matches!(flag, imap::types::Flag::Seen));
-        let gm_thrid = if plan.gmail_dialect {
-            extract_gm_thrid(body)
-        } else {
-            None
-        };
-        if let Some(parsed) = parse_raw(body, gm_thrid, is_read, plan.now) {
-            messages.push(parsed);
+            .map(|uid| uid.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let fetches = session
+            .uid_fetch(uid_set, "RFC822 FLAGS")
+            .map_err(|e| map_imap_err(&e, plan.account_id, false))?;
+
+        for item in fetches.iter() {
+            let Some(body) = item.body() else {
+                continue;
+            };
+            let is_read = item
+                .flags()
+                .iter()
+                .any(|flag| matches!(flag, imap::types::Flag::Seen));
+            let gm_thrid = if plan.gmail_dialect {
+                extract_gm_thrid(body)
+            } else {
+                None
+            };
+            if let Some(parsed) = parse_raw(body, gm_thrid, is_read, plan.now) {
+                messages.push(parsed);
+            }
         }
     }
     let _ = session.logout();

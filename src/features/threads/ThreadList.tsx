@@ -1,4 +1,4 @@
-import { Archive, Clock, Inbox, Star } from "lucide-react";
+import { AlertTriangle, Archive, Clock, Inbox, RefreshCw, Star, Trash2 } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import type { InboxCategory, ThreadSummary } from "../../types/mail";
 import type { MailApp } from "../shell/useMailApp";
@@ -143,6 +143,16 @@ export function ThreadList({ app }: { app: MailApp }) {
   }
 
   const inboxView = app.view.kind === "inbox" ? app.view : null;
+  const focusedAccount = app.scopeAccount
+    ? app.accounts.find((a) => a.id === app.scopeAccount) ?? null
+    : null;
+  const syncIssue =
+    focusedAccount &&
+    (focusedAccount.sync.kind === "blocked" || focusedAccount.sync.kind === "backoff")
+      ? focusedAccount.sync.kind === "blocked"
+        ? focusedAccount.sync.reason
+        : "Temporary connection error — retrying automatically."
+      : null;
 
   return (
     <section className="list-col">
@@ -162,6 +172,33 @@ export function ThreadList({ app }: { app: MailApp }) {
       ) : (
         <div className="list-tabs">
           <span className="list-title">{viewTitle(app.view)}</span>
+        </div>
+      )}
+
+      {focusedAccount && syncIssue && (
+        <div className="sync-banner" role="status">
+          <div className="sync-banner-head">
+            <AlertTriangle />
+            <span>{syncIssue}</span>
+          </div>
+          <div className="sync-banner-actions">
+            <button
+              className="t-btn"
+              onClick={() => void app.syncNow()}
+              disabled={app.syncing}
+            >
+              <RefreshCw />
+              {app.syncing ? "Syncing…" : "Retry sync"}
+            </button>
+            <button
+              className="t-btn"
+              onClick={() => void app.removeAccount(focusedAccount.id)}
+              title="Remove this account"
+            >
+              <Trash2 />
+              Remove
+            </button>
+          </div>
         </div>
       )}
 

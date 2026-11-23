@@ -77,8 +77,34 @@ interface ToastOptions {
 const THEME_KEY = "galapaghost.theme";
 const DEFAULT_UNDO_MS = 5000;
 
+function readStringField(obj: object, key: string): string | null {
+  if (!(key in obj)) return null;
+  const descriptor = Object.getOwnPropertyDescriptor(obj, key);
+  return typeof descriptor?.value === "string" ? descriptor.value : null;
+}
+
 function friendlyError(error: unknown): string {
   if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error !== null && typeof error === "object") {
+    const kind = readStringField(error, "kind");
+    const reason = readStringField(error, "reason");
+    const field = readStringField(error, "field");
+    if (kind === "authRequired") {
+      return reason ?? "Sign-in rejected or credentials missing — check your email and App Password.";
+    }
+    if (kind === "keychainUnavailable") {
+      return `OS keychain unavailable: ${reason ?? "unlock your keyring"}`;
+    }
+    if (kind === "network") {
+      return `Connection failed: ${reason ?? "check server host, port, and internet"}`;
+    }
+    if (kind === "invalidInput") {
+      return field && reason ? `${field}: ${reason}` : reason ?? "Invalid input";
+    }
+    if (reason) return reason;
+    if (kind) return kind;
+  }
   return String(error);
 }
 
@@ -455,12 +481,26 @@ export function useMailApp(): MailApp {
 
   async function syncNow(): Promise<void> {
     if (syncing) return;
+    const targets = scopeAccount
+      ? accounts.filter((a) => a.id === scopeAccount)
+      : accounts;
+    if (targets.length === 0) return;
     setSyncing(true);
     try {
-      await Promise.all(accounts.map((a) => syncAccount(a.id)));
+      const results = await Promise.allSettled(targets.map((a) => syncAccount(a.id)));
       await reloadMeta();
       await reload(scope, view);
-      showToast("Sync complete");
+      const succeeded = results.filter((r) => r.status === "fulfilled").length;
+      const firstRejected = results.find(
+        (r): r is PromiseRejectedResult => r.status === "rejected",
+      );
+      if (succeeded > 0 && !firstRejected) {
+        showToast(succeeded === 1 ? "Sync complete" : `Synced ${succeeded} accounts`);
+      } else if (succeeded > 0) {
+        showToast(`Synced ${succeeded} of ${targets.length} accounts`);
+      } else if (firstRejected) {
+        showToast(friendlyError(firstRejected.reason));
+      }
     } catch (err) {
       showToast(friendlyError(err));
     } finally {
@@ -659,9 +699,26 @@ export function useMailApp(): MailApp {
 
   async function addAccount(input: NewAccountInput): Promise<void> {
     try {
-      await addAccountCommand(input);
+      const created = await addAccountCommand(input);
+      const nextScope: Scope = { kind: "account", accountId: created.id };
+      const nextView: MailboxView = { kind: "inbox", category: "primary" };
+      setScopeAccount(created.id);
+      setView(nextView);
       await reloadMeta();
-      showToast(`Added ${input.displayName}`);
+      showToast(`Added ${created.displayName} — syncing…`);
+      setSyncing(true);
+      try {
+        await syncAccount(created.id);
+        await reloadMeta();
+        await reload(nextScope, nextView);
+        showToast(`Synced ${created.displayName}`);
+      } catch (syncErr) {
+        await reloadMeta();
+        await reload(nextScope, nextView);
+        showToast(`${created.displayName}: ${friendlyError(syncErr)}`, { durationMs: 8000 });
+      } finally {
+        setSyncing(false);
+      }
     } catch (err) {
       showToast(friendlyError(err));
       throw err;
