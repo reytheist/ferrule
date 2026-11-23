@@ -119,7 +119,9 @@ fn transport_for(
     let credentials = Credentials::new(username.to_string(), secret.to_string());
     let mechanism = match auth.credential_kind() {
         CredentialKind::Password => vec![Mechanism::Login, Mechanism::Plain],
-        CredentialKind::OAuthRefreshToken => vec![Mechanism::Xoauth2],
+        CredentialKind::OAuthRefreshToken | CredentialKind::OAuthClientSecret => {
+            vec![Mechanism::Xoauth2]
+        }
     };
 
     let builder = if endpoint.tls && endpoint.port == 465 {

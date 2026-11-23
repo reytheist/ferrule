@@ -1,6 +1,7 @@
 //! Private transport layer: IMAP fetch/verify, SMTP send, and RFC822 parsing.
 
 pub(crate) mod imap;
+pub(crate) mod oauth;
 pub(crate) mod smtp;
 
 use regex::Regex;

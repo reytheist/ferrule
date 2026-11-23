@@ -51,6 +51,16 @@ export async function addAccount(input: NewAccountInput): Promise<AccountView> {
   return invoke<AccountView>("add_account", { input });
 }
 
+export async function oauthSignInAccount(input: NewAccountInput): Promise<AccountView> {
+  if (!isTauriRuntime()) return mock.addAccount(input);
+  return invoke<AccountView>("oauth_sign_in_account", { input });
+}
+
+export async function reauthOAuthAccount(accountId: AccountId): Promise<AccountView> {
+  if (!isTauriRuntime()) return mock.syncAccount(accountId);
+  return invoke<AccountView>("reauth_oauth_account", { accountId });
+}
+
 export async function removeAccount(accountId: AccountId): Promise<void> {
   if (!isTauriRuntime()) return mock.removeAccount(accountId);
   return invoke<void>("remove_account", { accountId });

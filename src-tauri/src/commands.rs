@@ -29,6 +29,22 @@ pub async fn add_account(
 }
 
 #[tauri::command]
+pub async fn oauth_sign_in_account(
+    core: tauri::State<'_, MailCore>,
+    input: NewAccountInput,
+) -> Result<AccountView, CoreError> {
+    core.oauth_sign_in_account(input).await
+}
+
+#[tauri::command]
+pub async fn reauth_oauth_account(
+    core: tauri::State<'_, MailCore>,
+    account_id: AccountId,
+) -> Result<AccountView, CoreError> {
+    core.reauth_oauth_account(account_id).await
+}
+
+#[tauri::command]
 pub async fn remove_account(
     core: tauri::State<'_, MailCore>,
     account_id: AccountId,

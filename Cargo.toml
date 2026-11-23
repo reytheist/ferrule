@@ -12,7 +12,7 @@ authors = ["Galapaghost Contributors"]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite"] }
 ammonia = "4"
@@ -24,3 +24,8 @@ imap = { version = "3.0.0-alpha.15", default-features = false, features = ["rust
 rustls-connector = { version = "0.21", features = ["webpki-roots-certs"] }
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+sha2 = "0.10"
+base64 = "0.22"
+url = "2"
+open = "5"

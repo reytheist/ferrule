@@ -2,8 +2,11 @@
 //! verifies the Sent folder during crash recovery. Runs on a blocking thread; callers
 //! surface [`CoreError::AuthRequired`] / [`CoreError::Network`] without crashing.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use chrono::{DateTime, Utc};
 
+use crate::auth::CredentialKind;
 use crate::error::CoreError;
 use crate::ids::{AccountId, UnixMs};
 use crate::sync::{parse_raw, IngestMessage};
@@ -11,12 +14,19 @@ use crate::sync::{parse_raw, IngestMessage};
 const MAX_MESSAGES_PER_SYNC: usize = 50;
 const FETCH_BATCH_SIZE: usize = 20;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ImapAuthMode {
+    Login,
+    XOAuth2,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct FetchPlan {
     pub account_id: AccountId,
     pub host: String,
     pub port: u16,
     pub plaintext: bool,
+    pub auth_mode: ImapAuthMode,
     pub username: String,
     pub secret: String,
     pub folder: String,
@@ -69,6 +79,26 @@ fn map_imap_err(err: &imap::Error, account_id: AccountId, auth_phase: bool) -> C
     }
 }
 
+struct XOAuth2Authenticator {
+    user: String,
+    access_token: String,
+    sent: AtomicBool,
+}
+
+impl imap::Authenticator for XOAuth2Authenticator {
+    type Response = String;
+
+    fn process(&self, _data: &[u8]) -> Self::Response {
+        // Send the SASL XOAUTH2 string once; if the server replies with an error
+        // continuation challenge, return empty string so the server completes with NO.
+        if self.sent.swap(true, Ordering::SeqCst) {
+            String::new()
+        } else {
+            format!("user={}\x01auth=Bearer {}\x01\x01", self.user, self.access_token)
+        }
+    }
+}
+
 fn open_session(plan: &FetchPlan) -> Result<imap::Session<imap::Connection>, CoreError> {
     let mut builder = imap::ClientBuilder::new(plan.host.as_str(), plan.port);
     if plan.plaintext {
@@ -77,9 +107,21 @@ fn open_session(plan: &FetchPlan) -> Result<imap::Session<imap::Connection>, Cor
     let client = builder
         .connect()
         .map_err(|e| map_imap_err(&e, plan.account_id, false))?;
-    client
-        .login(&plan.username, &plan.secret)
-        .map_err(|(e, _)| map_imap_err(&e, plan.account_id, true))
+    match plan.auth_mode {
+        ImapAuthMode::Login => client
+            .login(&plan.username, &plan.secret)
+            .map_err(|(e, _)| map_imap_err(&e, plan.account_id, true)),
+        ImapAuthMode::XOAuth2 => {
+            let auth = XOAuth2Authenticator {
+                user: plan.username.clone(),
+                access_token: plan.secret.clone(),
+                sent: AtomicBool::new(false),
+            };
+            client
+                .authenticate("XOAUTH2", &auth)
+                .map_err(|(e, _)| map_imap_err(&e, plan.account_id, true))
+        }
+    }
 }
 
 fn since_imap_date(since: UnixMs) -> String {
@@ -238,11 +280,18 @@ pub(crate) fn plan_for(
     window: SyncWindow,
 ) -> FetchPlan {
     let endpoint = auth.imap_endpoint();
+    let auth_mode = match auth.credential_kind() {
+        CredentialKind::Password => ImapAuthMode::Login,
+        CredentialKind::OAuthRefreshToken | CredentialKind::OAuthClientSecret => {
+            ImapAuthMode::XOAuth2
+        }
+    };
     FetchPlan {
         account_id,
         host: endpoint.host,
         port: endpoint.port,
         plaintext: !endpoint.tls,
+        auth_mode,
         username: auth.username().to_string(),
         secret,
         folder,

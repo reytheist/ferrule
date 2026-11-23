@@ -76,6 +76,8 @@ pub fn run() {
             commands::health_check,
             commands::list_accounts,
             commands::add_account,
+            commands::oauth_sign_in_account,
+            commands::reauth_oauth_account,
             commands::remove_account,
             commands::sync_account,
             commands::seed_demo_if_empty,

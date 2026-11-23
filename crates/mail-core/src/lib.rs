@@ -11,8 +11,9 @@ pub mod types;
 mod store;
 mod sync;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::broadcast;
 
@@ -62,11 +63,17 @@ impl Host {
     }
 }
 
+struct CachedAccessToken {
+    token: SecretString,
+    expires_at: UnixMs,
+}
+
 struct MailCoreInner {
     config: CoreConfig,
     store: store::Store,
     host: Host,
     events: broadcast::Sender<CoreEvent>,
+    token_cache: Mutex<HashMap<AccountId, CachedAccessToken>>,
 }
 
 #[derive(Clone)]
@@ -108,6 +115,7 @@ impl MailCore {
                 store,
                 host,
                 events,
+                token_cache: Mutex::new(HashMap::new()),
             }),
         })
     }
@@ -255,12 +263,164 @@ impl MailCore {
             kind: auth.credential_kind(),
         };
         self.inner.host.secrets.delete(&key)?;
+        let _ = self.inner.host.secrets.delete(&SecretKey {
+            account_id,
+            kind: CredentialKind::OAuthClientSecret,
+        });
+        if let Ok(mut cache) = self.inner.token_cache.lock() {
+            cache.remove(&account_id);
+        }
 
         self.inner
             .store
             .with_conn(|conn| store::delete_account(conn, account_id))?;
         self.emit(CoreEvent::Resync);
         Ok(())
+    }
+
+    /// Run one-click browser OAuth2 PKCE sign-in, persist the refresh token (and optional
+    /// client secret) in the OS keychain, cache the short-lived access token in memory,
+    /// and create the account only after sign-in succeeds.
+    pub async fn oauth_sign_in_account(
+        &self,
+        mut input: NewAccountInput,
+    ) -> Result<AccountView, CoreError> {
+        let display_name = input.display_name.trim().to_string();
+        if display_name.is_empty() {
+            return Err(CoreError::InvalidInput {
+                field: "displayName".to_string(),
+                reason: "account name is required".to_string(),
+            });
+        }
+        input.auth.validate()?;
+        let client_secret = input
+            .secret
+            .take()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        if let ProviderAuth::GmailOAuth { ref mut client, .. } = input.auth {
+            client.has_client_secret = client_secret.is_some();
+        }
+
+        let bundle = sync::oauth::run_browser_pkce_flow(&input.auth, client_secret.as_deref())
+            .await?;
+        let refresh = bundle.refresh_token.ok_or_else(|| CoreError::Network {
+            reason: "OAuth provider did not return a refresh token — revoke app access and try again"
+                .to_string(),
+            retryable: false,
+        })?;
+
+        let created = self
+            .add_account(NewAccountInput {
+                display_name,
+                color: input.color,
+                auth: input.auth,
+                secret: Some(refresh),
+            })
+            .await?;
+
+        if let Some(secret) = client_secret {
+            let _ = self.inner.host.secrets.put(
+                &SecretKey {
+                    account_id: created.id,
+                    kind: CredentialKind::OAuthClientSecret,
+                },
+                &SecretString::new(secret),
+            );
+        }
+        self.cache_access_token(created.id, bundle.access_token, bundle.expires_in_secs);
+        Ok(created)
+    }
+
+    /// Re-run browser OAuth2 PKCE sign-in for an existing Gmail/Outlook OAuth account.
+    pub async fn reauth_oauth_account(&self, account_id: AccountId) -> Result<AccountView, CoreError> {
+        let account = self.account_row(account_id)?;
+        let client_secret = self
+            .inner
+            .host
+            .secrets
+            .get(&SecretKey {
+                account_id,
+                kind: CredentialKind::OAuthClientSecret,
+            })?;
+        let bundle = sync::oauth::run_browser_pkce_flow(
+            &account.auth,
+            client_secret.as_ref().map(SecretString::expose),
+        )
+        .await?;
+
+        if let Some(refresh) = bundle.refresh_token {
+            self.inner.host.secrets.put(
+                &SecretKey {
+                    account_id,
+                    kind: CredentialKind::OAuthRefreshToken,
+                },
+                &SecretString::new(refresh),
+            )?;
+        }
+        self.cache_access_token(account_id, bundle.access_token, bundle.expires_in_secs);
+        self.sync_account(account_id).await
+    }
+
+    fn cache_access_token(&self, account_id: AccountId, token: String, expires_in_secs: i64) {
+        let expires_at = self.now().add_secs(expires_in_secs.max(60));
+        if let Ok(mut cache) = self.inner.token_cache.lock() {
+            cache.insert(
+                account_id,
+                CachedAccessToken {
+                    token: SecretString::new(token),
+                    expires_at,
+                },
+            );
+        }
+    }
+
+    /// Resolve the active credential for IMAP/SMTP: raw password for Password accounts,
+    /// or a fresh (cached or refreshed) OAuth2 access token for OAuth accounts.
+    async fn resolve_transport_secret(
+        &self,
+        account_id: AccountId,
+        auth: &ProviderAuth,
+    ) -> Result<Option<SecretString>, CoreError> {
+        match auth.credential_kind() {
+            CredentialKind::Password => self.secret_for(account_id, auth),
+            CredentialKind::OAuthRefreshToken | CredentialKind::OAuthClientSecret => {
+                let now = self.now();
+                if let Ok(cache) = self.inner.token_cache.lock() {
+                    if let Some(entry) = cache.get(&account_id) {
+                        if entry.expires_at > now.add_secs(60) {
+                            return Ok(Some(entry.token.clone()));
+                        }
+                    }
+                }
+                let Some(refresh) = self.secret_for(account_id, auth)? else {
+                    return Ok(None);
+                };
+                let client_secret = self.inner.host.secrets.get(&SecretKey {
+                    account_id,
+                    kind: CredentialKind::OAuthClientSecret,
+                })?;
+                let bundle = sync::oauth::refresh_access_token(
+                    account_id,
+                    auth,
+                    refresh.expose(),
+                    client_secret.as_ref().map(SecretString::expose),
+                )
+                .await?;
+                if let Some(rotated) = bundle.refresh_token {
+                    self.inner.host.secrets.put(
+                        &SecretKey {
+                            account_id,
+                            kind: CredentialKind::OAuthRefreshToken,
+                        },
+                        &SecretString::new(rotated),
+                    )?;
+                }
+                let access = SecretString::new(bundle.access_token.clone());
+                self.cache_access_token(account_id, bundle.access_token, bundle.expires_in_secs);
+                Ok(Some(access))
+            }
+        }
     }
 
     /// Seed four demo accounts, six threads, timers, and templates when the database
@@ -953,7 +1113,10 @@ impl MailCore {
                 })?;
 
                 let account = self.account_row(job.account_id)?;
-                let Some(secret) = self.secret_for(job.account_id, &account.auth)? else {
+                let Some(secret) = self
+                    .resolve_transport_secret(job.account_id, &account.auth)
+                    .await?
+                else {
                     return self
                         .fail_send(
                             job,
@@ -1254,7 +1417,10 @@ impl MailCore {
         frozen: &FrozenMessage,
     ) -> Result<bool, CoreError> {
         let account = self.account_row(job.account_id)?;
-        let Some(secret) = self.secret_for(job.account_id, &account.auth)? else {
+        let Some(secret) = self
+            .resolve_transport_secret(job.account_id, &account.auth)
+            .await?
+        else {
             return Err(CoreError::AuthRequired {
                 account_id: job.account_id,
                 reason: "no saved credential in OS keychain".to_string(),
@@ -1311,13 +1477,17 @@ impl MailCore {
             Ok((account.auth, folder, since, min_uid))
         })?;
 
-        let secret = match self.secret_for(account_id, &auth)? {
-            Some(secret) => secret,
-            None => {
+        let secret = match self.resolve_transport_secret(account_id, &auth).await {
+            Ok(Some(secret)) => secret,
+            Ok(None) => {
                 let err = CoreError::AuthRequired {
                     account_id,
                     reason: "no saved credential in OS keychain".to_string(),
                 };
+                self.persist_sync_failure(account_id, &err, now)?;
+                return Err(err);
+            }
+            Err(err) => {
                 self.persist_sync_failure(account_id, &err, now)?;
                 return Err(err);
             }

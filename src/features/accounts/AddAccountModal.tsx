@@ -1,13 +1,13 @@
 import { useState } from "react";
-import { ArrowLeft, X } from "lucide-react";
+import { ArrowLeft, ExternalLink, X } from "lucide-react";
 import type { NewAccountInput, ProviderAuth, SpaceColor } from "../../types/mail";
 import type { MailApp } from "../shell/useMailApp";
 import { spaceClass } from "../spaces/SpaceSwitcher";
 
 type ProviderStep =
-  | "gmailAppPassword"
   | "gmailOAuth"
   | "outlookOAuth"
+  | "gmailAppPassword"
   | "imapPassword";
 
 interface ProviderOption {
@@ -18,28 +18,47 @@ interface ProviderOption {
 
 const PROVIDERS: ProviderOption[] = [
   {
-    kind: "gmailAppPassword",
-    name: "Gmail · App Password",
-    description: "Sign in with a Google App Password (2-step verification on).",
-  },
-  {
     kind: "gmailOAuth",
-    name: "Gmail · Your OAuth client",
-    description: "Bring your own Google OAuth client ID.",
+    name: "Gmail · Sign in with Google",
+    description: "One-click browser OAuth sign-in using your free Google Desktop Client ID.",
   },
   {
     kind: "outlookOAuth",
-    name: "Outlook · OAuth",
-    description: "Microsoft Entra public-client sign-in, no client secret.",
+    name: "Outlook · Sign in with Microsoft",
+    description: "One-click browser OAuth sign-in using a free Microsoft Entra Public Client.",
+  },
+  {
+    kind: "gmailAppPassword",
+    name: "Gmail · App Password",
+    description: "No cloud console needed — paste a 16-letter Google App Password.",
   },
   {
     kind: "imapPassword",
     name: "Custom IMAP / SMTP",
-    description: "Any standards-compliant server: host, port, credentials.",
+    description: "Any standards-compliant server: host, port, and password.",
   },
 ];
 
 const COLORS: SpaceColor[] = ["azure", "berry", "teal", "amber", "violet", "emerald"];
+const GOOGLE_CLIENT_KEY = "galapaghost.googleClientId";
+const OUTLOOK_CLIENT_KEY = "galapaghost.outlookClientId";
+const OUTLOOK_TENANT_KEY = "galapaghost.outlookTenant";
+
+function readPref(key: string, fallback = ""): string {
+  try {
+    return window.localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function savePref(key: string, value: string): void {
+  try {
+    if (value.trim()) window.localStorage.setItem(key, value.trim());
+  } catch {
+    // Ignore storage failures in restricted webviews.
+  }
+}
 
 function validPort(raw: string): boolean {
   const value = Number(raw);
@@ -48,13 +67,15 @@ function validPort(raw: string): boolean {
 
 export function AddAccountModal({ app }: { app: MailApp }) {
   const [step, setStep] = useState<"provider" | "form">("provider");
-  const [provider, setProvider] = useState<ProviderStep>("gmailAppPassword");
+  const [provider, setProvider] = useState<ProviderStep>("gmailOAuth");
   const [displayName, setDisplayName] = useState("");
-  const [color, setColor] = useState<SpaceColor>("violet");
+  const [color, setColor] = useState<SpaceColor>("azure");
   const [address, setAddress] = useState("");
   const [secret, setSecret] = useState("");
-  const [clientId, setClientId] = useState("");
-  const [tenant, setTenant] = useState("common");
+  const [googleClientId, setGoogleClientId] = useState(() => readPref(GOOGLE_CLIENT_KEY));
+  const [googleClientSecret, setGoogleClientSecret] = useState("");
+  const [outlookClientId, setOutlookClientId] = useState(() => readPref(OUTLOOK_CLIENT_KEY));
+  const [tenant, setTenant] = useState(() => readPref(OUTLOOK_TENANT_KEY, "common"));
   const [username, setUsername] = useState("");
   const [imapHost, setImapHost] = useState("");
   const [imapPort, setImapPort] = useState("993");
@@ -66,6 +87,8 @@ export function AddAccountModal({ app }: { app: MailApp }) {
   const [busy, setBusy] = useState(false);
 
   if (!app.addAccountOpen) return null;
+
+  const isOAuth = provider === "gmailOAuth" || provider === "outlookOAuth";
 
   function pick(next: ProviderStep): void {
     setProvider(next);
@@ -81,30 +104,36 @@ export function AddAccountModal({ app }: { app: MailApp }) {
     }
     switch (provider) {
       case "gmailAppPassword":
-        if (secret.trim().length < 8) {
+        if (secret.replace(/\s+/g, "").length < 8) {
           setError("Enter the 16-character Google App Password.");
           return null;
         }
         return { kind: "gmailAppPassword", address: mail };
       case "gmailOAuth":
-        if (clientId.trim().length === 0) {
-          setError("Enter your Google OAuth client ID.");
+        if (googleClientId.trim().length === 0) {
+          setError("Enter your Google OAuth Desktop Client ID.");
           return null;
         }
+        savePref(GOOGLE_CLIENT_KEY, googleClientId);
         return {
           kind: "gmailOAuth",
           address: mail,
-          client: { clientId: clientId.trim(), hasClientSecret: false },
+          client: {
+            clientId: googleClientId.trim(),
+            hasClientSecret: googleClientSecret.trim().length > 0,
+          },
         };
       case "outlookOAuth":
-        if (clientId.trim().length === 0) {
-          setError("Enter your Microsoft Entra client ID.");
+        if (outlookClientId.trim().length === 0) {
+          setError("Enter your Microsoft Entra Public Client ID.");
           return null;
         }
+        savePref(OUTLOOK_CLIENT_KEY, outlookClientId);
+        savePref(OUTLOOK_TENANT_KEY, tenant.trim() || "common");
         return {
           kind: "outlookOAuth",
           address: mail,
-          clientId: clientId.trim(),
+          clientId: outlookClientId.trim(),
           tenant: tenant.trim() || "common",
         };
       case "imapPassword":
@@ -137,35 +166,59 @@ export function AddAccountModal({ app }: { app: MailApp }) {
   async function create(): Promise<void> {
     const auth = buildAuth();
     if (!auth) return;
+    setError(null);
     const input: NewAccountInput = {
       displayName: displayName.trim() || auth.address.split("@")[0] || "New account",
       color,
       auth,
-      secret: auth.kind === "gmailOAuth" || auth.kind === "outlookOAuth" ? null : secret,
+      secret:
+        auth.kind === "gmailOAuth"
+          ? googleClientSecret.trim() || null
+          : auth.kind === "outlookOAuth"
+            ? null
+            : secret,
     };
     setBusy(true);
     try {
-      await app.addAccount(input);
+      if (isOAuth) {
+        await app.oauthSignInAccount(input);
+      } else {
+        await app.addAccount(input);
+      }
       app.closeAddAccount();
-    } catch {
-      setError("Could not add the account — check the details and try again.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not connect — check details and retry.");
     } finally {
       setBusy(false);
     }
+  }
+
+  function submitLabel(): string {
+    if (busy) {
+      return isOAuth ? "Waiting for browser sign-in…" : "Connecting…";
+    }
+    if (provider === "gmailOAuth") return "Sign in with Google";
+    if (provider === "outlookOAuth") return "Sign in with Microsoft";
+    return "Add & sync account";
   }
 
   return (
     <div
       className="modal-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) app.closeAddAccount();
+        if (event.target === event.currentTarget && !busy) app.closeAddAccount();
       }}
     >
       <div className="modal" role="dialog" aria-label="Add account">
         <div className="modal-head">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {step === "form" && (
-              <button className="icon-btn" onClick={() => setStep("provider")} title="Back">
+              <button
+                className="icon-btn"
+                disabled={busy}
+                onClick={() => setStep("provider")}
+                title="Back"
+              >
                 <ArrowLeft />
               </button>
             )}
@@ -175,9 +228,14 @@ export function AddAccountModal({ app }: { app: MailApp }) {
             <span className="wizard-steps">
               <span className={step === "provider" ? "step-on" : ""}>1 · provider</span>
               <span>→</span>
-              <span className={step === "form" ? "step-on" : ""}>2 · details</span>
+              <span className={step === "form" ? "step-on" : ""}>2 · sign in</span>
             </span>
-            <button className="icon-btn" onClick={app.closeAddAccount} title="Close (Esc)">
+            <button
+              className="icon-btn"
+              disabled={busy}
+              onClick={app.closeAddAccount}
+              title="Close (Esc)"
+            >
               <X />
             </button>
           </div>
@@ -203,10 +261,10 @@ export function AddAccountModal({ app }: { app: MailApp }) {
           <div className="modal-body">
             <div className="field-row">
               <div className="field">
-                <label>Display name</label>
+                <label>Space name</label>
                 <input
                   className="input"
-                  placeholder="e.g. Studio Gmail"
+                  placeholder="e.g. Personal Gmail"
                   value={displayName}
                   onChange={(event) => setDisplayName(event.target.value)}
                 />
@@ -215,7 +273,7 @@ export function AddAccountModal({ app }: { app: MailApp }) {
                 <label>Email address</label>
                 <input
                   className="input"
-                  placeholder="you@example.com"
+                  placeholder="you@gmail.com"
                   value={address}
                   onChange={(event) => setAddress(event.target.value)}
                 />
@@ -236,46 +294,43 @@ export function AddAccountModal({ app }: { app: MailApp }) {
               </div>
             </div>
 
-            {provider === "gmailAppPassword" && (
-              <div className="field">
-                <label>Google App Password</label>
-                <input
-                  className="input"
-                  type="password"
-                  placeholder="16-character app password"
-                  value={secret}
-                  onChange={(event) => setSecret(event.target.value)}
-                />
-                <span className="hint-text">
-                  Google Account → Security → 2-Step Verification → App passwords.
-                </span>
-              </div>
-            )}
-
             {provider === "gmailOAuth" && (
-              <div className="field">
-                <label>OAuth client ID</label>
-                <input
-                  className="input"
-                  placeholder="….apps.googleusercontent.com"
-                  value={clientId}
-                  onChange={(event) => setClientId(event.target.value)}
-                />
-                <span className="hint-text">
-                  Stored locally; the client secret never leaves your machine.
-                </span>
-              </div>
+              <>
+                <div className="field">
+                  <label>Google Desktop OAuth Client ID (remembered for all Gmail accounts)</label>
+                  <input
+                    className="input"
+                    placeholder="123456789-xxxx.apps.googleusercontent.com"
+                    value={googleClientId}
+                    onChange={(event) => setGoogleClientId(event.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label>Google Client Secret (from your Desktop OAuth client JSON)</label>
+                  <input
+                    className="input"
+                    type="password"
+                    placeholder="GOCSPX-… (stored only in OS keychain)"
+                    value={googleClientSecret}
+                    onChange={(event) => setGoogleClientSecret(event.target.value)}
+                  />
+                  <span className="hint-text">
+                    Google Cloud Console → APIs &amp; Services → Credentials → Create OAuth Client
+                    ID → Desktop app. Add your Gmail under OAuth consent screen → Test users.
+                  </span>
+                </div>
+              </>
             )}
 
             {provider === "outlookOAuth" && (
               <>
                 <div className="field">
-                  <label>Entra client ID</label>
+                  <label>Microsoft Entra Public Client ID</label>
                   <input
                     className="input"
                     placeholder="00000000-0000-0000-0000-000000000000"
-                    value={clientId}
-                    onChange={(event) => setClientId(event.target.value)}
+                    value={outlookClientId}
+                    onChange={(event) => setOutlookClientId(event.target.value)}
                   />
                 </div>
                 <div className="field">
@@ -286,8 +341,29 @@ export function AddAccountModal({ app }: { app: MailApp }) {
                     value={tenant}
                     onChange={(event) => setTenant(event.target.value)}
                   />
+                  <span className="hint-text">
+                    Entra Admin Center → App registrations → Mobile &amp; desktop redirect URI:
+                    http://localhost. No client secret required.
+                  </span>
                 </div>
               </>
+            )}
+
+            {provider === "gmailAppPassword" && (
+              <div className="field">
+                <label>Google App Password</label>
+                <input
+                  className="input"
+                  type="password"
+                  placeholder="abcd efgh ijkl mnop"
+                  value={secret}
+                  onChange={(event) => setSecret(event.target.value)}
+                />
+                <span className="hint-text">
+                  Generate at myaccount.google.com/apppasswords (requires 2-Step Verification).
+                  Spaces are stripped automatically.
+                </span>
+              </div>
             )}
 
             {provider === "imapPassword" && (
@@ -384,14 +460,15 @@ export function AddAccountModal({ app }: { app: MailApp }) {
 
         <div className="modal-foot">
           <span className="hint-text" style={{ flex: 1 }}>
-            Secrets go to the OS keychain — never to the WebView.
+            Refresh tokens and passwords stay in your OS keychain only.
           </span>
-          <button className="btn" onClick={app.closeAddAccount}>
+          <button className="btn" disabled={busy} onClick={app.closeAddAccount}>
             Cancel
           </button>
           {step === "form" && (
             <button className="btn primary" disabled={busy} onClick={() => void create()}>
-              {busy ? "Adding…" : "Create account"}
+              {isOAuth && <ExternalLink style={{ width: 13, height: 13 }} />}
+              {submitLabel()}
             </button>
           )}
         </div>

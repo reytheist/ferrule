@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, Clock, Inbox, RefreshCw, Star, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, Clock, ExternalLink, Inbox, RefreshCw, Star, Trash2 } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import type { InboxCategory, ThreadSummary } from "../../types/mail";
 import type { MailApp } from "../shell/useMailApp";
@@ -182,6 +182,17 @@ export function ThreadList({ app }: { app: MailApp }) {
             <span>{syncIssue}</span>
           </div>
           <div className="sync-banner-actions">
+            {(focusedAccount.provider === "gmail" || focusedAccount.provider === "outlook") && (
+              <button
+                className="t-btn"
+                onClick={() => void app.reauthAccount(focusedAccount.id)}
+                disabled={app.syncing}
+                title="Re-authenticate in browser"
+              >
+                <ExternalLink />
+                Sign in again
+              </button>
+            )}
             <button
               className="t-btn"
               onClick={() => void app.syncNow()}

@@ -55,6 +55,7 @@ pub enum ProviderKind {
 pub enum CredentialKind {
     Password,
     OAuthRefreshToken,
+    OAuthClientSecret,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -183,6 +184,7 @@ impl SecretKey {
         let suffix = match self.kind {
             CredentialKind::Password => "password",
             CredentialKind::OAuthRefreshToken => "oauth-refresh",
+            CredentialKind::OAuthClientSecret => "oauth-client-secret",
         };
         format!("galapaghost:v1:{}:{suffix}", self.account_id)
     }

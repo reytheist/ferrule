@@ -11,7 +11,9 @@ import {
   listTemplates,
   listThreads,
   mailboxCounts,
+  oauthSignInAccount as oauthSignInAccountCommand,
   openThread as openThreadCommand,
+  reauthOAuthAccount as reauthOAuthAccountCommand,
   removeAccount as removeAccountCommand,
   saveTemplate as saveTemplateCommand,
   seedDemoIfEmpty,
@@ -193,6 +195,8 @@ export interface MailApp {
   persistTemplate(input: SaveTemplateInput): Promise<void>;
   removeTemplate(id: TemplateId): Promise<void>;
   addAccount(input: NewAccountInput): Promise<void>;
+  oauthSignInAccount(input: NewAccountInput): Promise<void>;
+  reauthAccount(id: AccountId): Promise<void>;
   removeAccount(id: AccountId): Promise<void>;
 }
 
@@ -725,6 +729,52 @@ export function useMailApp(): MailApp {
     }
   }
 
+  async function oauthSignInAccount(input: NewAccountInput): Promise<void> {
+    try {
+      const created = await oauthSignInAccountCommand(input);
+      const nextScope: Scope = { kind: "account", accountId: created.id };
+      const nextView: MailboxView = { kind: "inbox", category: "primary" };
+      setScopeAccount(created.id);
+      setView(nextView);
+      await reloadMeta();
+      showToast(`Signed in to ${created.displayName} — syncing…`);
+      setSyncing(true);
+      try {
+        await syncAccount(created.id);
+        await reloadMeta();
+        await reload(nextScope, nextView);
+        showToast(`Synced ${created.displayName}`);
+      } catch (syncErr) {
+        await reloadMeta();
+        await reload(nextScope, nextView);
+        showToast(`${created.displayName}: ${friendlyError(syncErr)}`, { durationMs: 8000 });
+      } finally {
+        setSyncing(false);
+      }
+    } catch (err) {
+      const msg = friendlyError(err);
+      showToast(msg, { durationMs: 8000 });
+      throw new Error(msg);
+    }
+  }
+
+  async function reauthAccount(id: AccountId): Promise<void> {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      showToast("Opening browser to sign in…");
+      await reauthOAuthAccountCommand(id);
+      await reloadMeta();
+      await reload(scope, view);
+      showToast("Signed in and synced");
+    } catch (err) {
+      await reloadMeta();
+      showToast(friendlyError(err), { durationMs: 8000 });
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   async function removeAccount(id: AccountId): Promise<void> {
     try {
       await removeAccountCommand(id);
@@ -884,6 +934,8 @@ export function useMailApp(): MailApp {
     persistTemplate,
     removeTemplate,
     addAccount,
+    oauthSignInAccount,
+    reauthAccount,
     removeAccount,
   };
 }
