@@ -4,7 +4,11 @@ use thiserror::Error;
 use crate::ids::AccountId;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum CoreError {
     #[error("not found: {entity}")]
     NotFound { entity: String },
