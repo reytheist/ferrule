@@ -1,0 +1,26 @@
+[workspace]
+members = ["crates/mail-core", "src-tauri"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Galapaghost Contributors"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
+rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite"] }
+ammonia = "4"
+zeroize = { version = "1", features = ["derive"] }
+keyring = "3"
+mail-parser = "0.9"
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-rustls-tls", "hostname"] }
+imap = { version = "3.0.0-alpha.15", default-features = false, features = ["rustls-tls"] }
+rustls-connector = { version = "0.21", features = ["webpki-roots-certs"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+target/
+*.db
+*.db-wal
+*.db-shm
+todo.md
+.DS_Store
+Thumbs.db
