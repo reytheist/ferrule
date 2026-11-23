@@ -1,0 +1,149 @@
+/* Mosaic design tokens. Dark is the default; light applies via
+   html[data-theme="light"]. Space colors drive the active accent through
+   --space-accent, set on <html> by the shell. */
+
+:root {
+  color-scheme: dark;
+
+  --font-display: "Space Grotesk", "Inter", sans-serif;
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  --app-bg: #0f1118;
+  --app-rail: #0b0d13;
+  --app-surface: #161923;
+  --app-surface-2: #1c202c;
+  --app-hover: #1f2432;
+  --app-active: #232a3c;
+  --app-border: #272e40;
+  --app-border-soft: #1f2534;
+  --app-ink: #edf0f8;
+  --app-ink-2: #b3bacb;
+  --app-muted: #7b8399;
+
+  --space-default: #4f86ff;
+  --app-accent: var(--space-accent, var(--space-default));
+  --app-accent-soft: color-mix(in srgb, var(--app-accent) 16%, transparent);
+  --app-accent-fg: #ffffff;
+
+  --app-snooze: #e8a63c;
+  --app-snooze-bg: color-mix(in srgb, var(--app-snooze) 14%, transparent);
+  --app-followup: #f16a7a;
+  --app-followup-bg: color-mix(in srgb, var(--app-followup) 14%, transparent);
+  --app-shield: #34c4a4;
+  --app-shield-bg: color-mix(in srgb, var(--app-shield) 14%, transparent);
+
+  --space-azure: #3b82f6;
+  --space-berry: #e04f6d;
+  --space-teal: #14b8a6;
+  --space-amber: #e5941a;
+  --space-violet: #8b5cf6;
+  --space-emerald: #10b981;
+
+  --app-radius: 10px;
+  --app-row-radius: 8px;
+  --shadow-pop: 0 18px 42px rgba(0, 0, 0, 0.36);
+  --shadow-row: 0 3px 10px rgba(0, 0, 0, 0.16);
+  --toast-bg: #141821;
+  --toast-ink: #f3f6fb;
+  --toast-action: #7aa7ff;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+
+  --app-bg: #f1f3f7;
+  --app-rail: #e5e8f0;
+  --app-surface: #ffffff;
+  --app-surface-2: #f7f8fb;
+  --app-hover: #eef1f7;
+  --app-active: #e8eef9;
+  --app-border: #d8dde8;
+  --app-border-soft: #e8ecf4;
+  --app-ink: #121621;
+  --app-ink-2: #485063;
+  --app-muted: #6f788c;
+
+  --space-default: #2563eb;
+  --app-accent-fg: #ffffff;
+
+  --app-snooze: #b8720c;
+  --app-snooze-bg: #fef4df;
+  --app-followup: #c9344e;
+  --app-followup-bg: #fce9ed;
+  --app-shield: #0e856b;
+  --app-shield-bg: #e5f7f2;
+
+  --shadow-pop: 0 18px 42px rgba(23, 30, 46, 0.22);
+  --shadow-row: 0 3px 10px rgba(23, 30, 46, 0.12);
+  --toast-bg: #1d2330;
+  --toast-ink: #f3f6fb;
+  --toast-action: #8fb4ff;
+}
+
+/* Per-account space color scopes: any element carrying .acct-<color> resolves
+   --acct-color to that space's hex. */
+.acct-azure {
+  --acct-color: var(--space-azure);
+}
+.acct-berry {
+  --acct-color: var(--space-berry);
+}
+.acct-teal {
+  --acct-color: var(--space-teal);
+}
+.acct-amber {
+  --acct-color: var(--space-amber);
+}
+.acct-violet {
+  --acct-color: var(--space-violet);
+}
+.acct-emerald {
+  --acct-color: var(--space-emerald);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: 13px;
+  background: var(--app-bg);
+  color: var(--app-ink);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+  color: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--app-border);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--app-muted);
+}

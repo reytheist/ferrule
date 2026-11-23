@@ -1,0 +1,220 @@
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, Clock, Lock, X } from "lucide-react";
+import type { CreateDraftInput } from "../../types/mail";
+import type { MailApp } from "../shell/useMailApp";
+import { spaceClass } from "../spaces/SpaceSwitcher";
+import { anchorBelow } from "../ui/anchor";
+
+function splitRecipients(raw: string): string[] {
+  return raw
+    .split(/[,\s;]+/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+export function ComposeModal({ app }: { app: MailApp }) {
+  const firstAccount = app.accounts[0];
+  const [accountId, setAccountId] = useState(() => app.scopeAccount ?? firstAccount?.id ?? "");
+  const [to, setTo] = useState("");
+  const [cc, setCc] = useState("");
+  const [showCc, setShowCc] = useState(false);
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [snippetsOpen, setSnippetsOpen] = useState(false);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+
+  const fieldsRef = useRef({ accountId, to, cc, showCc, subject, body });
+  useEffect(() => {
+    fieldsRef.current = { accountId, to, cc, showCc, subject, body };
+  });
+
+  // Snippet inserted from the command bar lands in the open compose body.
+  const composeInsert = app.composeInsert;
+  useEffect(() => {
+    if (!composeInsert) return;
+    const text = composeInsert.body;
+    setBody((prev) => (prev ? `${prev}\n\n${text}` : text));
+    app.clearComposeInsert();
+    bodyRef.current?.focus();
+  }, [composeInsert, app]);
+
+  const account = app.accounts.find((a) => a.id === accountId) ?? firstAccount;
+
+  function submit(mode: "now" | "later", sendAt?: number): void {
+    const fields = fieldsRef.current;
+    const target = app.accounts.find((a) => a.id === fields.accountId);
+    if (!target) {
+      setError("Add an account before sending.");
+      return;
+    }
+    const recipients = splitRecipients(fields.to);
+    if (recipients.length === 0) {
+      setError("Add at least one recipient.");
+      return;
+    }
+    const input: CreateDraftInput = {
+      accountId: target.id,
+      replyToThread: null,
+      to: recipients,
+      cc: fields.showCc ? splitRecipients(fields.cc) : [],
+      bcc: [],
+      subject: fields.subject,
+      bodyText: fields.body,
+    };
+    setError(null);
+    if (mode === "now") {
+      void app.submitDraft(input, { kind: "undoable", undoSecs: 7 }).then(() => app.closeCompose());
+    } else if (sendAt !== undefined) {
+      void app.submitDraft(input, { kind: "scheduled", sendAt }).then(() => app.closeCompose());
+    }
+  }
+
+  if (!app.composeOpen) return null;
+
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) app.closeCompose();
+      }}
+    >
+      <div className="modal wide" role="dialog" aria-label="New message">
+        <div className="modal-head">
+          <h2>New message</h2>
+          <button className="icon-btn" onClick={app.closeCompose} title="Close (Esc)">
+            <X />
+          </button>
+        </div>
+
+        <div className="modal-body">
+          <div className="field">
+            <label>From</label>
+            <div className="compose-from">
+              <span
+                className={`from-pill${account ? ` ${spaceClass(account.color)}` : ""}`}
+                title="Outgoing identity is locked to the selected space"
+              >
+                <Lock />
+                <span className="fp-label">From:</span>
+                {account?.identities.find((i) => i.isPrimary)?.address ?? account?.email ?? "—"}
+              </span>
+              <select
+                className="select"
+                value={accountId}
+                onChange={(event) => setAccountId(event.target.value)}
+              >
+                {app.accounts.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.displayName} · {entry.email}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="field">
+            <label>To</label>
+            <input
+              className="input"
+              placeholder="alice@example.com, bob@example.com"
+              value={to}
+              onChange={(event) => setTo(event.target.value)}
+            />
+          </div>
+
+          {showCc ? (
+            <div className="field">
+              <label>Cc</label>
+              <input
+                className="input"
+                placeholder="cc@example.com"
+                value={cc}
+                onChange={(event) => setCc(event.target.value)}
+              />
+            </div>
+          ) : (
+            <button className="tpl-btn" style={{ alignSelf: "flex-start" }} onClick={() => setShowCc(true)}>
+              + Cc
+            </button>
+          )}
+
+          <div className="field">
+            <label>Subject</label>
+            <input
+              className="input"
+              placeholder="Subject"
+              value={subject}
+              onChange={(event) => setSubject(event.target.value)}
+            />
+          </div>
+
+          <div className="field">
+            <label>Message</label>
+            <textarea
+              ref={bodyRef}
+              className="textarea"
+              placeholder="Write your message…"
+              value={body}
+              onChange={(event) => setBody(event.target.value)}
+            />
+          </div>
+
+          {error && <span className="error-text">{error}</span>}
+        </div>
+
+        <div className="modal-foot">
+          <div className="tpl-wrap">
+            <button className="tpl-btn" onClick={() => setSnippetsOpen((v) => !v)}>
+              Snippets
+              <ChevronDown />
+            </button>
+            {snippetsOpen && (
+              <div
+                className="cmd-backdrop"
+                style={{ background: "transparent", zIndex: 14 }}
+                onClick={() => setSnippetsOpen(false)}
+              />
+            )}
+            {snippetsOpen && (
+              <div className="snippet-menu" style={{ bottom: "calc(100% + 6px)", top: "auto" }}>
+                {app.templates.length === 0 ? (
+                  <span className="cmd-empty">No snippets yet.</span>
+                ) : (
+                  app.templates.map((template) => (
+                    <button
+                      key={template.id}
+                      className="snippet-item"
+                      onClick={() => {
+                        const text = template.bodyText;
+                        setBody((prev) => (prev ? `${prev}\n\n${text}` : text));
+                        setSnippetsOpen(false);
+                        bodyRef.current?.focus();
+                      }}
+                    >
+                      <span className="name">{template.name}</span>
+                      {template.shortcut && <span className="kbd">{template.shortcut}</span>}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+          <span style={{ flex: 1 }} />
+          <button
+            className="btn"
+            onClick={(event) =>
+              app.requestSendLater(anchorBelow(event.currentTarget), (until) => submit("later", until))
+            }
+          >
+            <Clock />
+            Send Later
+          </button>
+          <button className="btn primary" onClick={() => submit("now")}>
+            Send
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
