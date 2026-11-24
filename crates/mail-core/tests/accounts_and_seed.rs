@@ -392,3 +392,57 @@ async fn gmail_app_password_strips_spaces() {
     let stored = secrets.get(&key).expect("get").expect("present");
     assert_eq!(stored.expose(), "abcdefghijklmnop");
 }
+
+#[tokio::test]
+async fn second_gmail_oauth_reuses_saved_client_secret_from_first_account() {
+    use mail_core::auth::{CredentialKind, OAuthClient, SecretString};
+
+    let secrets = Arc::new(MemorySecretStore::default());
+    let core = MailCore::open(
+        CoreConfig::default(),
+        Host {
+            secrets: secrets.clone(),
+            clock: Arc::new(ManualClock::new(UnixMs(1_795_000_000_000))),
+        },
+    )
+    .expect("open");
+
+    let first_auth = ProviderAuth::GmailOAuth {
+        address: "first@gmail.com".into(),
+        client: OAuthClient {
+            client_id: "shared-client.apps.googleusercontent.com".into(),
+            has_client_secret: true,
+        },
+    };
+    let first = core
+        .add_account(NewAccountInput {
+            display_name: "First".into(),
+            color: SpaceColor::Azure,
+            auth: first_auth,
+            secret: Some("refresh-1".into()),
+        })
+        .await
+        .expect("add first");
+    secrets
+        .put(
+            &SecretKey {
+                account_id: first.id,
+                kind: CredentialKind::OAuthClientSecret,
+            },
+            &SecretString::new("GOCSPX-shared-secret"),
+        )
+        .expect("put secret");
+
+    let second_auth = ProviderAuth::GmailOAuth {
+        address: "second@gmail.com".into(),
+        client: OAuthClient {
+            client_id: "shared-client.apps.googleusercontent.com".into(),
+            has_client_secret: false,
+        },
+    };
+    let resolved = core
+        .resolve_oauth_client_secret(&second_auth, None, None)
+        .expect("resolve")
+        .expect("found saved client secret");
+    assert_eq!(resolved.expose(), "GOCSPX-shared-secret");
+}

@@ -293,23 +293,28 @@ impl MailCore {
             });
         }
         input.auth.validate()?;
-        let client_secret = input
+        let explicit_secret = input
             .secret
             .take()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
+        let resolved_secret = self.resolve_oauth_client_secret(&input.auth, explicit_secret, None)?;
         if let ProviderAuth::GmailOAuth { ref mut client, .. } = input.auth {
-            client.has_client_secret = client_secret.is_some();
+            client.has_client_secret = resolved_secret.is_some();
         }
 
-        let bundle = sync::oauth::run_browser_pkce_flow(&input.auth, client_secret.as_deref())
-            .await?;
+        let bundle = sync::oauth::run_browser_pkce_flow(
+            &input.auth,
+            resolved_secret.as_ref().map(SecretString::expose),
+        )
+        .await?;
         let refresh = bundle.refresh_token.ok_or_else(|| CoreError::Network {
             reason: "OAuth provider did not return a refresh token — revoke app access and try again"
                 .to_string(),
             retryable: false,
         })?;
 
+        let auth_for_secret = input.auth.clone();
         let created = self
             .add_account(NewAccountInput {
                 display_name,
@@ -319,14 +324,17 @@ impl MailCore {
             })
             .await?;
 
-        if let Some(secret) = client_secret {
+        if let Some(secret) = resolved_secret {
             let _ = self.inner.host.secrets.put(
                 &SecretKey {
                     account_id: created.id,
                     kind: CredentialKind::OAuthClientSecret,
                 },
-                &SecretString::new(secret),
+                &secret,
             );
+            if let Some(client_key) = Self::oauth_client_secret_key(&auth_for_secret) {
+                let _ = self.inner.host.secrets.put(&client_key, &secret);
+            }
         }
         self.cache_access_token(created.id, bundle.access_token, bundle.expires_in_secs);
         Ok(created)
@@ -335,14 +343,7 @@ impl MailCore {
     /// Re-run browser OAuth2 PKCE sign-in for an existing Gmail/Outlook OAuth account.
     pub async fn reauth_oauth_account(&self, account_id: AccountId) -> Result<AccountView, CoreError> {
         let account = self.account_row(account_id)?;
-        let client_secret = self
-            .inner
-            .host
-            .secrets
-            .get(&SecretKey {
-                account_id,
-                kind: CredentialKind::OAuthClientSecret,
-            })?;
+        let client_secret = self.resolve_oauth_client_secret(&account.auth, None, Some(account_id))?;
         let bundle = sync::oauth::run_browser_pkce_flow(
             &account.auth,
             client_secret.as_ref().map(SecretString::expose),
@@ -360,6 +361,77 @@ impl MailCore {
         }
         self.cache_access_token(account_id, bundle.access_token, bundle.expires_in_secs);
         self.sync_account(account_id).await
+    }
+
+    fn oauth_client_secret_key(auth: &ProviderAuth) -> Option<SecretKey> {
+        let client_id = match auth {
+            ProviderAuth::GmailOAuth { client, .. } => client.client_id.trim(),
+            _ => return None,
+        };
+        if client_id.is_empty() {
+            return None;
+        }
+        let derived = AccountId::derive(uuid::Uuid::NAMESPACE_URL, format!("galapaghost:oauth-client:{client_id}").as_bytes());
+        Some(SecretKey {
+            account_id: derived,
+            kind: CredentialKind::OAuthClientSecret,
+        })
+    }
+
+    /// Resolve a Google Desktop OAuth `client_secret` from explicit input, this account's
+    /// keychain slot, the shared `client_id` keychain slot, or another existing account
+    /// using the same `client_id` (backfilling the shared slot when found).
+    pub fn resolve_oauth_client_secret(
+        &self,
+        auth: &ProviderAuth,
+        explicit: Option<String>,
+        account_id: Option<AccountId>,
+    ) -> Result<Option<SecretString>, CoreError> {
+        if let Some(secret) = explicit.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+            return Ok(Some(SecretString::new(secret)));
+        }
+        if let Some(id) = account_id {
+            if let Some(secret) = self.inner.host.secrets.get(&SecretKey {
+                account_id: id,
+                kind: CredentialKind::OAuthClientSecret,
+            })? {
+                return Ok(Some(secret));
+            }
+        }
+        let Some(client_key) = Self::oauth_client_secret_key(auth) else {
+            return Ok(None);
+        };
+        if let Some(secret) = self.inner.host.secrets.get(&client_key)? {
+            return Ok(Some(secret));
+        }
+        let target_client_id = match auth {
+            ProviderAuth::GmailOAuth { client, .. } => client.client_id.trim().to_string(),
+            _ => return Ok(None),
+        };
+        let existing_ids: Vec<AccountId> = self.inner.store.with_conn(|conn| {
+            let views = store::account_views(conn)?;
+            let mut matches = Vec::new();
+            for view in views {
+                if let Some(row) = store::get_account(conn, view.id)? {
+                    if let ProviderAuth::GmailOAuth { client, .. } = row.auth {
+                        if client.client_id.trim() == target_client_id {
+                            matches.push(view.id);
+                        }
+                    }
+                }
+            }
+            Ok(matches)
+        })?;
+        for existing_id in existing_ids {
+            if let Some(secret) = self.inner.host.secrets.get(&SecretKey {
+                account_id: existing_id,
+                kind: CredentialKind::OAuthClientSecret,
+            })? {
+                let _ = self.inner.host.secrets.put(&client_key, &secret);
+                return Ok(Some(secret));
+            }
+        }
+        Ok(None)
     }
 
     fn cache_access_token(&self, account_id: AccountId, token: String, expires_in_secs: i64) {
@@ -396,10 +468,7 @@ impl MailCore {
                 let Some(refresh) = self.secret_for(account_id, auth)? else {
                     return Ok(None);
                 };
-                let client_secret = self.inner.host.secrets.get(&SecretKey {
-                    account_id,
-                    kind: CredentialKind::OAuthClientSecret,
-                })?;
+                let client_secret = self.resolve_oauth_client_secret(auth, None, Some(account_id))?;
                 let bundle = sync::oauth::refresh_access_token(
                     account_id,
                     auth,

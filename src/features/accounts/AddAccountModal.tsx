@@ -74,7 +74,9 @@ export function AddAccountModal({ app }: { app: MailApp }) {
   const [secret, setSecret] = useState("");
   const [googleClientId, setGoogleClientId] = useState(() => readPref(GOOGLE_CLIENT_KEY));
   const [googleClientSecret, setGoogleClientSecret] = useState("");
+  const [showGoogleCreds, setShowGoogleCreds] = useState(() => readPref(GOOGLE_CLIENT_KEY).length === 0);
   const [outlookClientId, setOutlookClientId] = useState(() => readPref(OUTLOOK_CLIENT_KEY));
+  const [showOutlookCreds, setShowOutlookCreds] = useState(() => readPref(OUTLOOK_CLIENT_KEY).length === 0);
   const [tenant, setTenant] = useState(() => readPref(OUTLOOK_TENANT_KEY, "common"));
   const [username, setUsername] = useState("");
   const [imapHost, setImapHost] = useState("");
@@ -296,56 +298,84 @@ export function AddAccountModal({ app }: { app: MailApp }) {
 
             {provider === "gmailOAuth" && (
               <>
-                <div className="field">
-                  <label>Google Desktop OAuth Client ID (remembered for all Gmail accounts)</label>
-                  <input
-                    className="input"
-                    placeholder="123456789-xxxx.apps.googleusercontent.com"
-                    value={googleClientId}
-                    onChange={(event) => setGoogleClientId(event.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label>Google Client Secret (from your Desktop OAuth client JSON)</label>
-                  <input
-                    className="input"
-                    type="password"
-                    placeholder="GOCSPX-… (stored only in OS keychain)"
-                    value={googleClientSecret}
-                    onChange={(event) => setGoogleClientSecret(event.target.value)}
-                  />
-                  <span className="hint-text">
-                    Google Cloud Console → APIs &amp; Services → Credentials → Create OAuth Client
-                    ID → Desktop app. Add your Gmail under OAuth consent screen → Test users.
-                  </span>
-                </div>
+                {!showGoogleCreds && googleClientId.trim().length > 0 ? (
+                  <div className="field">
+                    <span className="hint-text">
+                      Using saved Google OAuth client ({googleClientId.slice(0, 18)}…).{" "}
+                      <button
+                        type="button"
+                        className="t-btn"
+                        style={{ marginLeft: 6 }}
+                        onClick={() => setShowGoogleCreds(true)}
+                      >
+                        Change
+                      </button>
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="field">
+                      <label>Google Desktop OAuth Client ID (saved once for all Gmail accounts)</label>
+                      <input
+                        className="input"
+                        placeholder="123456789-xxxx.apps.googleusercontent.com"
+                        value={googleClientId}
+                        onChange={(event) => setGoogleClientId(event.target.value)}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Google Client Secret (stored in OS keychain, reused across Gmail accounts)</label>
+                      <input
+                        className="input"
+                        type="password"
+                        placeholder="Leave blank to reuse saved secret, or paste GOCSPX-…"
+                        value={googleClientSecret}
+                        onChange={(event) => setGoogleClientSecret(event.target.value)}
+                      />
+                    </div>
+                  </>
+                )}
               </>
             )}
 
             {provider === "outlookOAuth" && (
               <>
-                <div className="field">
-                  <label>Microsoft Entra Public Client ID</label>
-                  <input
-                    className="input"
-                    placeholder="00000000-0000-0000-0000-000000000000"
-                    value={outlookClientId}
-                    onChange={(event) => setOutlookClientId(event.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label>Tenant</label>
-                  <input
-                    className="input"
-                    placeholder="common"
-                    value={tenant}
-                    onChange={(event) => setTenant(event.target.value)}
-                  />
-                  <span className="hint-text">
-                    Entra Admin Center → App registrations → Mobile &amp; desktop redirect URI:
-                    http://localhost. No client secret required.
-                  </span>
-                </div>
+                {!showOutlookCreds && outlookClientId.trim().length > 0 ? (
+                  <div className="field">
+                    <span className="hint-text">
+                      Using saved Microsoft Entra client ({outlookClientId.slice(0, 14)}…).{" "}
+                      <button
+                        type="button"
+                        className="t-btn"
+                        style={{ marginLeft: 6 }}
+                        onClick={() => setShowOutlookCreds(true)}
+                      >
+                        Change
+                      </button>
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="field">
+                      <label>Microsoft Entra Public Client ID</label>
+                      <input
+                        className="input"
+                        placeholder="00000000-0000-0000-0000-000000000000"
+                        value={outlookClientId}
+                        onChange={(event) => setOutlookClientId(event.target.value)}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Tenant</label>
+                      <input
+                        className="input"
+                        placeholder="common"
+                        value={tenant}
+                        onChange={(event) => setTenant(event.target.value)}
+                      />
+                    </div>
+                  </>
+                )}
               </>
             )}
 
