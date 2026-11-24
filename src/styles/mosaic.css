@@ -1522,6 +1522,100 @@
   white-space: nowrap;
 }
 
+.server-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: 7px;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface-2);
+}
+
+.server-summary-lines {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.server-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.server-summary-label {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--app-muted);
+}
+
+.server-summary-edited {
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--app-snooze-bg);
+  color: var(--app-snooze);
+}
+
+.server-summary-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--app-ink-2);
+}
+
+.server-summary-proto {
+  color: var(--app-muted);
+  min-width: 34px;
+  flex-shrink: 0;
+}
+
+.server-summary-host {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.server-summary-sec {
+  color: var(--app-muted);
+  flex-shrink: 0;
+}
+
+.server-edit-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.server-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn.compact {
+  padding: 4px 9px;
+  font-size: 10.5px;
+  border-radius: 6px;
+}
+
+.btn.compact svg {
+  width: 11px;
+  height: 11px;
+}
+
 /* ── Compose modal identity header ─────────────────────────────────────── */
 
 .compose-from {

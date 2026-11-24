@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check, ExternalLink, Plus, X } from "lucide-react";
+import { ArrowLeft, Check, ExternalLink, Pencil, Plus, X } from "lucide-react";
 import type {
   AccountView,
   NewAccountInput,
@@ -8,6 +8,16 @@ import type {
 } from "../../types/mail";
 import type { MailApp } from "../shell/useMailApp";
 import { SPACE_COLORS, spaceClass } from "../spaces/SpaceSwitcher";
+import {
+  IMAP_PRESETS,
+  type ImapPresetId,
+  detectImapPresetByEmail,
+  findImapPreset,
+  formatImapSecurity,
+  formatSmtpSecurity,
+  isImapPresetId,
+  matchesPresetEndpoints,
+} from "./imapPresets";
 
 type ProviderStep =
   | "gmailOAuth"
@@ -81,6 +91,8 @@ export function AddAccountModal({ app }: { app: MailApp }) {
     () => readPref(OUTLOOK_TENANT_KEY) || app.savedOAuthClients.outlookTenant || "common",
   );
   const [username, setUsername] = useState("");
+  const [presetId, setPresetId] = useState<ImapPresetId>("custom");
+  const [editingServers, setEditingServers] = useState(false);
   const [imapHost, setImapHost] = useState("");
   const [imapPort, setImapPort] = useState("993");
   const [imapTls, setImapTls] = useState(true);
@@ -106,6 +118,14 @@ export function AddAccountModal({ app }: { app: MailApp }) {
     outlookClientId.trim() || app.savedOAuthClients.outlookClientId || "";
   const isOAuth = provider === "gmailOAuth" || provider === "outlookOAuth";
   const oauthProviderName = provider === "outlookOAuth" ? "Microsoft" : "Google";
+  const activePreset = findImapPreset(presetId);
+  const isPresetModified =
+    activePreset !== null &&
+    !matchesPresetEndpoints(
+      activePreset,
+      { host: imapHost, port: imapPort, tls: imapTls },
+      { host: smtpHost, port: smtpPort, tls: smtpTls },
+    );
 
   const providers: ProviderOption[] = [
     {
@@ -129,8 +149,8 @@ export function AddAccountModal({ app }: { app: MailApp }) {
     },
     {
       kind: "imapPassword",
-      name: "Custom IMAP / SMTP",
-      description: "Any standards-compliant server: host, port, and password.",
+      name: "IMAP / SMTP",
+      description: "iCloud, Yahoo, Fastmail, Zoho, GMX, IONOS, or any custom mail server.",
     },
   ];
 
@@ -260,6 +280,78 @@ export function AddAccountModal({ app }: { app: MailApp }) {
     }
   }
 
+  function selectImapPreset(nextId: ImapPresetId): void {
+    const previousPreset = findImapPreset(presetId);
+    const nextPreset = findImapPreset(nextId);
+    setPresetId(nextId);
+    setError(null);
+
+    if (nextPreset) {
+      setImapHost(nextPreset.imap.host);
+      setImapPort(String(nextPreset.imap.port));
+      setImapTls(nextPreset.imap.tls);
+      setSmtpHost(nextPreset.smtp.host);
+      setSmtpPort(String(nextPreset.smtp.port));
+      setSmtpTls(nextPreset.smtp.tls);
+      setEditingServers(false);
+
+      const trimmedName = displayName.trim();
+      if (
+        trimmedName === "" ||
+        (previousPreset !== null && trimmedName === previousPreset.defaultSpaceName)
+      ) {
+        setDisplayName(nextPreset.defaultSpaceName);
+      }
+      return;
+    }
+
+    setEditingServers(true);
+    if (
+      previousPreset !== null &&
+      matchesPresetEndpoints(
+        previousPreset,
+        { host: imapHost, port: imapPort, tls: imapTls },
+        { host: smtpHost, port: smtpPort, tls: smtpTls },
+      )
+    ) {
+      setImapHost("");
+      setImapPort("993");
+      setImapTls(true);
+      setSmtpHost("");
+      setSmtpPort("587");
+      setSmtpTls(true);
+      if (displayName.trim() === previousPreset.defaultSpaceName) {
+        setDisplayName("");
+      }
+    }
+  }
+
+  function resetActivePreset(): void {
+    if (!activePreset) return;
+    setImapHost(activePreset.imap.host);
+    setImapPort(String(activePreset.imap.port));
+    setImapTls(activePreset.imap.tls);
+    setSmtpHost(activePreset.smtp.host);
+    setSmtpPort(String(activePreset.smtp.port));
+    setSmtpTls(activePreset.smtp.tls);
+    setError(null);
+  }
+
+  function handleAddressChange(nextAddress: string): void {
+    setAddress(nextAddress);
+    if (
+      provider === "imapPassword" &&
+      presetId === "custom" &&
+      imapHost.trim() === "" &&
+      smtpHost.trim() === ""
+    ) {
+      const detected = detectImapPresetByEmail(nextAddress);
+      if (detected) {
+        selectImapPreset(detected.id);
+      }
+    }
+  }
+
   function buildPasswordAuth(): ProviderAuth | null {
     const mail = address.trim();
     if (!mail.includes("@")) {
@@ -321,6 +413,23 @@ export function AddAccountModal({ app }: { app: MailApp }) {
 
   const canGoBack =
     !busy && (step === "form" || step === "oauthSetup" || (step === "oauthWaiting" && error !== null));
+
+  const spaceColorField = (
+    <div className="field">
+      <label>Space color</label>
+      <div className="color-picker">
+        {SPACE_COLORS.map((entry) => (
+          <button
+            key={entry}
+            type="button"
+            className={`color-swatch ${spaceClass(entry)}${color === entry ? " selected" : ""}`}
+            title={entry}
+            onClick={() => setColor(entry)}
+          />
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div
@@ -544,20 +653,7 @@ export function AddAccountModal({ app }: { app: MailApp }) {
               </span>
             </div>
 
-            <div className="field">
-              <label>Space color</label>
-              <div className="color-picker">
-                {SPACE_COLORS.map((entry) => (
-                  <button
-                    key={entry}
-                    type="button"
-                    className={`color-swatch ${spaceClass(entry)}${color === entry ? " selected" : ""}`}
-                    title={entry}
-                    onClick={() => setColor(entry)}
-                  />
-                ))}
-              </div>
-            </div>
+            {spaceColorField}
 
             {error && <span className="error-text">{error}</span>}
           </div>
@@ -565,144 +661,251 @@ export function AddAccountModal({ app }: { app: MailApp }) {
 
         {step === "form" && (
           <div className="modal-body">
-            <div className="field-row">
-              <div className="field">
-                <label>Space name</label>
-                <input
-                  className="input"
-                  placeholder="e.g. Domain Mail"
-                  value={displayName}
-                  onChange={(event) => setDisplayName(event.target.value)}
-                />
-              </div>
-              <div className="field">
-                <label>Email address</label>
-                <input
-                  className="input"
-                  placeholder="you@example.com"
-                  value={address}
-                  onChange={(event) => setAddress(event.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="field">
-              <label>Space color</label>
-              <div className="color-picker">
-                {SPACE_COLORS.map((entry) => (
-                  <button
-                    key={entry}
-                    type="button"
-                    className={`color-swatch ${spaceClass(entry)}${color === entry ? " selected" : ""}`}
-                    title={entry}
-                    onClick={() => setColor(entry)}
-                  />
-                ))}
-              </div>
-            </div>
-
             {provider === "gmailAppPassword" && (
-              <div className="field">
-                <label>Google App Password</label>
-                <input
-                  className="input"
-                  type="password"
-                  placeholder="abcd efgh ijkl mnop"
-                  value={secret}
-                  onChange={(event) => setSecret(event.target.value)}
-                />
-                <span className="hint-text">
-                  Generate at myaccount.google.com/apppasswords (requires 2-Step Verification).
-                  Spaces are stripped automatically.
-                </span>
-              </div>
+              <>
+                <div className="field-row">
+                  <div className="field">
+                    <label>Space name</label>
+                    <input
+                      className="input"
+                      placeholder="e.g. Domain Mail"
+                      value={displayName}
+                      onChange={(event) => setDisplayName(event.target.value)}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Email address</label>
+                    <input
+                      className="input"
+                      placeholder="you@example.com"
+                      value={address}
+                      onChange={(event) => setAddress(event.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {spaceColorField}
+
+                <div className="field">
+                  <label>Google App Password</label>
+                  <input
+                    className="input"
+                    type="password"
+                    placeholder="abcd efgh ijkl mnop"
+                    value={secret}
+                    onChange={(event) => setSecret(event.target.value)}
+                  />
+                  <span className="hint-text">
+                    Generate at myaccount.google.com/apppasswords (requires 2-Step Verification).
+                    Spaces are stripped automatically.
+                  </span>
+                </div>
+              </>
             )}
 
             {provider === "imapPassword" && (
               <>
-                <div className="field-row">
-                  <div className="field">
-                    <label>IMAP host</label>
-                    <input
-                      className="input"
-                      placeholder="imap.example.com"
-                      value={imapHost}
-                      onChange={(event) => setImapHost(event.target.value)}
-                    />
-                  </div>
-                  <div className="field" style={{ maxWidth: 96 }}>
-                    <label>Port</label>
-                    <input
-                      className="input"
-                      inputMode="numeric"
-                      value={imapPort}
-                      onChange={(event) => setImapPort(event.target.value)}
-                    />
-                  </div>
-                  <div className="field" style={{ maxWidth: 74 }}>
-                    <label>TLS</label>
-                    <select
-                      className="select"
-                      value={imapTls ? "on" : "off"}
-                      onChange={(event) => setImapTls(event.target.value === "on")}
-                    >
-                      <option value="on">TLS</option>
-                      <option value="off">Plain</option>
-                    </select>
-                  </div>
+                <div className="field">
+                  <label>Mail provider</label>
+                  <select
+                    className="select"
+                    value={presetId}
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      if (isImapPresetId(next)) {
+                        selectImapPreset(next);
+                      }
+                    }}
+                  >
+                    <option value="custom">Custom server (manual)</option>
+                    <optgroup label="Presets">
+                      {IMAP_PRESETS.map((preset) => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                  {activePreset && <span className="hint-text">{activePreset.hint}</span>}
                 </div>
+
                 <div className="field-row">
                   <div className="field">
-                    <label>SMTP host</label>
+                    <label>Email address</label>
                     <input
                       className="input"
-                      placeholder="smtp.example.com"
-                      value={smtpHost}
-                      onChange={(event) => setSmtpHost(event.target.value)}
-                    />
-                  </div>
-                  <div className="field" style={{ maxWidth: 96 }}>
-                    <label>Port</label>
-                    <input
-                      className="input"
-                      inputMode="numeric"
-                      value={smtpPort}
-                      onChange={(event) => setSmtpPort(event.target.value)}
-                    />
-                  </div>
-                  <div className="field" style={{ maxWidth: 74 }}>
-                    <label>TLS</label>
-                    <select
-                      className="select"
-                      value={smtpTls ? "on" : "off"}
-                      onChange={(event) => setSmtpTls(event.target.value === "on")}
-                    >
-                      <option value="on">STARTTLS</option>
-                      <option value="off">Plain</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="field-row">
-                  <div className="field">
-                    <label>Username</label>
-                    <input
-                      className="input"
-                      placeholder="defaults to email address"
-                      value={username}
-                      onChange={(event) => setUsername(event.target.value)}
+                      placeholder={activePreset?.emailPlaceholder ?? "you@example.com"}
+                      value={address}
+                      onChange={(event) => handleAddressChange(event.target.value)}
                     />
                   </div>
                   <div className="field">
-                    <label>Password</label>
+                    <label>{activePreset?.passwordLabel ?? "Password"}</label>
                     <input
                       className="input"
                       type="password"
-                      placeholder="Account password"
+                      placeholder={activePreset?.passwordPlaceholder ?? "Account password"}
                       value={secret}
                       onChange={(event) => setSecret(event.target.value)}
                     />
                   </div>
                 </div>
+
+                {activePreset && !editingServers ? (
+                  <div className="server-summary">
+                    <div className="server-summary-lines">
+                      <div className="server-summary-head">
+                        <span className="server-summary-label">Server settings</span>
+                        {isPresetModified && (
+                          <span className="server-summary-edited">Edited</span>
+                        )}
+                      </div>
+                      <div className="server-summary-row">
+                        <span className="server-summary-proto">IMAP</span>
+                        <span className="server-summary-host">
+                          {imapHost.trim() || "—"}:{imapPort.trim() || "—"}
+                        </span>
+                        <span className="server-summary-sec">
+                          ({formatImapSecurity(imapTls)})
+                        </span>
+                      </div>
+                      <div className="server-summary-row">
+                        <span className="server-summary-proto">SMTP</span>
+                        <span className="server-summary-host">
+                          {smtpHost.trim() || "—"}:{smtpPort.trim() || "—"}
+                        </span>
+                        <span className="server-summary-sec">
+                          ({formatSmtpSecurity(Number(smtpPort.trim()), smtpTls)})
+                        </span>
+                      </div>
+                      {username.trim() && (
+                        <div className="server-summary-row">
+                          <span className="server-summary-proto">User</span>
+                          <span className="server-summary-host">{username.trim()}</span>
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn compact"
+                      onClick={() => setEditingServers(true)}
+                    >
+                      <Pencil />
+                      Edit
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {activePreset && (
+                      <div className="server-edit-bar">
+                        <span className="server-summary-label">Server settings</span>
+                        <div className="server-edit-actions">
+                          {isPresetModified && (
+                            <button
+                              type="button"
+                              className="btn compact"
+                              onClick={resetActivePreset}
+                            >
+                              Reset preset
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="btn compact"
+                            onClick={() => setEditingServers(false)}
+                          >
+                            Done
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    <div className="field-row">
+                      <div className="field">
+                        <label>IMAP host</label>
+                        <input
+                          className="input"
+                          placeholder="imap.example.com"
+                          value={imapHost}
+                          onChange={(event) => setImapHost(event.target.value)}
+                        />
+                      </div>
+                      <div className="field" style={{ maxWidth: 96 }}>
+                        <label>Port</label>
+                        <input
+                          className="input"
+                          inputMode="numeric"
+                          value={imapPort}
+                          onChange={(event) => setImapPort(event.target.value)}
+                        />
+                      </div>
+                      <div className="field" style={{ maxWidth: 88 }}>
+                        <label>TLS</label>
+                        <select
+                          className="select"
+                          value={imapTls ? "on" : "off"}
+                          onChange={(event) => setImapTls(event.target.value === "on")}
+                        >
+                          <option value="on">TLS</option>
+                          <option value="off">Plain</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="field-row">
+                      <div className="field">
+                        <label>SMTP host</label>
+                        <input
+                          className="input"
+                          placeholder="smtp.example.com"
+                          value={smtpHost}
+                          onChange={(event) => setSmtpHost(event.target.value)}
+                        />
+                      </div>
+                      <div className="field" style={{ maxWidth: 96 }}>
+                        <label>Port</label>
+                        <input
+                          className="input"
+                          inputMode="numeric"
+                          value={smtpPort}
+                          onChange={(event) => setSmtpPort(event.target.value)}
+                        />
+                      </div>
+                      <div className="field" style={{ maxWidth: 88 }}>
+                        <label>TLS</label>
+                        <select
+                          className="select"
+                          value={smtpTls ? "on" : "off"}
+                          onChange={(event) => setSmtpTls(event.target.value === "on")}
+                        >
+                          <option value="on">
+                            {smtpPort.trim() === "465" ? "TLS" : "STARTTLS"}
+                          </option>
+                          <option value="off">Plain</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="field">
+                      <label>Username</label>
+                      <input
+                        className="input"
+                        placeholder="defaults to email address"
+                        value={username}
+                        onChange={(event) => setUsername(event.target.value)}
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div className="field">
+                  <label>Space name</label>
+                  <input
+                    className="input"
+                    placeholder="e.g. Domain Mail"
+                    value={displayName}
+                    onChange={(event) => setDisplayName(event.target.value)}
+                  />
+                </div>
+
+                {spaceColorField}
               </>
             )}
 
