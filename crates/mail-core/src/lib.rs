@@ -404,13 +404,12 @@ impl MailCore {
             resolved_secret.as_ref().map(SecretString::expose),
         )
         .await?;
+        let profile = sync::oauth::fetch_profile(&endpoints, &bundle).await?;
         let refresh = bundle.refresh_token.ok_or_else(|| CoreError::Network {
             reason: "OAuth provider did not return a refresh token — revoke app access and try again"
                 .to_string(),
             retryable: false,
         })?;
-
-        let profile = sync::oauth::fetch_profile(&endpoints, &bundle.access_token).await?;
         let existing = self.list_accounts().await?;
         if existing
             .iter()

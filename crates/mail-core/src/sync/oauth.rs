@@ -26,6 +26,7 @@ pub(crate) struct OAuthEndpoints {
     pub userinfo_url: &'static str,
     pub scope: &'static str,
     pub redirect_host: &'static str,
+    pub redirect_path: &'static str,
     pub client_id: String,
     pub login_hint: String,
     pub is_google: bool,
@@ -35,6 +36,7 @@ pub(crate) struct OAuthEndpoints {
 pub(crate) struct OAuthTokenBundle {
     pub access_token: String,
     pub refresh_token: Option<String>,
+    pub id_token: Option<String>,
     pub expires_in_secs: i64,
 }
 
@@ -47,9 +49,17 @@ pub(crate) struct OAuthProfile {
 struct TokenEndpointResponse {
     access_token: Option<String>,
     refresh_token: Option<String>,
+    id_token: Option<String>,
     expires_in: Option<i64>,
     error: Option<String>,
     error_description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IdTokenClaims {
+    email: Option<String>,
+    preferred_username: Option<String>,
+    upn: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,6 +96,7 @@ pub(crate) fn endpoints_for_sign_in(
                 userinfo_url: "https://www.googleapis.com/oauth2/v2/userinfo",
                 scope: "https://mail.google.com/ email profile",
                 redirect_host: "127.0.0.1",
+                redirect_path: "/callback",
                 client_id: client_id.to_string(),
                 login_hint: hint,
                 is_google: true,
@@ -110,8 +121,9 @@ pub(crate) fn endpoints_for_sign_in(
                     "https://login.microsoftonline.com/{tenant_slug}/oauth2/v2.0/token"
                 ),
                 userinfo_url: "https://graph.microsoft.com/v1.0/me",
-                scope: "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access User.Read",
+                scope: "openid email profile offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send",
                 redirect_host: "localhost",
+                redirect_path: "",
                 client_id: client_id.to_string(),
                 login_hint: hint,
                 is_google: false,
@@ -298,7 +310,10 @@ pub(crate) async fn run_browser_pkce_flow_for_endpoints(
         })?
         .port();
 
-    let redirect_uri = format!("http://{}:{port}/callback", endpoints.redirect_host);
+    let redirect_uri = format!(
+        "http://{}:{port}{}",
+        endpoints.redirect_host, endpoints.redirect_path
+    );
     let verifier = generate_pkce_verifier();
     let challenge = pkce_challenge_s256(&verifier);
     let state = generate_pkce_verifier();
@@ -360,10 +375,25 @@ pub(crate) async fn run_browser_pkce_flow_for_endpoints(
     exchange_code(endpoints, &redirect_uri, &code, &verifier, client_secret).await
 }
 
+pub(crate) fn email_from_id_token(id_token: &str) -> Option<String> {
+    let payload_b64 = id_token.split('.').nth(1)?;
+    let decoded = URL_SAFE_NO_PAD.decode(payload_b64).ok()?;
+    let claims: IdTokenClaims = serde_json::from_slice(&decoded).ok()?;
+    claims
+        .email
+        .or(claims.preferred_username)
+        .or(claims.upn)
+        .map(|e| e.trim().to_string())
+        .filter(|e| e.contains('@'))
+}
+
 pub(crate) async fn fetch_profile(
     endpoints: &OAuthEndpoints,
-    access_token: &str,
+    bundle: &OAuthTokenBundle,
 ) -> Result<OAuthProfile, CoreError> {
+    if let Some(email) = bundle.id_token.as_deref().and_then(email_from_id_token) {
+        return Ok(OAuthProfile { email });
+    }
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -372,7 +402,7 @@ pub(crate) async fn fetch_profile(
         })?;
     let resp = http
         .get(endpoints.userinfo_url)
-        .bearer_auth(access_token)
+        .bearer_auth(&bundle.access_token)
         .send()
         .await
         .map_err(|e| CoreError::Network {
@@ -479,6 +509,7 @@ async fn exchange_code(
     Ok(OAuthTokenBundle {
         access_token,
         refresh_token: parsed.refresh_token,
+        id_token: parsed.id_token,
         expires_in_secs: parsed.expires_in.unwrap_or(3600),
     })
 }
@@ -546,6 +577,7 @@ pub(crate) async fn refresh_access_token(
     Ok(OAuthTokenBundle {
         access_token,
         refresh_token: parsed.refresh_token,
+        id_token: parsed.id_token,
         expires_in_secs: parsed.expires_in.unwrap_or(3600),
     })
 }
@@ -622,5 +654,15 @@ mod tests {
             "good",
         );
         assert!(denied.unwrap_err().to_string().contains("User cancelled"));
+    }
+
+    #[test]
+    fn extracts_email_from_oidc_id_token_payload() {
+        let payload = URL_SAFE_NO_PAD.encode(r#"{"preferred_username":"user@outlook.com"}"#);
+        let fake_jwt = format!("eyJhbGciOiJSUzI1NiJ9.{payload}.sig");
+        assert_eq!(
+            email_from_id_token(&fake_jwt).as_deref(),
+            Some("user@outlook.com")
+        );
     }
 }
