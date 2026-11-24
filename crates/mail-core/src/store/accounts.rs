@@ -236,6 +236,21 @@ pub(crate) fn delete_account(conn: &mut Connection, id: AccountId) -> Result<boo
     Ok(changed > 0)
 }
 
+pub(crate) fn update_account_meta(
+    conn: &mut Connection,
+    id: AccountId,
+    display_name: &str,
+    color: SpaceColor,
+) -> Result<bool, CoreError> {
+    let changed = conn
+        .execute(
+            "UPDATE account SET display_name = ?2, color = ?3 WHERE id = ?1",
+            params![id_to_blob(id.as_bytes()), display_name, color.as_str()],
+        )
+        .sq()?;
+    Ok(changed > 0)
+}
+
 pub(crate) fn set_sync_state(
     conn: &mut Connection,
     id: AccountId,

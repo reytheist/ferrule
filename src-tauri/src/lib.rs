@@ -77,6 +77,8 @@ pub fn run() {
             commands::list_accounts,
             commands::add_account,
             commands::oauth_sign_in_account,
+            commands::saved_oauth_clients,
+            commands::update_account,
             commands::reauth_oauth_account,
             commands::remove_account,
             commands::sync_account,

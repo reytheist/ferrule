@@ -2,8 +2,9 @@ use mail_core::error::CoreError;
 use mail_core::ids::{AccountId, DraftId, JobId, TemplateId, ThreadId, UnixMs};
 use mail_core::types::{
     AccountView, ActionOutcome, CreateDraftInput, DraftView, JobView, MailAction, MailboxCounts,
-    NewAccountInput, RemoteContent, SaveTemplateInput, Scope, SendMode, SendReceipt, TemplateView,
-    ThreadPage, ThreadQuery, ThreadView, UndoOutcome,
+    NewAccountInput, OAuthSignInInput, RemoteContent, SaveTemplateInput, SavedOAuthClients, Scope,
+    SendMode, SendReceipt, TemplateView, ThreadPage, ThreadQuery, ThreadView, UndoOutcome,
+    UpdateAccountInput,
 };
 use mail_core::MailCore;
 
@@ -31,9 +32,24 @@ pub async fn add_account(
 #[tauri::command]
 pub async fn oauth_sign_in_account(
     core: tauri::State<'_, MailCore>,
-    input: NewAccountInput,
+    input: OAuthSignInInput,
 ) -> Result<AccountView, CoreError> {
     core.oauth_sign_in_account(input).await
+}
+
+#[tauri::command]
+pub async fn saved_oauth_clients(
+    core: tauri::State<'_, MailCore>,
+) -> Result<SavedOAuthClients, CoreError> {
+    core.saved_oauth_clients().await
+}
+
+#[tauri::command]
+pub async fn update_account(
+    core: tauri::State<'_, MailCore>,
+    input: UpdateAccountInput,
+) -> Result<AccountView, CoreError> {
+    core.update_account(input).await
 }
 
 #[tauri::command]

@@ -16,6 +16,7 @@ import {
   reauthOAuthAccount as reauthOAuthAccountCommand,
   removeAccount as removeAccountCommand,
   saveTemplate as saveTemplateCommand,
+  savedOAuthClients as savedOAuthClientsCommand,
   seedDemoIfEmpty,
   sendDraft,
   setFollowUp,
@@ -23,6 +24,7 @@ import {
   syncAccount,
   tickScheduler,
   unsnoozeThread,
+  updateAccount as updateAccountCommand,
 } from "../../ipc/core";
 import type {
   AccountId,
@@ -35,8 +37,10 @@ import type {
   MailboxView,
   MessageId,
   NewAccountInput,
+  OAuthSignInInput,
   RemoteContent,
   SaveTemplateInput,
+  SavedOAuthClients,
   Scope,
   SendMode,
   TemplateId,
@@ -45,6 +49,7 @@ import type {
   ThreadSummary,
   ThreadView,
   UnixMs,
+  UpdateAccountInput,
 } from "../../types/mail";
 import { formatDue } from "../ui/format";
 
@@ -130,6 +135,7 @@ export interface MailApp {
   booting: boolean;
   error: string | null;
   accounts: AccountView[];
+  savedOAuthClients: SavedOAuthClients;
   counts: MailboxCounts | null;
   threads: ThreadSummary[];
   jobs: JobView[];
@@ -195,7 +201,8 @@ export interface MailApp {
   persistTemplate(input: SaveTemplateInput): Promise<void>;
   removeTemplate(id: TemplateId): Promise<void>;
   addAccount(input: NewAccountInput): Promise<void>;
-  oauthSignInAccount(input: NewAccountInput): Promise<void>;
+  oauthSignInAccount(input: OAuthSignInInput): Promise<AccountView>;
+  updateAccount(input: UpdateAccountInput): Promise<AccountView>;
   reauthAccount(id: AccountId): Promise<void>;
   removeAccount(id: AccountId): Promise<void>;
 }
@@ -204,6 +211,11 @@ export function useMailApp(): MailApp {
   const [booting, setBooting] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<AccountView[]>([]);
+  const [savedOAuthClients, setSavedOAuthClients] = useState<SavedOAuthClients>({
+    gmailClientId: null,
+    outlookClientId: null,
+    outlookTenant: null,
+  });
   const [counts, setCounts] = useState<MailboxCounts | null>(null);
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [jobs, setJobs] = useState<JobView[]>([]);
@@ -263,14 +275,16 @@ export function useMailApp(): MailApp {
   }, []);
 
   const reloadMeta = useCallback(async () => {
-    const [nextAccounts, nextJobs, nextTemplates] = await Promise.all([
+    const [nextAccounts, nextJobs, nextTemplates, nextClients] = await Promise.all([
       listAccounts(),
       listJobs(),
       listTemplates(),
+      savedOAuthClientsCommand(),
     ]);
     setAccounts(nextAccounts);
     setJobs(nextJobs);
     setTemplates(nextTemplates);
+    setSavedOAuthClients(nextClients);
     jobsSignature.current = nextJobs.map((j) => `${j.id}:${j.state}`).join("|");
   }, []);
 
@@ -729,7 +743,7 @@ export function useMailApp(): MailApp {
     }
   }
 
-  async function oauthSignInAccount(input: NewAccountInput): Promise<void> {
+  async function oauthSignInAccount(input: OAuthSignInInput): Promise<AccountView> {
     try {
       const created = await oauthSignInAccountCommand(input);
       const nextScope: Scope = { kind: "account", accountId: created.id };
@@ -737,23 +751,39 @@ export function useMailApp(): MailApp {
       setScopeAccount(created.id);
       setView(nextView);
       await reloadMeta();
-      showToast(`Signed in to ${created.displayName} — syncing…`);
-      setSyncing(true);
-      try {
-        await syncAccount(created.id);
-        await reloadMeta();
-        await reload(nextScope, nextView);
-        showToast(`Synced ${created.displayName}`);
-      } catch (syncErr) {
-        await reloadMeta();
-        await reload(nextScope, nextView);
-        showToast(`${created.displayName}: ${friendlyError(syncErr)}`, { durationMs: 8000 });
-      } finally {
-        setSyncing(false);
-      }
+      showToast(`Connected ${created.email} — syncing…`);
+      void (async () => {
+        setSyncing(true);
+        try {
+          await syncAccount(created.id);
+          await reloadMeta();
+          await reload(nextScope, nextView);
+          showToast(`Synced ${created.email}`);
+        } catch (syncErr) {
+          await reloadMeta();
+          await reload(nextScope, nextView);
+          showToast(`${created.email}: ${friendlyError(syncErr)}`, { durationMs: 8000 });
+        } finally {
+          setSyncing(false);
+        }
+      })();
+      return created;
     } catch (err) {
       const msg = friendlyError(err);
       showToast(msg, { durationMs: 8000 });
+      throw new Error(msg);
+    }
+  }
+
+  async function updateAccount(input: UpdateAccountInput): Promise<AccountView> {
+    try {
+      const updated = await updateAccountCommand(input);
+      await reloadMeta();
+      await reload(scope, view);
+      return updated;
+    } catch (err) {
+      const msg = friendlyError(err);
+      showToast(msg);
       throw new Error(msg);
     }
   }
@@ -870,6 +900,7 @@ export function useMailApp(): MailApp {
     booting,
     error,
     accounts,
+    savedOAuthClients,
     counts,
     threads,
     jobs,
@@ -935,6 +966,7 @@ export function useMailApp(): MailApp {
     removeTemplate,
     addAccount,
     oauthSignInAccount,
+    updateAccount,
     reauthAccount,
     removeAccount,
   };

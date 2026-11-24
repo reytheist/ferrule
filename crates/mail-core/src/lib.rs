@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
 use crate::agent::AgentPort;
-use crate::auth::{CredentialKind, ProviderAuth, SecretKey, SecretStore, SecretString};
+use crate::auth::{CredentialKind, OAuthClient, ProviderAuth, ProviderKind, SecretKey, SecretStore, SecretString};
 use crate::error::CoreError;
 use crate::events::{Alert, CoreEvent};
 use crate::host::{Clock, OsKeychain, SystemClock};
@@ -278,33 +278,129 @@ impl MailCore {
         Ok(())
     }
 
-    /// Run one-click browser OAuth2 PKCE sign-in, persist the refresh token (and optional
-    /// client secret) in the OS keychain, cache the short-lived access token in memory,
-    /// and create the account only after sign-in succeeds.
-    pub async fn oauth_sign_in_account(
+    pub async fn update_account(
         &self,
-        mut input: NewAccountInput,
+        input: UpdateAccountInput,
     ) -> Result<AccountView, CoreError> {
-        let display_name = input.display_name.trim().to_string();
+        let display_name = input.display_name.trim();
         if display_name.is_empty() {
             return Err(CoreError::InvalidInput {
                 field: "displayName".to_string(),
-                reason: "account name is required".to_string(),
+                reason: "space name is required".to_string(),
             });
         }
-        input.auth.validate()?;
+        let updated = self.inner.store.with_conn(|conn| {
+            store::update_account_meta(conn, input.account_id, display_name, input.color)
+        })?;
+        if !updated {
+            return Err(CoreError::NotFound {
+                entity: "account".to_string(),
+            });
+        }
+        self.emit(CoreEvent::Resync);
+        self.account_view(input.account_id)?
+            .ok_or_else(|| CoreError::NotFound {
+                entity: "account".to_string(),
+            })
+    }
+
+    /// Return the previously configured OAuth client IDs found on existing accounts so
+    /// adding another Gmail or Outlook account can launch browser sign-in in one click.
+    pub async fn saved_oauth_clients(&self) -> Result<SavedOAuthClients, CoreError> {
+        self.inner.store.with_conn(|conn| {
+            let rows = store::list_account_rows(conn)?;
+            let mut clients = SavedOAuthClients::default();
+            for row in rows {
+                match row.auth {
+                    ProviderAuth::GmailOAuth { client, .. } if clients.gmail_client_id.is_none() => {
+                        let trimmed = client.client_id.trim();
+                        if !trimmed.is_empty() {
+                            clients.gmail_client_id = Some(trimmed.to_string());
+                        }
+                    }
+                    ProviderAuth::OutlookOAuth {
+                        client_id, tenant, ..
+                    } if clients.outlook_client_id.is_none() => {
+                        let trimmed = client_id.trim();
+                        if !trimmed.is_empty() {
+                            clients.outlook_client_id = Some(trimmed.to_string());
+                            let t = tenant.trim();
+                            clients.outlook_tenant = Some(if t.is_empty() {
+                                "common".to_string()
+                            } else {
+                                t.to_string()
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(clients)
+        })
+    }
+
+    /// Run one-click browser OAuth2 PKCE sign-in, discover the selected account's email
+    /// and name from the provider, auto-populate the space name and a unique unused color,
+    /// persist the refresh token (and optional client secret) in the OS keychain, and
+    /// create the account only after sign-in succeeds.
+    pub async fn oauth_sign_in_account(
+        &self,
+        input: OAuthSignInInput,
+    ) -> Result<AccountView, CoreError> {
+        let saved = self.saved_oauth_clients().await?;
+        let client_id = if !input.client_id.trim().is_empty() {
+            input.client_id.trim().to_string()
+        } else {
+            match input.provider {
+                ProviderKind::Gmail => saved.gmail_client_id.unwrap_or_default(),
+                ProviderKind::Outlook => saved.outlook_client_id.unwrap_or_default(),
+                ProviderKind::Imap => String::new(),
+            }
+        };
+        let tenant = input
+            .tenant
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_string)
+            .or(saved.outlook_tenant)
+            .unwrap_or_else(|| "common".to_string());
+
+        let endpoints = sync::oauth::endpoints_for_sign_in(
+            input.provider,
+            &client_id,
+            Some(&tenant),
+            None,
+        )?;
+
         let explicit_secret = input
-            .secret
-            .take()
+            .client_secret
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
-        let resolved_secret = self.resolve_oauth_client_secret(&input.auth, explicit_secret, None)?;
-        if let ProviderAuth::GmailOAuth { ref mut client, .. } = input.auth {
-            client.has_client_secret = resolved_secret.is_some();
-        }
+        let lookup_auth = match input.provider {
+            ProviderKind::Gmail => ProviderAuth::GmailOAuth {
+                address: String::new(),
+                client: OAuthClient {
+                    client_id: client_id.clone(),
+                    has_client_secret: explicit_secret.is_some(),
+                },
+            },
+            ProviderKind::Outlook => ProviderAuth::OutlookOAuth {
+                address: String::new(),
+                client_id: client_id.clone(),
+                tenant: tenant.clone(),
+            },
+            ProviderKind::Imap => {
+                return Err(CoreError::InvalidInput {
+                    field: "provider".to_string(),
+                    reason: "browser sign-in is only supported for Gmail and Outlook".to_string(),
+                });
+            }
+        };
+        let resolved_secret = self.resolve_oauth_client_secret(&lookup_auth, explicit_secret, None)?;
 
-        let bundle = sync::oauth::run_browser_pkce_flow(
-            &input.auth,
+        let bundle = sync::oauth::run_browser_pkce_flow_for_endpoints(
+            &endpoints,
             resolved_secret.as_ref().map(SecretString::expose),
         )
         .await?;
@@ -314,12 +410,53 @@ impl MailCore {
             retryable: false,
         })?;
 
-        let auth_for_secret = input.auth.clone();
+        let profile = sync::oauth::fetch_profile(&endpoints, &bundle.access_token).await?;
+        let existing = self.list_accounts().await?;
+        if existing
+            .iter()
+            .any(|acct| acct.email.eq_ignore_ascii_case(&profile.email))
+        {
+            return Err(CoreError::InvalidInput {
+                field: "address".to_string(),
+                reason: format!(
+                    "{} is already connected — pick a different account in your browser",
+                    profile.email
+                ),
+            });
+        }
+
+        let display_name = input
+            .display_name
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| default_space_name(&profile.email, &existing));
+        let used_colors: Vec<SpaceColor> = existing.iter().map(|a| a.color).collect();
+        let color = input
+            .color
+            .unwrap_or_else(|| SpaceColor::pick_unique(&used_colors));
+
+        let auth = match input.provider {
+            ProviderKind::Gmail => ProviderAuth::GmailOAuth {
+                address: profile.email.clone(),
+                client: OAuthClient {
+                    client_id,
+                    has_client_secret: resolved_secret.is_some(),
+                },
+            },
+            ProviderKind::Outlook => ProviderAuth::OutlookOAuth {
+                address: profile.email.clone(),
+                client_id,
+                tenant,
+            },
+            ProviderKind::Imap => unreachable!(),
+        };
+
+        let auth_for_secret = auth.clone();
         let created = self
             .add_account(NewAccountInput {
                 display_name,
-                color: input.color,
-                auth: input.auth,
+                color,
+                auth,
                 secret: Some(refresh),
             })
             .await?;
@@ -1759,6 +1896,32 @@ impl MailCore {
             alert: Alert::ApprovalRequested { draft_id: view.id },
         });
         Ok(view)
+    }
+}
+
+fn default_space_name(email: &str, existing: &[AccountView]) -> String {
+    let trimmed = email.trim();
+    let local = trimmed
+        .split('@')
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(trimmed);
+    let collision = existing
+        .iter()
+        .any(|acct| acct.display_name.eq_ignore_ascii_case(local));
+    if !collision {
+        return local.to_string();
+    }
+    let domain_label = trimmed
+        .split('@')
+        .nth(1)
+        .and_then(|d| d.split('.').next())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    match domain_label {
+        Some(domain) => format!("{local} ({domain})"),
+        None => trimmed.to_string(),
     }
 }
 

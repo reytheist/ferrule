@@ -445,4 +445,72 @@ async fn second_gmail_oauth_reuses_saved_client_secret_from_first_account() {
         .expect("resolve")
         .expect("found saved client secret");
     assert_eq!(resolved.expose(), "GOCSPX-shared-secret");
+
+    let saved = core.saved_oauth_clients().await.expect("saved clients");
+    assert_eq!(
+        saved.gmail_client_id.as_deref(),
+        Some("shared-client.apps.googleusercontent.com")
+    );
+    assert!(saved.outlook_client_id.is_none());
+}
+
+#[tokio::test]
+async fn update_account_changes_space_name_and_color_and_picks_unique_colors() {
+    assert_eq!(SpaceColor::pick_unique(&[]), SpaceColor::Azure);
+    assert_eq!(
+        SpaceColor::pick_unique(&[SpaceColor::Azure]),
+        SpaceColor::Berry
+    );
+    assert_eq!(
+        SpaceColor::pick_unique(&[SpaceColor::Azure, SpaceColor::Teal]),
+        SpaceColor::Berry
+    );
+    assert_eq!(
+        SpaceColor::pick_unique(&SpaceColor::ALL),
+        SpaceColor::Azure
+    );
+
+    let core = MailCore::open(
+        CoreConfig::default(),
+        Host {
+            secrets: Arc::new(MemorySecretStore::default()),
+            clock: Arc::new(ManualClock::new(UnixMs(START))),
+        },
+    )
+    .expect("open");
+
+    let account = core
+        .add_account(NewAccountInput {
+            display_name: "reytheist".into(),
+            color: SpaceColor::Azure,
+            auth: ProviderAuth::GmailAppPassword {
+                address: "reytheist@gmail.com".into(),
+            },
+            secret: Some("abcd efgh ijkl mnop".into()),
+        })
+        .await
+        .expect("add");
+
+    let updated = core
+        .update_account(UpdateAccountInput {
+            account_id: account.id,
+            display_name: "Personal Gmail".into(),
+            color: SpaceColor::Emerald,
+        })
+        .await
+        .expect("update");
+    assert_eq!(updated.display_name, "Personal Gmail");
+    assert_eq!(updated.color, SpaceColor::Emerald);
+
+    let blank = core
+        .update_account(UpdateAccountInput {
+            account_id: account.id,
+            display_name: "   ".into(),
+            color: SpaceColor::Berry,
+        })
+        .await;
+    assert!(matches!(
+        blank,
+        Err(mail_core::error::CoreError::InvalidInput { .. })
+    ));
 }

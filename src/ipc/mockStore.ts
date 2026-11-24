@@ -32,11 +32,13 @@ import type {
   MessageId,
   MessageView,
   NewAccountInput,
+  OAuthSignInInput,
   PrivacyReport,
   ProviderKind,
   RemoteContent,
   RemoteImagesStatus,
   SaveTemplateInput,
+  SavedOAuthClients,
   Scope,
   SendMode,
   SendReceipt,
@@ -54,6 +56,7 @@ import type {
   UndoOutcome,
   UnixMs,
   UnsubscribeInfo,
+  UpdateAccountInput,
 } from "../types/mail";
 
 const MINUTE = 60_000;
@@ -910,6 +913,66 @@ export async function addAccount(input: NewAccountInput): Promise<AccountView> {
     position: state.accounts.length,
   };
   state.accounts.push(account);
+  return accountView(account);
+}
+
+const PALETTE: SpaceColor[] = ["azure", "berry", "teal", "amber", "violet", "emerald"];
+
+function pickUniqueColor(): SpaceColor {
+  let best: SpaceColor = PALETTE[0] ?? "azure";
+  let bestCount = Number.POSITIVE_INFINITY;
+  for (const candidate of PALETTE) {
+    const count = state.accounts.filter((a) => a.color === candidate).length;
+    if (count === 0) return candidate;
+    if (count < bestCount) {
+      best = candidate;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
+export async function savedOAuthClients(): Promise<SavedOAuthClients> {
+  return {
+    gmailClientId: "preview-google-client.apps.googleusercontent.com",
+    outlookClientId: null,
+    outlookTenant: "common",
+  };
+}
+
+export async function oauthSignInAccount(input: OAuthSignInInput): Promise<AccountView> {
+  const index = state.accounts.length + 1;
+  const domain = input.provider === "outlook" ? "outlook.com" : "gmail.com";
+  const email = `account${index}@${domain}`;
+  const displayName = input.displayName?.trim() || `account${index}`;
+  const color = input.color ?? pickUniqueColor();
+  const identity: IdentityView = {
+    id: newIdentityId(),
+    address: email,
+    displayName,
+    isPrimary: true,
+  };
+  const account: StoredAccount = {
+    id: newAccountId(),
+    displayName,
+    provider: input.provider,
+    color,
+    email,
+    identities: [identity],
+    sync: { kind: "idle", lastOk: null },
+    position: state.accounts.length,
+  };
+  state.accounts.push(account);
+  return accountView(account);
+}
+
+export async function updateAccount(input: UpdateAccountInput): Promise<AccountView> {
+  const account = accountById(input.accountId);
+  if (!account) throw new Error("Account not found");
+  const name = input.displayName.trim();
+  if (!name) throw new Error("Space name is required");
+  account.displayName = name;
+  account.color = input.color;
   return accountView(account);
 }
 

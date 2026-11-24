@@ -16,8 +16,10 @@ import type {
   MailboxCounts,
   MailAction,
   NewAccountInput,
+  OAuthSignInInput,
   RemoteContent,
   SaveTemplateInput,
+  SavedOAuthClients,
   Scope,
   SendMode,
   SendReceipt,
@@ -28,6 +30,7 @@ import type {
   ThreadQuery,
   ThreadView,
   UndoOutcome,
+  UpdateAccountInput,
 } from "../types/mail";
 
 export function isTauriRuntime(): boolean {
@@ -51,9 +54,19 @@ export async function addAccount(input: NewAccountInput): Promise<AccountView> {
   return invoke<AccountView>("add_account", { input });
 }
 
-export async function oauthSignInAccount(input: NewAccountInput): Promise<AccountView> {
-  if (!isTauriRuntime()) return mock.addAccount(input);
+export async function oauthSignInAccount(input: OAuthSignInInput): Promise<AccountView> {
+  if (!isTauriRuntime()) return mock.oauthSignInAccount(input);
   return invoke<AccountView>("oauth_sign_in_account", { input });
+}
+
+export async function savedOAuthClients(): Promise<SavedOAuthClients> {
+  if (!isTauriRuntime()) return mock.savedOAuthClients();
+  return invoke<SavedOAuthClients>("saved_oauth_clients");
+}
+
+export async function updateAccount(input: UpdateAccountInput): Promise<AccountView> {
+  if (!isTauriRuntime()) return mock.updateAccount(input);
+  return invoke<AccountView>("update_account", { input });
 }
 
 export async function reauthOAuthAccount(accountId: AccountId): Promise<AccountView> {

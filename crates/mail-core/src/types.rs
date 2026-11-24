@@ -18,6 +18,15 @@ pub enum SpaceColor {
 }
 
 impl SpaceColor {
+    pub const ALL: [Self; 6] = [
+        Self::Azure,
+        Self::Berry,
+        Self::Teal,
+        Self::Amber,
+        Self::Violet,
+        Self::Emerald,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Azure => "azure",
@@ -38,6 +47,24 @@ impl SpaceColor {
             "emerald" => Self::Emerald,
             _ => Self::Azure,
         }
+    }
+
+    /// Pick the first unused color in palette order, or the least-used color once all
+    /// six palette slots are taken.
+    pub fn pick_unique(used: &[Self]) -> Self {
+        let mut best = Self::ALL[0];
+        let mut best_count = usize::MAX;
+        for candidate in Self::ALL {
+            let count = used.iter().filter(|&&c| c == candidate).count();
+            if count == 0 {
+                return candidate;
+            }
+            if count < best_count {
+                best = candidate;
+                best_count = count;
+            }
+        }
+        best
     }
 }
 
@@ -149,6 +176,38 @@ pub struct NewAccountInput {
     pub color: SpaceColor,
     pub auth: ProviderAuth,
     pub secret: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthSignInInput {
+    pub provider: ProviderKind,
+    #[serde(default)]
+    pub client_id: String,
+    #[serde(default)]
+    pub client_secret: Option<String>,
+    #[serde(default)]
+    pub tenant: Option<String>,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub color: Option<SpaceColor>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAccountInput {
+    pub account_id: AccountId,
+    pub display_name: String,
+    pub color: SpaceColor,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedOAuthClients {
+    pub gmail_client_id: Option<String>,
+    pub outlook_client_id: Option<String>,
+    pub outlook_tenant: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

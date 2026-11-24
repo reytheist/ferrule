@@ -96,6 +96,27 @@ export interface NewAccountInput {
   secret: string | null;
 }
 
+export interface OAuthSignInInput {
+  provider: ProviderKind;
+  clientId: string;
+  clientSecret: string | null;
+  tenant: string | null;
+  displayName: string | null;
+  color: SpaceColor | null;
+}
+
+export interface UpdateAccountInput {
+  accountId: AccountId;
+  displayName: string;
+  color: SpaceColor;
+}
+
+export interface SavedOAuthClients {
+  gmailClientId: string | null;
+  outlookClientId: string | null;
+  outlookTenant: string | null;
+}
+
 export interface ThreadQuery {
   scope: Scope;
   view: MailboxView;

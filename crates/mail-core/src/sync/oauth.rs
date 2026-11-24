@@ -13,7 +13,7 @@ use tokio::net::TcpListener;
 use url::Url;
 use uuid::Uuid;
 
-use crate::auth::ProviderAuth;
+use crate::auth::{ProviderAuth, ProviderKind};
 use crate::error::CoreError;
 use crate::ids::AccountId;
 
@@ -23,6 +23,7 @@ const CALLBACK_TIMEOUT: Duration = Duration::from_secs(180);
 pub(crate) struct OAuthEndpoints {
     pub auth_url: String,
     pub token_url: String,
+    pub userinfo_url: &'static str,
     pub scope: &'static str,
     pub redirect_host: &'static str,
     pub client_id: String,
@@ -37,6 +38,11 @@ pub(crate) struct OAuthTokenBundle {
     pub expires_in_secs: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OAuthProfile {
+    pub email: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct TokenEndpointResponse {
     access_token: Option<String>,
@@ -46,10 +52,29 @@ struct TokenEndpointResponse {
     error_description: Option<String>,
 }
 
-pub(crate) fn endpoints_for(auth: &ProviderAuth) -> Result<OAuthEndpoints, CoreError> {
-    match auth {
-        ProviderAuth::GmailOAuth { address, client } => {
-            if client.client_id.trim().is_empty() {
+#[derive(Debug, Deserialize)]
+struct GoogleUserInfo {
+    email: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MicrosoftGraphMe {
+    mail: Option<String>,
+    user_principal_name: Option<String>,
+}
+
+pub(crate) fn endpoints_for_sign_in(
+    provider: ProviderKind,
+    client_id: &str,
+    tenant: Option<&str>,
+    login_hint: Option<&str>,
+) -> Result<OAuthEndpoints, CoreError> {
+    let client_id = client_id.trim();
+    let hint = login_hint.unwrap_or("").trim().to_string();
+    match provider {
+        ProviderKind::Gmail => {
+            if client_id.is_empty() {
                 return Err(CoreError::InvalidInput {
                     field: "clientId".to_string(),
                     reason: "Google OAuth client ID is required".to_string(),
@@ -58,29 +83,25 @@ pub(crate) fn endpoints_for(auth: &ProviderAuth) -> Result<OAuthEndpoints, CoreE
             Ok(OAuthEndpoints {
                 auth_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
                 token_url: "https://oauth2.googleapis.com/token".to_string(),
+                userinfo_url: "https://www.googleapis.com/oauth2/v2/userinfo",
                 scope: "https://mail.google.com/ email profile",
                 redirect_host: "127.0.0.1",
-                client_id: client.client_id.trim().to_string(),
-                login_hint: address.trim().to_string(),
+                client_id: client_id.to_string(),
+                login_hint: hint,
                 is_google: true,
             })
         }
-        ProviderAuth::OutlookOAuth {
-            address,
-            client_id,
-            tenant,
-        } => {
-            if client_id.trim().is_empty() {
+        ProviderKind::Outlook => {
+            if client_id.is_empty() {
                 return Err(CoreError::InvalidInput {
                     field: "clientId".to_string(),
                     reason: "Microsoft Entra client ID is required".to_string(),
                 });
             }
-            let tenant_slug = if tenant.trim().is_empty() {
-                "common"
-            } else {
-                tenant.trim()
-            };
+            let tenant_slug = tenant
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .unwrap_or("common");
             Ok(OAuthEndpoints {
                 auth_url: format!(
                     "https://login.microsoftonline.com/{tenant_slug}/oauth2/v2.0/authorize"
@@ -88,13 +109,36 @@ pub(crate) fn endpoints_for(auth: &ProviderAuth) -> Result<OAuthEndpoints, CoreE
                 token_url: format!(
                     "https://login.microsoftonline.com/{tenant_slug}/oauth2/v2.0/token"
                 ),
+                userinfo_url: "https://graph.microsoft.com/v1.0/me",
                 scope: "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access User.Read",
                 redirect_host: "localhost",
-                client_id: client_id.trim().to_string(),
-                login_hint: address.trim().to_string(),
+                client_id: client_id.to_string(),
+                login_hint: hint,
                 is_google: false,
             })
         }
+        ProviderKind::Imap => Err(CoreError::InvalidInput {
+            field: "provider".to_string(),
+            reason: "browser sign-in is only supported for Gmail and Outlook".to_string(),
+        }),
+    }
+}
+
+pub(crate) fn endpoints_for(auth: &ProviderAuth) -> Result<OAuthEndpoints, CoreError> {
+    match auth {
+        ProviderAuth::GmailOAuth { address, client } => {
+            endpoints_for_sign_in(ProviderKind::Gmail, &client.client_id, None, Some(address))
+        }
+        ProviderAuth::OutlookOAuth {
+            address,
+            client_id,
+            tenant,
+        } => endpoints_for_sign_in(
+            ProviderKind::Outlook,
+            client_id,
+            Some(tenant),
+            Some(address),
+        ),
         _ => Err(CoreError::InvalidInput {
             field: "auth".to_string(),
             reason: "browser sign-in is only supported for Gmail OAuth and Outlook OAuth"
@@ -138,7 +182,12 @@ pub(crate) fn build_authorize_url(
         }
         if endpoints.is_google {
             pairs.append_pair("access_type", "offline");
-            pairs.append_pair("prompt", "consent");
+            let prompt = if endpoints.login_hint.is_empty() {
+                "select_account consent"
+            } else {
+                "consent"
+            };
+            pairs.append_pair("prompt", prompt);
         } else {
             pairs.append_pair("prompt", "select_account");
         }
@@ -229,6 +278,13 @@ pub(crate) async fn run_browser_pkce_flow(
     client_secret: Option<&str>,
 ) -> Result<OAuthTokenBundle, CoreError> {
     let endpoints = endpoints_for(auth)?;
+    run_browser_pkce_flow_for_endpoints(&endpoints, client_secret).await
+}
+
+pub(crate) async fn run_browser_pkce_flow_for_endpoints(
+    endpoints: &OAuthEndpoints,
+    client_secret: Option<&str>,
+) -> Result<OAuthTokenBundle, CoreError> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .map_err(|e| CoreError::Network {
@@ -246,7 +302,7 @@ pub(crate) async fn run_browser_pkce_flow(
     let verifier = generate_pkce_verifier();
     let challenge = pkce_challenge_s256(&verifier);
     let state = generate_pkce_verifier();
-    let auth_url = build_authorize_url(&endpoints, &redirect_uri, &state, &challenge)?;
+    let auth_url = build_authorize_url(endpoints, &redirect_uri, &state, &challenge)?;
 
     open::that(&auth_url).map_err(|e| CoreError::Network {
         reason: format!("could not open system browser for sign-in: {e}"),
@@ -301,7 +357,68 @@ pub(crate) async fn run_browser_pkce_flow(
         retryable: true,
     })??;
 
-    exchange_code(&endpoints, &redirect_uri, &code, &verifier, client_secret).await
+    exchange_code(endpoints, &redirect_uri, &code, &verifier, client_secret).await
+}
+
+pub(crate) async fn fetch_profile(
+    endpoints: &OAuthEndpoints,
+    access_token: &str,
+) -> Result<OAuthProfile, CoreError> {
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|e| CoreError::Internal {
+            reason: format!("build HTTP client: {e}"),
+        })?;
+    let resp = http
+        .get(endpoints.userinfo_url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|e| CoreError::Network {
+            reason: format!("could not fetch OAuth account profile: {e}"),
+            retryable: true,
+        })?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(CoreError::Network {
+            reason: format!("OAuth profile lookup rejected ({status})"),
+            retryable: false,
+        });
+    }
+
+    if endpoints.is_google {
+        let info: GoogleUserInfo = resp.json().await.map_err(|e| CoreError::Network {
+            reason: format!("invalid Google profile response: {e}"),
+            retryable: false,
+        })?;
+        let email = info
+            .email
+            .map(|e| e.trim().to_string())
+            .filter(|e| e.contains('@'))
+            .ok_or_else(|| CoreError::Network {
+                reason: "Google did not return an email address for the selected account"
+                    .to_string(),
+                retryable: false,
+            })?;
+        Ok(OAuthProfile { email })
+    } else {
+        let info: MicrosoftGraphMe = resp.json().await.map_err(|e| CoreError::Network {
+            reason: format!("invalid Microsoft profile response: {e}"),
+            retryable: false,
+        })?;
+        let email = info
+            .mail
+            .or(info.user_principal_name)
+            .map(|e| e.trim().to_string())
+            .filter(|e| e.contains('@'))
+            .ok_or_else(|| CoreError::Network {
+                reason: "Microsoft did not return an email address for the selected account"
+                    .to_string(),
+                retryable: false,
+            })?;
+        Ok(OAuthProfile { email })
+    }
 }
 
 async fn exchange_code(
@@ -474,6 +591,20 @@ mod tests {
         assert!(url.contains("login.microsoftonline.com/common"));
         assert!(url.contains("IMAP.AccessAsUser.All"));
         assert!(url.contains("offline_access"));
+
+        // New Gmail sign-in without a pre-entered email forces the Google account chooser.
+        let fresh_google = endpoints_for_sign_in(
+            ProviderKind::Gmail,
+            "123.apps.googleusercontent.com",
+            None,
+            None,
+        )
+        .expect("fresh google");
+        let fresh_url =
+            build_authorize_url(&fresh_google, "http://127.0.0.1:43210/callback", "st3", "ch3")
+                .expect("fresh url");
+        assert!(fresh_url.contains("prompt=select_account+consent"));
+        assert!(!fresh_url.contains("login_hint="));
     }
 
     #[test]
