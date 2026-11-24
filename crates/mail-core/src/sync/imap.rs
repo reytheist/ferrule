@@ -13,6 +13,7 @@ use crate::sync::{parse_raw, IngestMessage};
 
 const MAX_MESSAGES_PER_SYNC: usize = 50;
 const FETCH_BATCH_SIZE: usize = 20;
+const FETCH_QUERY: &str = "(BODY.PEEK[] FLAGS)";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ImapAuthMode {
@@ -170,7 +171,7 @@ pub(crate) fn fetch_window(plan: &FetchPlan) -> Result<FetchedWindow, CoreError>
             .collect::<Vec<_>>()
             .join(",");
         let fetches = session
-            .uid_fetch(uid_set, "RFC822 FLAGS")
+            .uid_fetch(uid_set, FETCH_QUERY)
             .map_err(|e| map_imap_err(&e, plan.account_id, false))?;
 
         for item in fetches.iter() {
@@ -299,5 +300,17 @@ pub(crate) fn plan_for(
         now: window.now,
         gmail_dialect: crate::sync::Dialect::from_auth(auth) == crate::sync::Dialect::Gmail,
         min_uid: window.min_uid,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fetch_query_is_parenthesized_and_non_destructive() {
+        assert!(FETCH_QUERY.starts_with('(') && FETCH_QUERY.ends_with(')'));
+        assert!(FETCH_QUERY.contains("BODY.PEEK[]"));
+        assert!(FETCH_QUERY.contains("FLAGS"));
     }
 }
