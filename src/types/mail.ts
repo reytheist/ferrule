@@ -67,7 +67,7 @@ export type SyncState =
   | { kind: "idle"; lastOk: UnixMs | null }
   | { kind: "connecting" }
   | { kind: "syncing"; done: number; total: number | null }
-  | { kind: "backoff"; retryAt: UnixMs; attempt: number }
+  | { kind: "backoff"; retryAt: UnixMs; attempt: number; reason?: string | null }
   | { kind: "blocked"; reason: string };
 
 export interface IdentityView {

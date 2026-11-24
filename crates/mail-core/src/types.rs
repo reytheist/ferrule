@@ -110,7 +110,12 @@ pub enum SyncState {
     Idle { last_ok: Option<UnixMs> },
     Connecting,
     Syncing { done: u32, total: Option<u32> },
-    Backoff { retry_at: UnixMs, attempt: u32 },
+    Backoff {
+        retry_at: UnixMs,
+        attempt: u32,
+        #[serde(default)]
+        reason: Option<String>,
+    },
     Blocked { reason: String },
 }
 

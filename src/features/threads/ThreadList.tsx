@@ -151,7 +151,7 @@ export function ThreadList({ app }: { app: MailApp }) {
     (focusedAccount.sync.kind === "blocked" || focusedAccount.sync.kind === "backoff")
       ? focusedAccount.sync.kind === "blocked"
         ? focusedAccount.sync.reason
-        : "Temporary connection error — retrying automatically."
+        : focusedAccount.sync.reason ?? "Temporary connection error — retrying automatically."
       : null;
 
   return (

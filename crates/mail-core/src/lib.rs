@@ -1578,9 +1578,10 @@ impl MailCore {
             CoreError::AuthRequired { reason, .. } => SyncState::Blocked {
                 reason: reason.clone(),
             },
-            CoreError::Network { .. } => SyncState::Backoff {
+            CoreError::Network { reason, .. } => SyncState::Backoff {
                 retry_at: now.add_secs(30),
                 attempt: 1,
+                reason: Some(reason.clone()),
             },
             other => SyncState::Blocked {
                 reason: other.to_string(),
