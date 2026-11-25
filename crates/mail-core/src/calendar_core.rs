@@ -1,4 +1,4 @@
-//! `MailCore` facade methods for Phase C — Pigment Shared Calendar,
+//! `MailCore` facade methods for Phase C: Pigment Shared Calendar,
 //! Email ↔ Calendar Bridges, Meeting Docs with Recurring Carryover, and Discord Integration.
 
 use std::time::Duration;
@@ -50,7 +50,7 @@ impl MailCore {
         if ws.connected {
             if let Some(client) = self.remote_staff_client(&ws)? {
                 if client.push_calendar_event(&saved).await.is_err() {
-                    self.mark_staff_offline("Calendar event saved locally — offline");
+                    self.mark_staff_offline("Calendar event saved locally (offline)");
                 }
             }
         }
@@ -180,7 +180,7 @@ impl MailCore {
         if ws.connected {
             if let Some(client) = self.remote_staff_client(&ws)? {
                 if client.push_meeting_doc(&updated).await.is_err() {
-                    self.mark_staff_offline("Meeting doc saved locally — offline");
+                    self.mark_staff_offline("Meeting doc saved locally (offline)");
                 }
             }
         }
@@ -223,7 +223,7 @@ impl MailCore {
                     .filter(|s| !s.is_empty())
                     .map(|s| s.trim_start_matches('#').to_ascii_lowercase())
                     .or(event.department.clone()),
-                milestone: Some("PMS 2027".to_string()),
+                milestone: Some(event.title.clone()).filter(|t| !t.trim().is_empty()),
                 assignee_handle: input
                     .assignee_handle
                     .as_deref()
@@ -262,9 +262,14 @@ impl MailCore {
 
         if ws.connected {
             if let Some(client) = self.remote_staff_client(&ws)? {
-                let _ = client.push_action_item(&item).await;
+                let mut push_failed = client.push_action_item(&item).await.is_err();
                 if let Some(doc) = &updated_doc {
-                    let _ = client.push_meeting_doc(doc).await;
+                    if client.push_meeting_doc(doc).await.is_err() {
+                        push_failed = true;
+                    }
+                }
+                if push_failed {
+                    self.mark_staff_offline("Action item saved locally (offline)");
                 }
             }
         }
@@ -288,7 +293,9 @@ impl MailCore {
         let ws = self.get_staff_workspace().await?;
         if ws.connected {
             if let Some(client) = self.remote_staff_client(&ws)? {
-                let _ = client.push_action_item(&updated).await;
+                if client.push_action_item(&updated).await.is_err() {
+                    self.mark_staff_offline("Action item saved locally (offline)");
+                }
             }
         }
         self.emit(CoreEvent::CalendarChanged);
@@ -413,7 +420,7 @@ impl MailCore {
         if ws.connected {
             if let Some(client) = self.remote_staff_client(&ws)? {
                 if client.push_action_item(&saved).await.is_err() {
-                    self.mark_staff_offline("Action item saved locally — offline");
+                    self.mark_staff_offline("Action item saved locally (offline)");
                 }
                 if let Some(ev) = &synced_event {
                     let _ = client.push_calendar_event(ev).await;

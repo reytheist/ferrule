@@ -1,4 +1,4 @@
-//! `MailCore` facade methods for Phase B — Pigment Staff Sync & Email Collaboration.
+//! `MailCore` facade methods for Phase B: Pigment Staff Sync & Email Collaboration.
 
 use crate::auth::{SecretKey, SecretString};
 use crate::error::CoreError;
@@ -76,7 +76,7 @@ impl MailCore {
             input.staff_role.trim().to_string()
         };
 
-        // Store token strictly in OS keychain (SecretStore) — never in SQLite.
+        // Store token strictly in OS keychain (SecretStore), never in SQLite.
         self.inner
             .host
             .secrets
@@ -187,7 +187,7 @@ impl MailCore {
                     conn,
                     StaffSyncStatus::Error,
                     None,
-                    Some("Staff Sync token missing from OS keychain — reconnect in Settings."),
+                    Some("Staff Sync token missing from OS keychain. Reconnect in Settings."),
                 )
             })?;
             return self.get_staff_workspace().await;
@@ -276,7 +276,7 @@ impl MailCore {
             // Personal Space guardrail: never allow sharing threads from Personal Spaces.
             if account.space_kind != SpaceKind::PigmentStaff {
                 return Err(CoreError::IllegalState {
-                    reason: "Staff Sharing is disabled for Personal spaces — switch this account to Pigment Staff to share threads.".to_string(),
+                    reason: "Staff Sharing is disabled for Personal spaces. Switch this account to Pigment Staff to share threads.".to_string(),
                 });
             }
 
@@ -409,7 +409,7 @@ impl MailCore {
 
         if let Some(client) = self.remote_staff_client(&ws)? {
             if client.push_shared_thread(&shared).await.is_err() {
-                self.mark_staff_offline("Thread saved locally — offline");
+                self.mark_staff_offline("Thread saved locally (offline)");
             } else if let Some(comment) = &initial_comment {
                 let _ = client.push_comment(comment).await;
             }
@@ -455,7 +455,7 @@ impl MailCore {
                 .await
                 .is_err()
             {
-                self.mark_staff_offline("Handoff saved locally — offline");
+                self.mark_staff_offline("Handoff saved locally (offline)");
             }
         }
 
@@ -497,7 +497,7 @@ impl MailCore {
 
         if let Some(client) = self.remote_staff_client(&ws)? {
             if client.push_comment(&comment).await.is_err() {
-                self.mark_staff_offline("Comment saved locally — offline");
+                self.mark_staff_offline("Comment saved locally (offline)");
             }
         }
 
@@ -645,6 +645,23 @@ impl MailCore {
                     auto_comment = Some(comment);
                 }
                 DraftLockAction::Approve => {
+                    if draft.lock_state == DraftLockState::Editing {
+                        if let Some(holder) = draft.editor_handle.as_deref() {
+                            if holder != ws.staff_handle {
+                                let label = draft.editor_name.as_deref().unwrap_or(holder);
+                                return Err(CoreError::IllegalState {
+                                    reason: format!(
+                                        "{label} is currently editing this draft. Request review or take over before approving."
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                    if draft.body_text.trim().is_empty() {
+                        return Err(CoreError::IllegalState {
+                            reason: "Cannot approve an empty draft.".to_string(),
+                        });
+                    }
                     draft.lock_state = DraftLockState::Approved;
                     draft.editor_handle = None;
                     draft.editor_name = None;
@@ -668,7 +685,7 @@ impl MailCore {
 
         if let Some(client) = self.remote_staff_client(&ws)? {
             if client.push_draft(&draft).await.is_err() {
-                self.mark_staff_offline("Draft saved locally — offline");
+                self.mark_staff_offline("Draft saved locally (offline)");
             } else if let Some(comment) = &auto_comment {
                 let _ = client.push_comment(comment).await;
             }
