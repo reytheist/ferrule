@@ -9,6 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "verify": "cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && pnpm typecheck && pnpm lint && pnpm build",
+    "build:server": "cargo build --release -p staff-sync-server --bin staff-sync-server",
     "tauri": "tauri"
   },
   "dependencies": {

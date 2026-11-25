@@ -4,13 +4,15 @@ MIT-licensed low-memory Windows + Linux desktop email client (Tauri v2 + Rust `c
 
 ship-target: commit locally on master (push to origin when approved)
 
-## Checks
+## Checks (local-only; no GitHub Actions CI)
 
-- `cargo test --workspace`
-- `cargo clippy --workspace --all-targets -- -D warnings`
-- `pnpm typecheck`
-- `pnpm lint` (zero warnings)
-- `pnpm build`
+- `pnpm verify` (or `./scripts/verify.ps1` / `./scripts/verify.sh`), which runs:
+  - `cargo test --workspace`
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+  - `pnpm typecheck`
+  - `pnpm lint` (zero warnings)
+  - `pnpm build`
+- Local release builds: `pnpm build:server` (`staff-sync-server`) and `pnpm tauri build` (desktop installer)
 
 ## Invariants
 
