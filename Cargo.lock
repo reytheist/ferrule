@@ -1319,7 +1319,7 @@ dependencies = [
 
 [[package]]
 name = "ferrule"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "mail-core",
  "serde",
@@ -2646,7 +2646,7 @@ checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 
 [[package]]
 name = "mail-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ammonia",
  "base64 0.22.1",
@@ -4599,7 +4599,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "staff-sync-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "chrono",

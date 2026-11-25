@@ -5,6 +5,8 @@ import { WorkbookImportModal } from "./features/actions/WorkbookImportModal";
 import { CalendarView } from "./features/calendar/CalendarView";
 import { CommandBar } from "./features/command-bar/CommandBar";
 import { ComposeModal } from "./features/compose/ComposeModal";
+import { EmptyWorkspace } from "./features/onboarding/EmptyWorkspace";
+import { OnboardingModal } from "./features/onboarding/OnboardingModal";
 import { ReadingPane } from "./features/reading/ReadingPane";
 import { SettingsModal } from "./features/settings/SettingsModal";
 import { MailboxSidebar } from "./features/sidebar/MailboxSidebar";
@@ -20,6 +22,7 @@ import { ShareThreadModal } from "./features/staff/ShareThreadModal";
 import { ThreadList } from "./features/threads/ThreadList";
 import { Topbar } from "./features/topbar/Topbar";
 import { TemplatesModal } from "./features/templates/TemplatesModal";
+import { FeatureTour } from "./features/tour/FeatureTour";
 import { FerruleGlyph } from "./features/ui/FerruleGlyph";
 import { SchedulePopover } from "./features/ui/SchedulePopover";
 import { UndoToast } from "./features/ui/UndoToast";
@@ -70,6 +73,8 @@ export function App() {
             <SharedThreadsList app={app} />
             <SharedThreadReadingPane app={app} />
           </>
+        ) : app.accounts.length === 0 ? (
+          <EmptyWorkspace app={app} />
         ) : (
           <>
             <ThreadList app={app} />
@@ -78,6 +83,8 @@ export function App() {
         )}
       </div>
 
+      {app.onboardingOpen && <OnboardingModal app={app} />}
+      {app.tourOpen && <FeatureTour app={app} />}
       {app.commandOpen && <CommandBar app={app} />}
       {app.composeOpen && <ComposeModal app={app} />}
       {app.addAccountOpen && <AddAccountModal app={app} />}

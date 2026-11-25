@@ -543,6 +543,7 @@ async fn pigment_staff_space_and_developer_tools_settings_persist() {
     let enabled = core
         .update_settings(AppSettings {
             developer_tools_enabled: true,
+            ..AppSettings::default()
         })
         .await
         .expect("enable dev tools");
@@ -663,6 +664,116 @@ async fn pre_phase_a_sqlite_database_upgrades_cleanly_and_idempotently() {
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].display_name, "Legacy Personal");
         assert_eq!(accounts[0].space_kind, SpaceKind::Personal);
+    }
+
+    for suffix in ["", "-wal", "-shm"] {
+        let mut path = db_path.clone().into_os_string();
+        path.push(suffix);
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+#[tokio::test]
+async fn onboarding_and_tour_settings_drive_first_run_setup() {
+    let (_, clock) = test_clock();
+    let core = MailCore::open(
+        CoreConfig::default(),
+        Host {
+            secrets: Arc::new(MemorySecretStore::default()),
+            clock,
+        },
+    )
+    .expect("open core");
+
+    let initial = core.get_settings().await.expect("get settings");
+    assert!(!initial.onboarding_completed);
+    assert!(!initial.tour_completed);
+    assert!(core.needs_first_run_setup().expect("first run true"));
+
+    let updated = core
+        .update_settings(AppSettings {
+            developer_tools_enabled: false,
+            onboarding_completed: true,
+            tour_completed: true,
+        })
+        .await
+        .expect("update settings");
+    assert!(updated.onboarding_completed);
+    assert!(updated.tour_completed);
+    assert!(!core.needs_first_run_setup().expect("first run false after onboarding"));
+}
+
+#[tokio::test]
+async fn opening_db_purges_legacy_demo_accounts_and_templates_once() {
+    let db_path = std::env::temp_dir().join(format!("ferrule-demo-purge-{}.db", Uuid::new_v4()));
+
+    // First open: create DB, seed legacy demo data + one real user account & template,
+    // and remove the purge marker so reopening simulates upgrading a v0.1.0 database.
+    {
+        let (_, clock) = test_clock();
+        let core = MailCore::open(
+            CoreConfig {
+                db_path: Some(db_path.clone()),
+                ..CoreConfig::default()
+            },
+            Host {
+                secrets: Arc::new(MemorySecretStore::default()),
+                clock,
+            },
+        )
+        .expect("open initial");
+        assert!(core.seed_demo_if_empty().await.expect("seed demo"));
+        core.add_account(NewAccountInput {
+            display_name: "Real User".into(),
+            color: SpaceColor::Emerald,
+            space_kind: SpaceKind::Personal,
+            auth: ProviderAuth::GmailAppPassword {
+                address: "real.user@example.org".into(),
+            },
+            secret: Some("abcd efgh ijkl mnop".into()),
+        })
+        .await
+        .expect("add real account");
+        core.save_template(SaveTemplateInput {
+            id: None,
+            name: "My Real Template".into(),
+            shortcut: Some("/real".into()),
+            subject: "Hello".into(),
+            body_text: "Real body".into(),
+        })
+        .await
+        .expect("save real template");
+    }
+
+    // Clear the one-time marker to simulate a pre-0.2.0 database.
+    {
+        let conn = rusqlite::Connection::open(&db_path).expect("raw sqlite");
+        conn.execute("DELETE FROM app_setting WHERE key = 'legacy_demo_purged_v1'", [])
+            .expect("clear marker");
+    }
+
+    // Reopen: legacy demo accounts & demo templates are purged; real data remains.
+    {
+        let (_, clock) = test_clock();
+        let core = MailCore::open(
+            CoreConfig {
+                db_path: Some(db_path.clone()),
+                ..CoreConfig::default()
+            },
+            Host {
+                secrets: Arc::new(MemorySecretStore::default()),
+                clock,
+            },
+        )
+        .expect("reopen upgraded");
+
+        let accounts = core.list_accounts().await.expect("list accounts");
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].email, "real.user@example.org");
+
+        let templates = core.list_templates().await.expect("list templates");
+        assert_eq!(templates.len(), 1);
+        assert_eq!(templates[0].name, "My Real Template");
     }
 
     for suffix in ["", "-wal", "-shm"] {

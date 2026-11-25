@@ -32,6 +32,8 @@ export type SpaceKind = "personal" | "pigmentStaff";
 
 export interface AppSettings {
   developerToolsEnabled: boolean;
+  onboardingCompleted: boolean;
+  tourCompleted: boolean;
 }
 
 export type ProviderKind = "gmail" | "outlook" | "imap";

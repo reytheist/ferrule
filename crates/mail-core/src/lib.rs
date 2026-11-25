@@ -191,6 +191,18 @@ impl MailCore {
         Ok(settings)
     }
 
+    /// Synchronous check used at desktop launch to decide whether to show the
+    /// first-boot-only Launch Splash before Onboarding.
+    pub fn needs_first_run_setup(&self) -> Result<bool, CoreError> {
+        self.inner.store.with_conn(|conn| {
+            let settings = store::get_app_settings(conn)?;
+            if settings.onboarding_completed {
+                return Ok(false);
+            }
+            Ok(store::account_count(conn)? == 0)
+        })
+    }
+
     // ---------------------------------------------------------------- accounts
 
     pub async fn list_accounts(&self) -> Result<Vec<AccountView>, CoreError> {

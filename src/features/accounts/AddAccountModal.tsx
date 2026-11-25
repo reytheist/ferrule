@@ -78,7 +78,17 @@ function pickNextColor(accounts: AccountView[]): SpaceColor {
   return best;
 }
 
-export function AddAccountModal({ app }: { app: MailApp }) {
+interface AddAccountModalProps {
+  app: MailApp;
+  embedded?: boolean;
+  onAccountConnected?: () => void;
+}
+
+export function AddAccountModal({
+  app,
+  embedded = false,
+  onAccountConnected,
+}: AddAccountModalProps) {
   const [step, setStep] = useState<WizardStep>("provider");
   const [provider, setProvider] = useState<ProviderStep>("pigmentStaff");
   const [connected, setConnected] = useState<AccountView | null>(null);
@@ -118,7 +128,7 @@ export function AddAccountModal({ app }: { app: MailApp }) {
     };
   }, []);
 
-  if (!app.addAccountOpen) return null;
+  if (!embedded && !app.addAccountOpen) return null;
 
   const effectiveGoogleClientId =
     googleClientId.trim() || app.savedOAuthClients.gmailClientId || "";
@@ -305,9 +315,24 @@ export function AddAccountModal({ app }: { app: MailApp }) {
     }
   }
 
+  function handleComplete(): void {
+    if (embedded) {
+      setStep("provider");
+      setConnected(null);
+      setAddress("");
+      setSecret("");
+      setDisplayName("");
+      setDisplayNameTouched(false);
+      setError(null);
+      onAccountConnected?.();
+    } else {
+      app.closeAddAccount();
+    }
+  }
+
   async function finishCustomize(): Promise<void> {
     const ok = await saveSpaceEditsIfChanged();
-    if (ok && mountedRef.current) app.closeAddAccount();
+    if (ok && mountedRef.current) handleComplete();
   }
 
   async function addAnotherOAuth(): Promise<void> {
@@ -446,7 +471,7 @@ export function AddAccountModal({ app }: { app: MailApp }) {
     setBusy(true);
     try {
       await app.addAccount(input);
-      if (mountedRef.current) app.closeAddAccount();
+      if (mountedRef.current) handleComplete();
     } catch (err) {
       if (mountedRef.current) {
         setError(
@@ -478,20 +503,8 @@ export function AddAccountModal({ app }: { app: MailApp }) {
     </div>
   );
 
-  return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !busy) {
-          if (step === "customize") {
-            void finishCustomize();
-          } else {
-            app.closeAddAccount();
-          }
-        }
-      }}
-    >
-      <div className="modal" role="dialog" aria-label="Add account">
+  const dialogContent = (
+      <div className={embedded ? "embedded-account-flow" : "modal"} role={embedded ? undefined : "dialog"} aria-label={embedded ? undefined : "Add account"}>
         <div className="modal-head">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {canGoBack && (
@@ -506,7 +519,7 @@ export function AddAccountModal({ app }: { app: MailApp }) {
                 <ArrowLeft />
               </button>
             )}
-            <h2>{step === "customize" ? "Customize space" : "Add account"}</h2>
+            <h2>{step === "customize" ? "Customize space" : "Connect an email account"}</h2>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span className="wizard-steps">
@@ -528,20 +541,22 @@ export function AddAccountModal({ app }: { app: MailApp }) {
                 </>
               )}
             </span>
-            <button
-              className="icon-btn"
-              disabled={busy}
-              onClick={() => {
-                if (step === "customize") {
-                  void finishCustomize();
-                } else {
-                  app.closeAddAccount();
-                }
-              }}
-              title="Close (Esc)"
-            >
-              <X />
-            </button>
+            {!embedded && (
+              <button
+                className="icon-btn"
+                disabled={busy}
+                onClick={() => {
+                  if (step === "customize") {
+                    void finishCustomize();
+                  } else {
+                    app.closeAddAccount();
+                  }
+                }}
+                title="Close (Esc)"
+              >
+                <X />
+              </button>
+            )}
           </div>
         </div>
 
@@ -1009,9 +1024,11 @@ export function AddAccountModal({ app }: { app: MailApp }) {
             </>
           ) : (
             <>
-              <button className="btn" disabled={busy} onClick={app.closeAddAccount}>
-                Cancel
-              </button>
+              {!embedded && (
+                <button className="btn" disabled={busy} onClick={app.closeAddAccount}>
+                  Cancel
+                </button>
+              )}
               {step === "oauthSetup" && (
                 <button
                   className="btn primary"
@@ -1041,6 +1058,26 @@ export function AddAccountModal({ app }: { app: MailApp }) {
           )}
         </div>
       </div>
+  );
+
+  if (embedded) {
+    return dialogContent;
+  }
+
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) {
+          if (step === "customize") {
+            void finishCustomize();
+          } else {
+            app.closeAddAccount();
+          }
+        }
+      }}
+    >
+      {dialogContent}
     </div>
   );
 }

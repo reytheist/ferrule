@@ -108,6 +108,8 @@ impl Store {
             .map_err(|e| CoreError::Storage {
                 reason: format!("run migration 0007: {e}"),
             })?;
+        let mut conn = conn;
+        purge_legacy_demo_data(&mut conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -252,6 +254,58 @@ pub(crate) fn fts_delete(conn: &mut Connection, rowid: i64) -> Result<(), CoreEr
 }
 
 const APP_SETTINGS_KEY: &str = "app_settings";
+const LEGACY_DEMO_PURGE_KEY: &str = "legacy_demo_purged_v1";
+
+const LEGACY_DEMO_EMAILS: &[&str] = &[
+    "mira.studio@gmail.com",
+    "reyth.personal@gmail.com",
+    "reyth@outlook.com",
+    "hello@paperkite.press",
+];
+
+/// One-time guarded cleanup that removes the v0.1.0 pre-seeded demo accounts
+/// (and their cascading threads/messages/FTS entries) plus the 3 seeded demo
+/// templates from existing local databases, leaving any user-added data intact.
+fn purge_legacy_demo_data(conn: &mut Connection) -> Result<(), CoreError> {
+    let already_done: Option<String> = query_one(
+        conn,
+        "SELECT value_json FROM app_setting WHERE key = ?1",
+        rusqlite::params![LEGACY_DEMO_PURGE_KEY],
+        |row| row.get(0).sq(),
+    )?;
+    if already_done.is_some() {
+        return Ok(());
+    }
+
+    let demo_ids: Vec<crate::ids::AccountId> = {
+        let rows = list_account_rows(conn)?;
+        rows.into_iter()
+            .filter(|row| LEGACY_DEMO_EMAILS.contains(&row.email.as_str()))
+            .map(|row| row.id)
+            .collect()
+    };
+    for id in demo_ids {
+        delete_account(conn, id)?;
+    }
+
+    conn.execute(
+        "DELETE FROM template
+         WHERE (name = 'Invoice reminder' AND shortcut = '/invoice')
+            OR (name = 'Intro reply' AND shortcut = '/intro')
+            OR (name = 'Out of office' AND shortcut = '/ooo' AND body_text LIKE '%studio@brightlark.example%')",
+        [],
+    )
+    .sq()?;
+
+    conn.execute(
+        "INSERT INTO app_setting (key, value_json) VALUES (?1, 'true')
+         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
+        rusqlite::params![LEGACY_DEMO_PURGE_KEY],
+    )
+    .sq()?;
+
+    Ok(())
+}
 
 pub(crate) fn get_app_settings(conn: &mut Connection) -> Result<crate::types::AppSettings, CoreError> {
     let raw: Option<String> = query_one(

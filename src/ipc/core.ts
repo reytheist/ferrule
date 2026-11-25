@@ -90,6 +90,11 @@ export async function healthCheck(): Promise<string> {
   return invoke<string>("health_check");
 }
 
+export async function signalAppReady(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await invoke<void>("app_ready");
+}
+
 export async function getSettings(): Promise<AppSettings> {
   if (!isTauriRuntime()) return mock.getSettings();
   return invoke<AppSettings>("get_settings");
@@ -138,11 +143,6 @@ export async function removeAccount(accountId: AccountId): Promise<void> {
 export async function syncAccount(accountId: AccountId): Promise<AccountView> {
   if (!isTauriRuntime()) return mock.syncAccount(accountId);
   return invoke<AccountView>("sync_account", { accountId });
-}
-
-export async function seedDemoIfEmpty(): Promise<void> {
-  if (!isTauriRuntime()) return mock.seedDemoIfEmpty();
-  return invoke<void>("seed_demo_if_empty");
 }
 
 export async function listThreads(query: ThreadQuery): Promise<ThreadPage> {

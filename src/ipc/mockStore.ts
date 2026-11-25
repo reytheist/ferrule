@@ -232,7 +232,11 @@ function emptyState(): MockState {
     drafts: new Map(),
     jobs: [],
     templates: [],
-    settings: { developerToolsEnabled: false },
+    settings: {
+      developerToolsEnabled: false,
+      onboardingCompleted: false,
+      tourCompleted: false,
+    },
     staffWorkspace: emptyWorkspace(),
     staffDirectory: [],
     sharedThreads: [],

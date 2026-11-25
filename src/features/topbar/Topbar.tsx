@@ -25,11 +25,12 @@ function syncLabel(app: MailApp): string {
     null,
   );
   const count = app.accounts.length;
-  if (lastOk === null) return `${count} accts · never`;
+  if (count === 0) return "No accounts";
+  if (lastOk === null) return `${count} ${count === 1 ? "acct" : "accts"} · never`;
   const minutes = Math.max(0, Math.round((Date.now() - lastOk) / 60000));
-  if (minutes < 1) return `${count} accts · just now`;
-  if (minutes < 60) return `${count} accts · ${minutes}m ago`;
-  return `${count} accts · ${Math.round(minutes / 60)}h ago`;
+  if (minutes < 1) return `${count} ${count === 1 ? "acct" : "accts"} · just now`;
+  if (minutes < 60) return `${count} ${count === 1 ? "acct" : "accts"} · ${minutes}m ago`;
+  return `${count} ${count === 1 ? "acct" : "accts"} · ${Math.round(minutes / 60)}h ago`;
 }
 
 export function Topbar({ app }: { app: MailApp }) {
@@ -42,7 +43,12 @@ export function Topbar({ app }: { app: MailApp }) {
         <span>Ferrule</span>
       </div>
 
-      <button className="search-trigger" onClick={app.openCommand} title="Search mail, labels, or commands">
+      <button
+        className="search-trigger"
+        data-tour="command-bar"
+        onClick={app.openCommand}
+        title="Search mail, labels, or commands"
+      >
         <span className="s-left">
           <Search />
           Search mail, labels, or commands…
@@ -75,6 +81,7 @@ export function Topbar({ app }: { app: MailApp }) {
         </button>
         <button
           className="icon-btn"
+          data-tour="settings"
           onClick={app.openSettings}
           title={IS_MAC ? "Settings (⌘,)" : "Settings (Ctrl+,)"}
           aria-label="Settings"

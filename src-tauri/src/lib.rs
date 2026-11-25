@@ -1,11 +1,28 @@
 mod commands;
 
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use mail_core::{CoreConfig, Host, MailCore};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+
+pub(crate) struct SplashState {
+    started_at: Mutex<Option<Instant>>,
+}
+
+impl SplashState {
+    fn new(started_at: Option<Instant>) -> Self {
+        Self {
+            started_at: Mutex::new(started_at),
+        }
+    }
+
+    pub(crate) fn take_started_at(&self) -> Option<Instant> {
+        self.started_at.lock().ok().and_then(|mut guard| guard.take())
+    }
+}
 
 #[cfg(target_os = "macos")]
 fn install_macos_app_menu(app: &tauri::App) -> tauri::Result<()> {
@@ -114,11 +131,46 @@ pub fn run() {
             }
             let _ = tray.build(app)?;
 
+            let first_run_splash = core.needs_first_run_setup().unwrap_or(false);
+            let splash_started = if first_run_splash {
+                match WebviewWindowBuilder::new(
+                    app,
+                    "splash",
+                    WebviewUrl::App("splash.html".into()),
+                )
+                .title("Ferrule")
+                .inner_size(460.0, 300.0)
+                .decorations(false)
+                .resizable(false)
+                .center()
+                .always_on_top(true)
+                .visible(true)
+                .build()
+                {
+                    Ok(_) => Some(Instant::now()),
+                    Err(_) => {
+                        if let Some(main) = app.get_webview_window("main") {
+                            let _ = main.show();
+                            let _ = main.set_focus();
+                        }
+                        None
+                    }
+                }
+            } else {
+                if let Some(main) = app.get_webview_window("main") {
+                    let _ = main.show();
+                    let _ = main.set_focus();
+                }
+                None
+            };
+
+            app.manage(SplashState::new(splash_started));
             app.manage(core);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
+            commands::app_ready,
             commands::get_settings,
             commands::update_settings,
             commands::list_accounts,
@@ -129,7 +181,6 @@ pub fn run() {
             commands::reauth_oauth_account,
             commands::remove_account,
             commands::sync_account,
-            commands::seed_demo_if_empty,
             commands::list_threads,
             commands::mailbox_counts,
             commands::open_thread,

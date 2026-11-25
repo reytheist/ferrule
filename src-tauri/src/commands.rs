@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use mail_core::calendar::{
     ActionItemStatus, ActionItemView, AddInviteToCalendarInput, AvailabilityQuery,
     AvailabilitySlot, CalendarEventView, CalendarInviteView, CalendarOccurrence,
@@ -24,11 +26,39 @@ use mail_core::types::{
     ThreadView, UndoOutcome, UpdateAccountInput,
 };
 use mail_core::MailCore;
+use tauri::Manager;
+
+use crate::SplashState;
+
+const MIN_SPLASH_DWELL: Duration = Duration::from_millis(1200);
 
 #[tauri::command]
 pub fn health_check(core: tauri::State<'_, MailCore>) -> Result<String, CoreError> {
     core.db_health_check()?;
     Ok("ok".to_string())
+}
+
+#[tauri::command]
+pub async fn app_ready(
+    app: tauri::AppHandle,
+    splash: tauri::State<'_, SplashState>,
+) -> Result<(), CoreError> {
+    if let Some(started) = splash.take_started_at() {
+        let elapsed = started.elapsed();
+        if let Some(remaining) = MIN_SPLASH_DWELL.checked_sub(elapsed) {
+            tokio::time::sleep(remaining).await;
+        }
+        if let Some(main) = app.get_webview_window("main") {
+            let _ = main.show();
+            let _ = main.set_focus();
+        }
+        if let Some(splash_window) = app.get_webview_window("splash") {
+            let _ = splash_window.close();
+        }
+    } else if let Some(main) = app.get_webview_window("main") {
+        let _ = main.show();
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -91,12 +121,6 @@ pub async fn sync_account(
     account_id: AccountId,
 ) -> Result<AccountView, CoreError> {
     core.sync_account(account_id).await
-}
-
-#[tauri::command]
-pub async fn seed_demo_if_empty(core: tauri::State<'_, MailCore>) -> Result<(), CoreError> {
-    let _ = core.seed_demo_if_empty().await?;
-    Ok(())
 }
 
 #[tauri::command]

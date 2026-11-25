@@ -5,6 +5,7 @@ import {
   RefreshCw,
   Shield,
   SlidersHorizontal,
+  Sparkles,
   Sun,
   Terminal,
   Unplug,
@@ -16,18 +17,12 @@ import { spaceClass } from "../spaces/SpaceSwitcher";
 
 export function SettingsModal({ app }: { app: MailApp }) {
   const [busy, setBusy] = useState(false);
-  const [serverUrl, setServerUrl] = useState(
-    () => app.staffWorkspace.serverUrl || "local://pigment-demo",
-  );
+  const [serverUrl, setServerUrl] = useState(() => app.staffWorkspace.serverUrl || "");
   const [token, setToken] = useState("");
-  const [staffName, setStaffName] = useState(() => app.staffWorkspace.staffName || "Reyth");
-  const [staffHandle, setStaffHandle] = useState(() => app.staffWorkspace.staffHandle || "reyth");
-  const [staffEmail, setStaffEmail] = useState(
-    () => app.staffWorkspace.staffEmail || "info@pigmentminiatures.com",
-  );
-  const [staffRole, setStaffRole] = useState(
-    () => app.staffWorkspace.staffRole || "Show Director",
-  );
+  const [staffName, setStaffName] = useState(() => app.staffWorkspace.staffName || "");
+  const [staffHandle, setStaffHandle] = useState(() => app.staffWorkspace.staffHandle || "");
+  const [staffEmail, setStaffEmail] = useState(() => app.staffWorkspace.staffEmail || "");
+  const [staffRole, setStaffRole] = useState(() => app.staffWorkspace.staffRole || "");
   const [staffError, setStaffError] = useState<string | null>(null);
 
   if (!app.settingsOpen) return null;
@@ -63,12 +58,12 @@ export function SettingsModal({ app }: { app: MailApp }) {
     setStaffError(null);
     try {
       await app.connectStaffWorkspace({
-        serverUrl,
-        token: token.trim() || (serverUrl.startsWith("local://") ? "local-demo-token" : ""),
-        staffName,
-        staffHandle,
-        staffEmail,
-        staffRole,
+        serverUrl: serverUrl.trim(),
+        token: token.trim(),
+        staffName: staffName.trim(),
+        staffHandle: staffHandle.trim().replace(/^@/, ""),
+        staffEmail: staffEmail.trim(),
+        staffRole: staffRole.trim(),
       });
       setToken("");
     } catch (err) {
@@ -162,7 +157,7 @@ export function SettingsModal({ app }: { app: MailApp }) {
                     <label>Staff Sync Server URL</label>
                     <input
                       className="input"
-                      placeholder="https://sync.pigmentminiatures.com or local://pigment-demo"
+                      placeholder="https://pigmentshow.us/api/ferrule"
                       value={serverUrl}
                       onChange={(event) => setServerUrl(event.target.value)}
                     />
@@ -172,9 +167,7 @@ export function SettingsModal({ app }: { app: MailApp }) {
                     <input
                       className="input"
                       type="password"
-                      placeholder={
-                        serverUrl.startsWith("local://") ? "Auto-filled for local demo" : "Paste invite token"
-                      }
+                      placeholder="Paste invite token"
                       value={token}
                       onChange={(event) => setToken(event.target.value)}
                     />
@@ -301,6 +294,34 @@ export function SettingsModal({ app }: { app: MailApp }) {
               All mail stays 100% local by default. Personal spaces keep Staff Sharing disabled so
               private threads are never accidentally shared.
             </span>
+          </section>
+
+          <section className="settings-section">
+            <div className="settings-section-title">Setup &amp; Guidance</div>
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <span className="settings-row-label">Feature Tour</span>
+                <span className="hint-text">
+                  Walk through Account Spaces, Command Bar, scheduling, and Pigment Staff tools.
+                </span>
+              </div>
+              <button type="button" className="btn compact" onClick={app.startTour}>
+                <Sparkles />
+                Replay Feature Tour
+              </button>
+            </div>
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <span className="settings-row-label">Onboarding</span>
+                <span className="hint-text">
+                  Re-open the guided setup flow for appearance, accounts, and Pigment Staff Sync.
+                </span>
+              </div>
+              <button type="button" className="btn compact" onClick={app.openOnboarding}>
+                <SlidersHorizontal />
+                Run Onboarding
+              </button>
+            </div>
           </section>
 
           <section className="settings-section">

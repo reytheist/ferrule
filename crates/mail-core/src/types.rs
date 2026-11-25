@@ -184,6 +184,10 @@ impl SpaceKind {
 pub struct AppSettings {
     #[serde(default)]
     pub developer_tools_enabled: bool,
+    #[serde(default)]
+    pub onboarding_completed: bool,
+    #[serde(default)]
+    pub tour_completed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

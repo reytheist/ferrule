@@ -86,7 +86,7 @@ export function SpaceSwitcher({ app }: { app: MailApp }) {
 
   return (
     <>
-      <nav className="spaces-strip" aria-label="Account spaces">
+      <nav className="spaces-strip" aria-label="Account spaces" data-tour="spaces">
         <button
           className={`space-chip all-spaces${app.scopeAccount === null ? " active" : ""}`}
           onClick={() => app.selectSpace(null)}

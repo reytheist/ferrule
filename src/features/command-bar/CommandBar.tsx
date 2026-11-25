@@ -20,6 +20,8 @@ import {
   Search,
   Send,
   Settings,
+  SlidersHorizontal,
+  Sparkles,
   Star,
   Sun,
   Trash2,
@@ -111,6 +113,8 @@ export function CommandBar({ app }: { app: MailApp }) {
       },
       { id: "add-account", label: "Add account", icon: Plus, run: app.openAddAccount },
       { id: "settings", label: "Open Settings", hint: "Ctrl ,", icon: Settings, run: app.openSettings },
+      { id: "replay-tour", label: "Replay Feature Tour", icon: Sparkles, run: app.startTour },
+      { id: "run-onboarding", label: "Run Onboarding", icon: SlidersHorizontal, run: app.openOnboarding },
       { id: "templates", label: "Manage templates & snippets", icon: FileText, run: app.openTemplates },
       {
         id: "archive",

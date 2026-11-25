@@ -96,62 +96,75 @@ function sameView(a: MailboxView, b: MailboxView): boolean {
 }
 
 export function MailboxSidebar({ app }: { app: MailApp }) {
+  const renderEntry = (entry: NavEntry) => {
+    const Icon = entry.icon;
+    const count = entry.count(app);
+    const active = app.activeSection === "mail" && sameView(app.view, entry.view);
+    return (
+      <button
+        key={entry.key}
+        className={`nav-item${active ? " active" : ""}`}
+        data-tour={entry.key === "inbox" ? "inbox" : undefined}
+        onClick={() => app.selectView(entry.view)}
+        title={entry.label}
+      >
+        <Icon />
+        <span className="nav-label">{entry.label}</span>
+        {count !== null && <span className="nav-count">{count}</span>}
+      </button>
+    );
+  };
+
+  const inboxEntry = ENTRIES[0];
+  const scheduleEntries = ENTRIES.slice(1, 4);
+  const restEntries = ENTRIES.slice(4);
+
   return (
     <aside className="sidebar">
       <div className="sidebar-section">Mailboxes</div>
-      {ENTRIES.map((entry) => {
-        const Icon = entry.icon;
-        const count = entry.count(app);
-        const active = app.activeSection === "mail" && sameView(app.view, entry.view);
-        return (
-          <button
-            key={entry.key}
-            className={`nav-item${active ? " active" : ""}`}
-            onClick={() => app.selectView(entry.view)}
-            title={entry.label}
-          >
-            <Icon />
-            <span className="nav-label">{entry.label}</span>
-            {count !== null && <span className="nav-count">{count}</span>}
-          </button>
-        );
-      })}
+      {inboxEntry && renderEntry(inboxEntry)}
+      <div className="sidebar-tour-group" data-tour="schedule">
+        {scheduleEntries.map(renderEntry)}
+      </div>
+      {restEntries.map(renderEntry)}
 
-      <div className="sidebar-section">Pigment Staff</div>
-      <button
-        className={`nav-item${app.activeSection === "shared" ? " active" : ""}`}
-        onClick={app.openSharedSection}
-        title="Shared with Me"
-      >
-        <Users />
-        <span className="nav-label">Shared with Me</span>
-        <span className="nav-count">{app.sharedThreads.length}</span>
-      </button>
-      <button
-        className={`nav-item${app.activeSection === "calendar" ? " active" : ""}`}
-        onClick={app.openCalendarSection}
-        title="Pigment Shared Calendar & Meetings"
-      >
-        <CalendarDays />
-        <span className="nav-label">Calendar</span>
-        <span className="nav-count">{app.calendarOccurrences.length}</span>
-      </button>
-      <button
-        className={`nav-item${app.activeSection === "actions" ? " active" : ""}`}
-        onClick={app.openActionsSection}
-        title="Pigment Shared Action Items & Operations Workbook"
-      >
-        <CheckSquare />
-        <span className="nav-label">Action Items</span>
-        <span className="nav-count">
-          {app.actionItems.filter((a) => a.status === "open").length}
-        </span>
-      </button>
-      <button className="nav-item" onClick={app.openContacts} title="Shared Show Contacts">
-        <Contact />
-        <span className="nav-label">Show Contacts</span>
-        <span className="nav-count">{app.showContacts.length}</span>
-      </button>
+      <div className="sidebar-tour-group" data-tour="staff">
+        <div className="sidebar-section">Pigment Staff</div>
+        <button
+          className={`nav-item${app.activeSection === "shared" ? " active" : ""}`}
+          onClick={app.openSharedSection}
+          title="Shared with Me"
+        >
+          <Users />
+          <span className="nav-label">Shared with Me</span>
+          <span className="nav-count">{app.sharedThreads.length}</span>
+        </button>
+        <button
+          className={`nav-item${app.activeSection === "calendar" ? " active" : ""}`}
+          onClick={app.openCalendarSection}
+          title="Pigment Shared Calendar & Meetings"
+        >
+          <CalendarDays />
+          <span className="nav-label">Calendar</span>
+          <span className="nav-count">{app.calendarOccurrences.length}</span>
+        </button>
+        <button
+          className={`nav-item${app.activeSection === "actions" ? " active" : ""}`}
+          onClick={app.openActionsSection}
+          title="Pigment Shared Action Items & Operations Workbook"
+        >
+          <CheckSquare />
+          <span className="nav-label">Action Items</span>
+          <span className="nav-count">
+            {app.actionItems.filter((a) => a.status === "open").length}
+          </span>
+        </button>
+        <button className="nav-item" onClick={app.openContacts} title="Shared Show Contacts">
+          <Contact />
+          <span className="nav-label">Show Contacts</span>
+          <span className="nav-count">{app.showContacts.length}</span>
+        </button>
+      </div>
 
       <div className="sidebar-section">Library</div>
       <button className="nav-item" onClick={app.openTemplates} title="Templates">

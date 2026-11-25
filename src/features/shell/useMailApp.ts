@@ -58,11 +58,11 @@ import {
   saveShowContact as saveShowContactCommand,
   saveTemplate as saveTemplateCommand,
   savedOAuthClients as savedOAuthClientsCommand,
-  seedDemoIfEmpty,
   sendDraft,
   setDiscordWebhook as setDiscordWebhookCommand,
   setFollowUp,
   shareThread as shareThreadCommand,
+  signalAppReady,
   snoozeThread as snoozeThreadCommand,
   syncAccount,
   syncStaffWorkspace as syncStaffWorkspaceCommand,
@@ -187,6 +187,7 @@ interface ToastOptions {
 }
 
 const THEME_KEY = "ferrule.theme";
+const LAYOUT_KEY = "ferrule.layout";
 const DEFAULT_UNDO_MS = 5000;
 
 function readStringField(obj: object, key: string): string | null {
@@ -229,6 +230,15 @@ function loadTheme(): Theme {
   }
 }
 
+function loadLayout(): Layout {
+  try {
+    const stored = window.localStorage.getItem(LAYOUT_KEY);
+    return stored === "classic" ? "classic" : "split";
+  } catch {
+    return "split";
+  }
+}
+
 function centerAnchor(): Anchor {
   return {
     x: Math.max(12, window.innerWidth / 2 - 118),
@@ -259,6 +269,9 @@ export interface MailApp {
   addAccountOpen: boolean;
   templatesOpen: boolean;
   settingsOpen: boolean;
+  onboardingOpen: boolean;
+  tourOpen: boolean;
+  tourStep: number;
   shareModalOpen: boolean;
   contactsOpen: boolean;
   pinnedLinksOpen: boolean;
@@ -290,7 +303,16 @@ export interface MailApp {
   workbookImportTarget: WorkbookImportTarget;
 
   toggleTheme(): void;
+  setTheme(next: Theme): void;
   toggleLayout(): void;
+  setLayout(next: Layout): void;
+  openOnboarding(): void;
+  completeOnboarding(): Promise<void>;
+  startTour(): void;
+  nextTourStep(): void;
+  prevTourStep(): void;
+  skipTour(): Promise<void>;
+  completeTour(): Promise<void>;
   backToList(): void;
   selectSpace(id: AccountId | null): void;
   selectView(view: MailboxView): void;
@@ -400,7 +422,11 @@ export function useMailApp(): MailApp {
     outlookClientId: null,
     outlookTenant: null,
   });
-  const [settings, setSettings] = useState<AppSettings>({ developerToolsEnabled: false });
+  const [settings, setSettings] = useState<AppSettings>({
+    developerToolsEnabled: false,
+    onboardingCompleted: false,
+    tourCompleted: false,
+  });
   const [counts, setCounts] = useState<MailboxCounts | null>(null);
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [jobs, setJobs] = useState<JobView[]>([]);
@@ -411,7 +437,7 @@ export function useMailApp(): MailApp {
   const [thread, setThread] = useState<ThreadView | null>(null);
   const [remoteContent, setRemoteContent] = useState<RemoteContent>("blockAll");
   const [theme, setTheme] = useState<Theme>(loadTheme);
-  const [layout, setLayout] = useState<Layout>("split");
+  const [layout, setLayout] = useState<Layout>(loadLayout);
   const [stage, setStage] = useState<Stage>("list");
   const [toast, setToast] = useState<ToastData | null>(null);
   const [commandOpen, setCommandOpen] = useState(false);
@@ -419,6 +445,9 @@ export function useMailApp(): MailApp {
   const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
+  const [tourStep, setTourStep] = useState(0);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [contactsOpen, setContactsOpen] = useState(false);
   const [pinnedLinksOpen, setPinnedLinksOpen] = useState(false);
@@ -529,9 +558,10 @@ export function useMailApp(): MailApp {
     setSettings(nextSettings);
     jobsSignature.current = nextJobs.map((j) => `${j.id}:${j.state}`).join("|");
     await reloadStaff();
+    return { accounts: nextAccounts, settings: nextSettings };
   }, [reloadStaff]);
 
-  // Theme persistence + accent wiring.
+  // Theme & layout persistence + accent wiring.
   useEffect(() => {
     themeRef.current = theme;
     try {
@@ -541,6 +571,14 @@ export function useMailApp(): MailApp {
     }
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LAYOUT_KEY, layout);
+    } catch {
+      // Ignore storage failures in restricted previews.
+    }
+  }, [layout]);
 
   // Keep refs fresh so popover callbacks read current reply state.
   useEffect(() => {
@@ -554,18 +592,23 @@ export function useMailApp(): MailApp {
     document.documentElement.style.setProperty("--space-accent", accent);
   }, [scopeAccount, accounts]);
 
-  // Boot: seed the preview store, then load meta. The scope/view effect below
-  // performs the first counts + threads load on mount.
+  // Boot: load meta, determine first-run Onboarding state, and signal desktop
+  // readiness so the first-boot Launch Splash transitions smoothly to main.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        await seedDemoIfEmpty();
-        if (!cancelled) await reloadMeta();
+        const meta = await reloadMeta();
+        if (!cancelled && !meta.settings.onboardingCompleted && meta.accounts.length === 0) {
+          setOnboardingOpen(true);
+        }
       } catch (err) {
         if (!cancelled) setError(friendlyError(err));
       } finally {
-        if (!cancelled) setBooting(false);
+        if (!cancelled) {
+          setBooting(false);
+          void signalAppReady();
+        }
       }
     })();
     return () => {
@@ -910,6 +953,73 @@ export function useMailApp(): MailApp {
     }
   }
 
+  function openOnboarding(): void {
+    setSettingsOpen(false);
+    setCommandOpen(false);
+    setTourOpen(false);
+    setOnboardingOpen(true);
+  }
+
+  async function completeOnboarding(): Promise<void> {
+    setOnboardingOpen(false);
+    const shouldStartTour = !settings.tourCompleted;
+    try {
+      const updated = await updateSettingsCommand({
+        ...settings,
+        onboardingCompleted: true,
+      });
+      setSettings(updated);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+    if (shouldStartTour) {
+      setActiveSection("mail");
+      setTourStep(0);
+      setTourOpen(true);
+    }
+  }
+
+  function startTour(): void {
+    setSettingsOpen(false);
+    setCommandOpen(false);
+    setOnboardingOpen(false);
+    setActiveSection("mail");
+    setTourStep(0);
+    setTourOpen(true);
+  }
+
+  function nextTourStep(): void {
+    setTourStep((prev) => prev + 1);
+  }
+
+  function prevTourStep(): void {
+    setTourStep((prev) => Math.max(0, prev - 1));
+  }
+
+  async function persistTourDone(): Promise<void> {
+    setTourOpen(false);
+    setTourStep(0);
+    if (settings.tourCompleted) return;
+    try {
+      const updated = await updateSettingsCommand({
+        ...settings,
+        tourCompleted: true,
+      });
+      setSettings(updated);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function skipTour(): Promise<void> {
+    await persistTourDone();
+  }
+
+  async function completeTour(): Promise<void> {
+    await persistTourDone();
+    showToast("Feature tour complete — replay anytime from Settings or Ctrl+K");
+  }
+
   function openCommand(): void {
     setCommandOpen(true);
   }
@@ -952,6 +1062,10 @@ export function useMailApp(): MailApp {
   }
 
   function closeTopLayer(): void {
+    if (tourOpen) {
+      void skipTour();
+      return;
+    }
     if (popover !== null) {
       setPopover(null);
       return;
@@ -1787,6 +1901,9 @@ export function useMailApp(): MailApp {
     addAccountOpen,
     templatesOpen,
     settingsOpen,
+    onboardingOpen,
+    tourOpen,
+    tourStep,
     shareModalOpen,
     contactsOpen,
     pinnedLinksOpen,
@@ -1817,7 +1934,16 @@ export function useMailApp(): MailApp {
     workbookImportOpen,
     workbookImportTarget,
     toggleTheme: () => setTheme((prev) => (prev === "dark" ? "light" : "dark")),
+    setTheme,
     toggleLayout: () => setLayout((prev) => (prev === "split" ? "classic" : "split")),
+    setLayout,
+    openOnboarding,
+    completeOnboarding,
+    startTour,
+    nextTourStep,
+    prevTourStep,
+    skipTour,
+    completeTour,
     backToList,
     selectSpace,
     selectView,
