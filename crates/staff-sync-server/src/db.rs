@@ -347,7 +347,21 @@ impl SyncDb {
     }
 
     pub fn delete_calendar_event(&self, id: CalendarEventId, now: UnixMs) -> Result<(), DbError> {
-        self.delete_simple("calendar_event", &id.to_string(), now)
+        let eid = id.to_string();
+        self.with_conn(|conn| {
+            let tx = conn.transaction()?;
+            tx.execute("DELETE FROM calendar_event WHERE id = ?1", params![eid])?;
+            tx.execute("DELETE FROM meeting_doc WHERE event_id = ?1", params![eid])?;
+            tx.execute(
+                "INSERT INTO tombstone (entity_kind, entity_id, deleted_at)
+                 VALUES ('calendar_event', ?1, ?2)
+                 ON CONFLICT(entity_kind, entity_id) DO UPDATE SET
+                    deleted_at = excluded.deleted_at",
+                params![eid, now.0],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
     }
 
     pub fn upsert_meeting_doc(

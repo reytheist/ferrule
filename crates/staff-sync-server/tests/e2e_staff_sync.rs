@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mail_core::auth::MemorySecretStore;
+use mail_core::auth::{MemorySecretStore, SecretKey, SecretStore};
 use mail_core::calendar::{
     ActionItemStatus, AgendaItem, CalendarEventKind, CalendarRangeQuery, MeetingDocAction,
     RecurrenceRule, SaveActionItemInput, SaveCalendarEventInput, UpdateMeetingDocInput,
@@ -909,6 +909,208 @@ async fn clock_skewed_client_edits_visible_on_incremental_since_pull() {
         .unwrap()
         .iter()
         .any(|a| a.id == skewed.id));
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn calendar_event_delete_cleans_up_meeting_doc_on_server_and_peers() {
+    let server = spawn_server(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        ServerConfig::with_tokens(vec!["doc-cleanup-token".into()], None),
+    )
+    .await
+    .expect("spawn server");
+
+    let alice = open_test_core(None, BASE_MS);
+    let bob = open_test_core(None, BASE_MS + 1_000);
+
+    alice
+        .connect_staff_workspace(ConnectStaffWorkspaceInput {
+            server_url: server.url(),
+            token: "doc-cleanup-token".into(),
+            staff_name: "Alice".into(),
+            staff_handle: "alice".into(),
+            staff_email: "info@pigmentminiatures.com".into(),
+            staff_role: "Director".into(),
+        })
+        .await
+        .expect("connect alice");
+    bob.connect_staff_workspace(ConnectStaffWorkspaceInput {
+        server_url: server.url(),
+        token: "doc-cleanup-token".into(),
+        staff_name: "Bob".into(),
+        staff_handle: "bob".into(),
+        staff_email: "sponsors@pigmentminiatures.com".into(),
+        staff_role: "Sponsors".into(),
+    })
+    .await
+    .expect("connect bob");
+    alice.stop_staff_sync_listener();
+    bob.stop_staff_sync_listener();
+
+    let ev = alice
+        .save_calendar_event(SaveCalendarEventInput {
+            id: None,
+            series_id: None,
+            title: "Meeting With Doc".into(),
+            description: String::new(),
+            start_at: UnixMs(BASE_MS + DAY),
+            end_at: UnixMs(BASE_MS + DAY + HOUR),
+            all_day: false,
+            kind: CalendarEventKind::Meeting,
+            department: Some("operations".into()),
+            location: None,
+            recurrence: RecurrenceRule::None,
+            discord_url: None,
+            attendees: vec!["alice".into()],
+            source_ics_uid: None,
+        })
+        .await
+        .expect("save event");
+    alice
+        .update_meeting_doc(UpdateMeetingDocInput {
+            event_id: ev.id,
+            action: MeetingDocAction::SaveNotes {
+                notes_markdown: "Temporary agenda notes".into(),
+                release_lock: true,
+            },
+        })
+        .await
+        .expect("save meeting doc");
+
+    bob.sync_staff_workspace().await.expect("bob initial sync");
+    let bob_doc = bob.get_meeting_doc(ev.id).await.expect("bob sees doc");
+    assert_eq!(bob_doc.notes_markdown, "Temporary agenda notes");
+
+    // Alice deletes the calendar event -> meeting doc must be removed on server and Bob.
+    alice.delete_calendar_event(ev.id).await.expect("delete event");
+    bob.sync_staff_workspace().await.expect("bob sync after delete");
+
+    assert!(
+        bob.get_meeting_doc(ev.id).await.is_err(),
+        "deleted event and its meeting doc must be gone on peer"
+    );
+
+    // Verify server snapshot itself contains zero orphaned meetingDocs.
+    let snap: serde_json::Value = reqwest::Client::new()
+        .get(format!("{}/v1/snapshot", server.url()))
+        .bearer_auth("doc-cleanup-token")
+        .send()
+        .await
+        .expect("fetch snapshot")
+        .json()
+        .await
+        .expect("snapshot json");
+    assert_eq!(
+        snap["meetingDocs"].as_array().map(|a| a.len()),
+        Some(0),
+        "server snapshot must not retain orphaned meetingDocs after event deletion"
+    );
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn missing_keychain_token_and_misrouted_404_preserve_outbox() {
+    let server = spawn_server(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        ServerConfig::with_tokens(vec!["outbox-guard-token".into()], None),
+    )
+    .await
+    .expect("spawn server");
+
+    // 1. Missing keychain token path: preserve edits in outbox and surface Error status.
+    let secrets = Arc::new(MemorySecretStore::default());
+    let host = Host {
+        clock: Arc::new(ManualClock::new(UnixMs(BASE_MS))),
+        secrets: secrets.clone(),
+    };
+    let alice = MailCore::open(CoreConfig::default(), host).expect("open alice");
+    alice
+        .connect_staff_workspace(ConnectStaffWorkspaceInput {
+            server_url: server.url(),
+            token: "outbox-guard-token".into(),
+            staff_name: "Alice".into(),
+            staff_handle: "alice".into(),
+            staff_email: "info@pigmentminiatures.com".into(),
+            staff_role: "Director".into(),
+        })
+        .await
+        .expect("connect alice");
+    alice.stop_staff_sync_listener();
+
+    // Simulate OS keychain clearing the stored token while workspace stays connected.
+    secrets
+        .delete(&SecretKey::staff_sync_token())
+        .expect("delete token");
+
+    alice
+        .save_action_item(SaveActionItemInput {
+            id: None,
+            title: "Must queue when keychain token missing".into(),
+            department: Some("operations".into()),
+            milestone: None,
+            assignee_handle: None,
+            status: ActionItemStatus::Open,
+            due_at: None,
+            start_time: None,
+            end_time: None,
+            location: None,
+            cost_note: None,
+            source_event_id: None,
+            source_series_id: None,
+            source_thread_id: None,
+            sync_to_calendar: false,
+        })
+        .await
+        .expect("save action with missing token");
+
+    let ws_missing = alice.get_staff_workspace().await.expect("ws");
+    assert_eq!(ws_missing.status, StaffSyncStatus::Error);
+    assert_eq!(ws_missing.pending_outbox_count, 1);
+
+    // 2. Misrouted URL returning HTTP 404 on PUT /v1/action-items must NOT silently drop the edit.
+    let bob = open_test_core(None, BASE_MS + 1_000);
+    bob.connect_staff_workspace(ConnectStaffWorkspaceInput {
+        server_url: format!("{}/wrong-prefix", server.url()),
+        token: "outbox-guard-token".into(),
+        staff_name: "Bob".into(),
+        staff_handle: "bob".into(),
+        staff_email: "sponsors@pigmentminiatures.com".into(),
+        staff_role: "Sponsors".into(),
+    })
+    .await
+    .expect("connect bob to misrouted prefix");
+    bob.stop_staff_sync_listener();
+
+    bob.save_action_item(SaveActionItemInput {
+        id: None,
+        title: "Must survive misrouted 404".into(),
+        department: Some("sponsors".into()),
+        milestone: None,
+        assignee_handle: None,
+        status: ActionItemStatus::Open,
+        due_at: None,
+        start_time: None,
+        end_time: None,
+        location: None,
+        cost_note: None,
+        source_event_id: None,
+        source_series_id: None,
+        source_thread_id: None,
+        sync_to_calendar: false,
+    })
+    .await
+    .expect("save action against misrouted 404");
+
+    let bob_ws = bob.get_staff_workspace().await.expect("bob ws");
+    assert_eq!(bob_ws.status, StaffSyncStatus::Offline);
+    assert!(
+        bob_ws.pending_outbox_count >= 2,
+        "member upsert + action item must remain queued on router-level 404, got {}",
+        bob_ws.pending_outbox_count
+    );
 
     server.shutdown().await;
 }

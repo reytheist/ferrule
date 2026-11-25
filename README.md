@@ -36,8 +36,9 @@ pnpm typecheck && pnpm lint && pnpm build
 
 ## Docs
 
+- [Pigment Staff Onboarding Guide](docs/STAFF_ONBOARDING.md)
+- [Staff Sync Server Deployment](docs/STAFF_SYNC_DEPLOY.md)
 - [Blueprint](docs/BLUEPRINT.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Staff Collaboration Spec](docs/COLLABORATION_SPEC.md)
-- [Staff Sync Server Deployment](docs/STAFF_SYNC_DEPLOY.md)
 - [UI Bake-Off](design/bakeoff/full-desktop.html)

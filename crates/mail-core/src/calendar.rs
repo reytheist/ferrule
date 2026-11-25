@@ -803,6 +803,42 @@ fn is_eu_dst(dt: &NaiveDateTime) -> bool {
     dt.day() < end_day || (dt.day() == end_day && dt.hour() < 1)
 }
 
+/// AEDT (Sydney/Melbourne): first Sunday in October 02:00 to first Sunday in April 03:00.
+fn is_au_dst(dt: &NaiveDateTime) -> bool {
+    let m = dt.month();
+    if (5..=9).contains(&m) {
+        return false;
+    }
+    if m >= 11 || m <= 3 {
+        return true;
+    }
+    if m == 10 {
+        let start_day = nth_weekday_of_month(dt.year(), 10, Weekday::Sun, 1).unwrap_or(7);
+        return dt.day() > start_day || (dt.day() == start_day && dt.hour() >= 2);
+    }
+    // April
+    let end_day = nth_weekday_of_month(dt.year(), 4, Weekday::Sun, 1).unwrap_or(7);
+    dt.day() < end_day || (dt.day() == end_day && dt.hour() < 3)
+}
+
+/// NZDT (Auckland): last Sunday in September 02:00 to first Sunday in April 03:00.
+fn is_nz_dst(dt: &NaiveDateTime) -> bool {
+    let m = dt.month();
+    if (5..=8).contains(&m) {
+        return false;
+    }
+    if m >= 10 || m <= 3 {
+        return true;
+    }
+    if m == 9 {
+        let start_day = last_weekday_of_month(dt.year(), 9, Weekday::Sun).unwrap_or(28);
+        return dt.day() > start_day || (dt.day() == start_day && dt.hour() >= 2);
+    }
+    // April
+    let end_day = nth_weekday_of_month(dt.year(), 4, Weekday::Sun, 1).unwrap_or(7);
+    dt.day() < end_day || (dt.day() == end_day && dt.hour() < 3)
+}
+
 fn resolve_tzid_offset_secs(
     tzid: &str,
     dt: &NaiveDateTime,
@@ -892,14 +928,10 @@ fn resolve_tzid_offset_secs(
             Some(9 * 3600)
         }
         "australia/sydney" | "australia/melbourne" | "aus eastern standard time" => {
-            let cur_md = (dt.month(), dt.day());
-            let in_dst = !((4, 1)..(10, 1)).contains(&cur_md);
-            Some(if in_dst { 11 * 3600 } else { 10 * 3600 })
+            Some(if is_au_dst(dt) { 11 * 3600 } else { 10 * 3600 })
         }
         "pacific/auckland" | "new zealand standard time" => {
-            let cur_md = (dt.month(), dt.day());
-            let in_dst = !((4, 1)..(9, 25)).contains(&cur_md);
-            Some(if in_dst { 13 * 3600 } else { 12 * 3600 })
+            Some(if is_nz_dst(dt) { 13 * 3600 } else { 12 * 3600 })
         }
         _ => None,
     }

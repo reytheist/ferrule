@@ -209,11 +209,14 @@ pub(crate) fn delete_calendar_event(
     conn: &mut Connection,
     id: CalendarEventId,
 ) -> Result<bool, CoreError> {
+    let id_blob = id_to_blob(id.as_bytes());
+    conn.execute(
+        "DELETE FROM meeting_doc WHERE event_id = ?1",
+        params![id_blob],
+    )
+    .sq()?;
     let rows = conn
-        .execute(
-            "DELETE FROM calendar_event WHERE id = ?1",
-            params![id_to_blob(id.as_bytes())],
-        )
+        .execute("DELETE FROM calendar_event WHERE id = ?1", params![id_blob])
         .sq()?;
     Ok(rows > 0)
 }

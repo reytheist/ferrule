@@ -266,7 +266,7 @@ impl StaffSyncClient {
             .send()
             .await
             .map_err(|e| StaffHttpError::Retryable(format!("Staff Sync unreachable: {e}")))?;
-        check_status(resp.status())?;
+        check_status(resp.status(), false)?;
         resp.json::<StaffSyncSnapshot>()
             .await
             .map_err(|e| StaffHttpError::Retryable(format!("invalid Staff Sync snapshot JSON: {e}")))
@@ -274,7 +274,7 @@ impl StaffSyncClient {
 
     pub(crate) async fn push_member(&self, member: &StaffMemberView) -> Result<(), StaffHttpError> {
         let url = format!("{}/v1/members/{}", self.base_url, member.id);
-        self.put_json(&url, member).await
+        self.put_json(&url, member, false).await
     }
 
     pub(crate) async fn execute_op(&self, op: &StaffOutboxOp) -> Result<(), StaffHttpError> {
@@ -322,7 +322,7 @@ impl StaffSyncClient {
             .send()
             .await
             .map_err(|e| StaffHttpError::Retryable(format!("Staff Sync SSE unreachable: {e}")))?;
-        check_status(resp.status())?;
+        check_status(resp.status(), false)?;
         Ok(resp)
     }
 
@@ -330,7 +330,7 @@ impl StaffSyncClient {
         &self,
         thread: &SharedThreadView,
     ) -> Result<(), StaffHttpError> {
-        self.post_json(&format!("{}/v1/shared-threads", self.base_url), thread)
+        self.post_json(&format!("{}/v1/shared-threads", self.base_url), thread, false)
             .await
     }
 
@@ -358,7 +358,7 @@ impl StaffSyncClient {
             .send()
             .await
             .map_err(|e| StaffHttpError::Retryable(format!("push handoff: {e}")))?;
-        check_status(resp.status())
+        check_status(resp.status(), true)
     }
 
     pub(crate) async fn push_comment(
@@ -369,7 +369,7 @@ impl StaffSyncClient {
             "{}/v1/shared-threads/{}/comments",
             self.base_url, comment.shared_thread_id
         );
-        self.post_json(&url, comment).await
+        self.post_json(&url, comment, true).await
     }
 
     pub(crate) async fn push_draft(&self, draft: &SharedDraftView) -> Result<(), StaffHttpError> {
@@ -377,7 +377,7 @@ impl StaffSyncClient {
             "{}/v1/shared-threads/{}/draft",
             self.base_url, draft.shared_thread_id
         );
-        self.put_json(&url, draft).await
+        self.put_json(&url, draft, true).await
     }
 
     pub(crate) async fn push_shared_template(
@@ -385,7 +385,7 @@ impl StaffSyncClient {
         template: &SharedTemplateView,
     ) -> Result<(), StaffHttpError> {
         let url = format!("{}/v1/shared-templates/{}", self.base_url, template.id);
-        self.put_json(&url, template).await
+        self.put_json(&url, template, false).await
     }
 
     pub(crate) async fn delete_shared_template(
@@ -398,7 +398,7 @@ impl StaffSyncClient {
 
     pub(crate) async fn push_contact(&self, contact: &ShowContactView) -> Result<(), StaffHttpError> {
         let url = format!("{}/v1/contacts/{}", self.base_url, contact.id);
-        self.put_json(&url, contact).await
+        self.put_json(&url, contact, false).await
     }
 
     pub(crate) async fn delete_contact(&self, id: ContactId) -> Result<(), StaffHttpError> {
@@ -411,7 +411,7 @@ impl StaffSyncClient {
         link: &PinnedLinkView,
     ) -> Result<(), StaffHttpError> {
         let url = format!("{}/v1/pinned-links/{}", self.base_url, link.id);
-        self.put_json(&url, link).await
+        self.put_json(&url, link, false).await
     }
 
     pub(crate) async fn delete_pinned_link(&self, id: PinnedLinkId) -> Result<(), StaffHttpError> {
@@ -424,7 +424,7 @@ impl StaffSyncClient {
         event: &CalendarEventView,
     ) -> Result<(), StaffHttpError> {
         let url = format!("{}/v1/calendar/events/{}", self.base_url, event.id);
-        self.put_json(&url, event).await
+        self.put_json(&url, event, false).await
     }
 
     pub(crate) async fn delete_calendar_event(
@@ -440,7 +440,7 @@ impl StaffSyncClient {
         doc: &MeetingDocView,
     ) -> Result<(), StaffHttpError> {
         let url = format!("{}/v1/calendar/events/{}/doc", self.base_url, doc.event_id);
-        self.put_json(&url, doc).await
+        self.put_json(&url, doc, false).await
     }
 
     pub(crate) async fn push_action_item(
@@ -448,7 +448,7 @@ impl StaffSyncClient {
         item: &ActionItemView,
     ) -> Result<(), StaffHttpError> {
         let url = format!("{}/v1/action-items/{}", self.base_url, item.id);
-        self.put_json(&url, item).await
+        self.put_json(&url, item, false).await
     }
 
     pub(crate) async fn delete_action_item(&self, id: ActionItemId) -> Result<(), StaffHttpError> {
@@ -456,7 +456,12 @@ impl StaffSyncClient {
         self.delete_url(&url).await
     }
 
-    async fn post_json<T: Serialize>(&self, url: &str, body: &T) -> Result<(), StaffHttpError> {
+    async fn post_json<T: Serialize>(
+        &self,
+        url: &str,
+        body: &T,
+        drop_on_404: bool,
+    ) -> Result<(), StaffHttpError> {
         let resp = self
             .http
             .post(url)
@@ -465,10 +470,15 @@ impl StaffSyncClient {
             .send()
             .await
             .map_err(|e| StaffHttpError::Retryable(format!("Staff Sync POST failed: {e}")))?;
-        check_status(resp.status())
+        check_status(resp.status(), drop_on_404)
     }
 
-    async fn put_json<T: Serialize>(&self, url: &str, body: &T) -> Result<(), StaffHttpError> {
+    async fn put_json<T: Serialize>(
+        &self,
+        url: &str,
+        body: &T,
+        drop_on_404: bool,
+    ) -> Result<(), StaffHttpError> {
         let resp = self
             .http
             .put(url)
@@ -477,7 +487,7 @@ impl StaffSyncClient {
             .send()
             .await
             .map_err(|e| StaffHttpError::Retryable(format!("Staff Sync PUT failed: {e}")))?;
-        check_status(resp.status())
+        check_status(resp.status(), drop_on_404)
     }
 
     async fn delete_url(&self, url: &str) -> Result<(), StaffHttpError> {
@@ -488,11 +498,11 @@ impl StaffSyncClient {
             .send()
             .await
             .map_err(|e| StaffHttpError::Retryable(format!("Staff Sync DELETE failed: {e}")))?;
-        check_status(resp.status())
+        check_status(resp.status(), false)
     }
 }
 
-fn check_status(status: reqwest::StatusCode) -> Result<(), StaffHttpError> {
+fn check_status(status: reqwest::StatusCode, drop_on_404: bool) -> Result<(), StaffHttpError> {
     if status.is_success() {
         return Ok(());
     }
@@ -501,7 +511,10 @@ fn check_status(status: reqwest::StatusCode) -> Result<(), StaffHttpError> {
         401 | 403 => Err(StaffHttpError::AuthRejected(format!(
             "Staff Sync rejected bearer token (HTTP {code}). Reconnect in Settings."
         ))),
-        404 | 409 => Err(StaffHttpError::DropConflictOrNotFound(format!(
+        409 => Err(StaffHttpError::DropConflictOrNotFound(format!(
+            "Staff Sync returned HTTP {code}"
+        ))),
+        404 if drop_on_404 => Err(StaffHttpError::DropConflictOrNotFound(format!(
             "Staff Sync returned HTTP {code}"
         ))),
         _ => Err(StaffHttpError::Retryable(format!(

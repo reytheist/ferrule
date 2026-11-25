@@ -203,6 +203,68 @@ fn parses_ics_additional_iana_tzids_and_vtimezone_transition_day() {
 }
 
 #[test]
+fn parses_ics_au_nz_dst_transition_boundaries() {
+    // 2025 AU (Sydney): AEDT (+11) ends first Sun of Apr = Apr 6, starts first Sun of Oct = Oct 5.
+    // 2025 NZ (Auckland): NZDT (+13) ends first Sun of Apr = Apr 6, starts last Sun of Sep = Sep 28.
+    let raw = concat!(
+        "BEGIN:VCALENDAR\r\n",
+        "VERSION:2.0\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:syd-apr3@pigment\r\n",
+        "SUMMARY:Sydney Before Apr 6 End\r\n",
+        "DTSTART;TZID=Australia/Sydney:20250403T110000\r\n",
+        "DTEND;TZID=Australia/Sydney:20250403T120000\r\n",
+        "END:VEVENT\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:syd-oct3@pigment\r\n",
+        "SUMMARY:Sydney Before Oct 5 Start\r\n",
+        "DTSTART;TZID=Australia/Sydney:20251003T100000\r\n",
+        "DTEND;TZID=Australia/Sydney:20251003T110000\r\n",
+        "END:VEVENT\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:akl-sep26@pigment\r\n",
+        "SUMMARY:Auckland Before Sep 28 Start\r\n",
+        "DTSTART;TZID=Pacific/Auckland:20250926T120000\r\n",
+        "DTEND;TZID=Pacific/Auckland:20250926T130000\r\n",
+        "END:VEVENT\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:akl-sep29@pigment\r\n",
+        "SUMMARY:Auckland After Sep 28 Start\r\n",
+        "DTSTART;TZID=Pacific/Auckland:20250929T130000\r\n",
+        "DTEND;TZID=Pacific/Auckland:20250929T140000\r\n",
+        "END:VEVENT\r\n",
+        "END:VCALENDAR\r\n",
+    );
+
+    let events = parse_ics(raw);
+    assert_eq!(events.len(), 4);
+
+    // 2025-04-03 11:00 Australia/Sydney is still AEDT (+11) -> 00:00 UTC
+    let syd_apr3 = chrono::DateTime::parse_from_rfc3339("2025-04-03T00:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    assert_eq!(events[0].start_at, UnixMs(syd_apr3));
+
+    // 2025-10-03 10:00 Australia/Sydney is still AEST (+10) -> 00:00 UTC
+    let syd_oct3 = chrono::DateTime::parse_from_rfc3339("2025-10-03T00:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    assert_eq!(events[1].start_at, UnixMs(syd_oct3));
+
+    // 2025-09-26 12:00 Pacific/Auckland is still NZST (+12) -> 00:00 UTC
+    let akl_sep26 = chrono::DateTime::parse_from_rfc3339("2025-09-26T00:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    assert_eq!(events[2].start_at, UnixMs(akl_sep26));
+
+    // 2025-09-29 13:00 Pacific/Auckland is NZDT (+13) -> 00:00 UTC
+    let akl_sep29 = chrono::DateTime::parse_from_rfc3339("2025-09-29T00:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    assert_eq!(events[3].start_at, UnixMs(akl_sep29));
+}
+
+#[test]
 fn parses_natural_language_quick_add() {
     let parsed = parse_quick_add(
         "Staff sync Thu 7pm 90m #operations @Ballroom A weekly",

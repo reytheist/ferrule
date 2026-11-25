@@ -129,6 +129,8 @@ impl MailCore {
         }
 
         // Real HTTP/HTTPS Staff Sync server: push member profile, flush any queued ops, then pull.
+        self.stop_staff_sync_listener();
+        let _sync_guard = self.inner.staff_sync_lock.lock().await;
         let client = StaffSyncClient::new(&server_url, &token)?;
         let member_push = client.push_member(&current_member).await;
         let pull_res = match member_push {
@@ -171,6 +173,7 @@ impl MailCore {
                 store::get_staff_workspace(conn)
             }
         })?;
+        drop(_sync_guard);
         self.start_staff_sync_listener();
         self.emit(CoreEvent::StaffChanged);
         Ok(ws)
@@ -178,6 +181,7 @@ impl MailCore {
 
     pub async fn disconnect_staff_workspace(&self) -> Result<(), CoreError> {
         self.stop_staff_sync_listener();
+        let _sync_guard = self.inner.staff_sync_lock.lock().await;
         self.inner
             .host
             .secrets
@@ -1040,8 +1044,13 @@ impl MailCore {
         let mut status_or_outbox_changed = false;
         if ws.connected && !ws.server_url.starts_with("local://") && !ops.is_empty() {
             let _sync_guard = self.inner.staff_sync_lock.lock().await;
+            let live_ws = self.inner.store.with_conn(store::get_staff_workspace)?;
+            if !live_ws.connected || live_ws.server_url.starts_with("local://") {
+                self.emit(event);
+                return Ok(());
+            }
             let now = self.now();
-            match self.remote_staff_client(ws)? {
+            match self.remote_staff_client(&live_ws)? {
                 None => {
                     // Keychain token missing on a remote workspace: preserve edits in the
                     // outbox and surface an auth error instead of silently dropping them.
