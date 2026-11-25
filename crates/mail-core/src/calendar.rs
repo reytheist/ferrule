@@ -2,6 +2,8 @@
 //! read-only personal .ics overlays, availability slots), Meeting Docs with
 //! recurring carryover, and Discord meeting integration.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc, Weekday};
 use serde::{Deserialize, Serialize};
 
@@ -428,7 +430,16 @@ pub struct ParsedIcsEvent {
     pub all_day: bool,
 }
 
-/// Unfold RFC 5545 continuation lines (CRLF or LF followed by space/tab) and parse VEVENT blocks.
+#[derive(Debug, Default, Clone)]
+struct VTimezoneDef {
+    standard_offset_secs: Option<i32>,
+    daylight_offset_secs: Option<i32>,
+    standard_start_month: Option<u32>,
+    daylight_start_month: Option<u32>,
+}
+
+/// Unfold RFC 5545 continuation lines (CRLF or LF followed by space/tab) and parse VEVENT blocks,
+/// honoring embedded `VTIMEZONE` definitions and `TZID=...` parameters.
 pub fn parse_ics(raw: &str) -> Vec<ParsedIcsEvent> {
     let mut unfolded: Vec<String> = Vec::new();
     for line in raw.replace("\r\n", "\n").split('\n') {
@@ -440,6 +451,8 @@ pub fn parse_ics(raw: &str) -> Vec<ParsedIcsEvent> {
         }
         unfolded.push(line.to_string());
     }
+
+    let vtimezones = parse_vtimezones(&unfolded);
 
     let mut events = Vec::new();
     let mut in_event = false;
@@ -542,7 +555,10 @@ pub fn parse_ics(raw: &str) -> Vec<ParsedIcsEvent> {
                 let is_date = params
                     .iter()
                     .any(|p| p.eq_ignore_ascii_case("VALUE=DATE"));
-                if let Some((ts, all_day)) = parse_ics_datetime(value_raw.trim(), is_date) {
+                let tzid = extract_tzid_param(&params);
+                if let Some((ts, all_day)) =
+                    parse_ics_datetime(value_raw.trim(), is_date, tzid, &vtimezones)
+                {
                     start_at = Some((ts, all_day));
                 }
             }
@@ -550,7 +566,10 @@ pub fn parse_ics(raw: &str) -> Vec<ParsedIcsEvent> {
                 let is_date = params
                     .iter()
                     .any(|p| p.eq_ignore_ascii_case("VALUE=DATE"));
-                if let Some((ts, _)) = parse_ics_datetime(value_raw.trim(), is_date) {
+                let tzid = extract_tzid_param(&params);
+                if let Some((ts, _)) =
+                    parse_ics_datetime(value_raw.trim(), is_date, tzid, &vtimezones)
+                {
                     end_at = Some(ts);
                 }
             }
@@ -561,6 +580,106 @@ pub fn parse_ics(raw: &str) -> Vec<ParsedIcsEvent> {
     events
 }
 
+fn parse_vtimezones(lines: &[String]) -> HashMap<String, VTimezoneDef> {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum SubSection {
+        None,
+        Standard,
+        Daylight,
+    }
+
+    let mut map = HashMap::new();
+    let mut in_vtz = false;
+    let mut section = SubSection::None;
+    let mut current_tzid = String::new();
+    let mut current = VTimezoneDef::default();
+
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.eq_ignore_ascii_case("BEGIN:VTIMEZONE") {
+            in_vtz = true;
+            section = SubSection::None;
+            current_tzid.clear();
+            current = VTimezoneDef::default();
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case("END:VTIMEZONE") {
+            if in_vtz && !current_tzid.is_empty() {
+                map.insert(current_tzid.to_ascii_lowercase(), current.clone());
+            }
+            in_vtz = false;
+            section = SubSection::None;
+            continue;
+        }
+        if !in_vtz {
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case("BEGIN:STANDARD") {
+            section = SubSection::Standard;
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case("END:STANDARD") {
+            section = SubSection::None;
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case("BEGIN:DAYLIGHT") {
+            section = SubSection::Daylight;
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case("END:DAYLIGHT") {
+            section = SubSection::None;
+            continue;
+        }
+
+        let Some((prop_part, value_raw)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let prop_name = prop_part.split(';').next().unwrap_or("").to_ascii_uppercase();
+        let val = value_raw.trim().trim_matches('"');
+
+        match prop_name.as_str() {
+            "TZID" if section == SubSection::None => {
+                current_tzid = val.to_string();
+            }
+            "TZOFFSETTO" => {
+                if let Some(secs) = parse_utc_offset_secs(val) {
+                    match section {
+                        SubSection::Standard => current.standard_offset_secs = Some(secs),
+                        SubSection::Daylight => current.daylight_offset_secs = Some(secs),
+                        SubSection::None => {}
+                    }
+                }
+            }
+            "DTSTART" => {
+                if let Ok(dt) = NaiveDateTime::parse_from_str(val.trim_end_matches('Z'), "%Y%m%dT%H%M%S") {
+                    match section {
+                        SubSection::Standard => current.standard_start_month = Some(dt.month()),
+                        SubSection::Daylight => current.daylight_start_month = Some(dt.month()),
+                        SubSection::None => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    map
+}
+
+fn extract_tzid_param<'a>(params: &[&'a str]) -> Option<&'a str> {
+    for param in params {
+        if let Some((k, v)) = param.split_once('=') {
+            if k.eq_ignore_ascii_case("TZID") {
+                let cleaned = v.trim().trim_matches('"').trim();
+                if !cleaned.is_empty() {
+                    return Some(cleaned);
+                }
+            }
+        }
+    }
+    None
+}
+
 fn unescape_ics_text(raw: &str) -> String {
     raw.replace("\\n", "\n")
         .replace("\\N", "\n")
@@ -569,7 +688,12 @@ fn unescape_ics_text(raw: &str) -> String {
         .replace("\\\\", "\\")
 }
 
-fn parse_ics_datetime(raw: &str, force_date: bool) -> Option<(UnixMs, bool)> {
+fn parse_ics_datetime(
+    raw: &str,
+    force_date: bool,
+    tzid: Option<&str>,
+    vtimezones: &HashMap<String, VTimezoneDef>,
+) -> Option<(UnixMs, bool)> {
     let trimmed = raw.trim();
     if force_date || (trimmed.len() == 8 && trimmed.bytes().all(|b| b.is_ascii_digit())) {
         let date = NaiveDate::parse_from_str(trimmed, "%Y%m%d").ok()?;
@@ -581,9 +705,179 @@ fn parse_ics_datetime(raw: &str, force_date: bool) -> Option<(UnixMs, bool)> {
         return Some((UnixMs(Utc.from_utc_datetime(&dt).timestamp_millis()), false));
     }
     if let Ok(dt) = NaiveDateTime::parse_from_str(trimmed, "%Y%m%dT%H%M%S") {
-        return Some((UnixMs(Utc.from_utc_datetime(&dt).timestamp_millis()), false));
+        let offset_secs = tzid
+            .and_then(|tz| resolve_tzid_offset_secs(tz, &dt, vtimezones))
+            .unwrap_or(0);
+        let utc_dt = dt - Duration::seconds(i64::from(offset_secs));
+        return Some((UnixMs(Utc.from_utc_datetime(&utc_dt).timestamp_millis()), false));
     }
     None
+}
+
+/// Parse an RFC 5545 / ISO UTC offset string like `-0600`, `+0530`, `-05:00`, or `UTC+02:00`.
+fn parse_utc_offset_secs(raw: &str) -> Option<i32> {
+    let cleaned = raw
+        .trim()
+        .strip_prefix("UTC")
+        .or_else(|| raw.trim().strip_prefix("GMT"))
+        .unwrap_or(raw.trim())
+        .trim();
+    if cleaned.is_empty() {
+        return None;
+    }
+    let (sign, rest) = if let Some(r) = cleaned.strip_prefix('+') {
+        (1i32, r)
+    } else {
+        let r = cleaned.strip_prefix('-')?;
+        (-1i32, r)
+    };
+    let digits: String = rest.chars().filter(|c| c.is_ascii_digit()).collect();
+    let (hours, mins) = match digits.len() {
+        2 => (digits.parse::<i32>().ok()?, 0),
+        4 => (
+            digits[0..2].parse::<i32>().ok()?,
+            digits[2..4].parse::<i32>().ok()?,
+        ),
+        6 => (
+            digits[0..2].parse::<i32>().ok()?,
+            digits[2..4].parse::<i32>().ok()?,
+        ),
+        _ => return None,
+    };
+    if hours > 14 || mins >= 60 {
+        return None;
+    }
+    Some(sign * (hours * 3600 + mins * 60))
+}
+
+fn nth_weekday_of_month(year: i32, month: u32, weekday: Weekday, n: u32) -> Option<u32> {
+    let first = NaiveDate::from_ymd_opt(year, month, 1)?;
+    let offset = (weekday.num_days_from_monday() as i32
+        - first.weekday().num_days_from_monday() as i32)
+        .rem_euclid(7) as u32;
+    Some(1 + offset + (n.saturating_sub(1)) * 7)
+}
+
+fn last_weekday_of_month(year: i32, month: u32, weekday: Weekday) -> Option<u32> {
+    let next_month = if month == 12 {
+        NaiveDate::from_ymd_opt(year + 1, 1, 1)?
+    } else {
+        NaiveDate::from_ymd_opt(year, month + 1, 1)?
+    };
+    let last = next_month - Duration::days(1);
+    let back = (last.weekday().num_days_from_monday() as i32
+        - weekday.num_days_from_monday() as i32)
+        .rem_euclid(7) as u32;
+    Some(last.day().saturating_sub(back))
+}
+
+fn is_us_dst(dt: &NaiveDateTime) -> bool {
+    let m = dt.month();
+    if !(3..=11).contains(&m) {
+        return false;
+    }
+    if m > 3 && m < 11 {
+        return true;
+    }
+    if m == 3 {
+        let start_day = nth_weekday_of_month(dt.year(), 3, Weekday::Sun, 2).unwrap_or(14);
+        return dt.day() > start_day || (dt.day() == start_day && dt.hour() >= 2);
+    }
+    let end_day = nth_weekday_of_month(dt.year(), 11, Weekday::Sun, 1).unwrap_or(7);
+    dt.day() < end_day || (dt.day() == end_day && dt.hour() < 2)
+}
+
+fn is_eu_dst(dt: &NaiveDateTime) -> bool {
+    let m = dt.month();
+    if !(3..=10).contains(&m) {
+        return false;
+    }
+    if m > 3 && m < 10 {
+        return true;
+    }
+    if m == 3 {
+        let start_day = last_weekday_of_month(dt.year(), 3, Weekday::Sun).unwrap_or(28);
+        return dt.day() > start_day || (dt.day() == start_day && dt.hour() >= 1);
+    }
+    let end_day = last_weekday_of_month(dt.year(), 10, Weekday::Sun).unwrap_or(28);
+    dt.day() < end_day || (dt.day() == end_day && dt.hour() < 1)
+}
+
+fn resolve_tzid_offset_secs(
+    tzid: &str,
+    dt: &NaiveDateTime,
+    vtimezones: &HashMap<String, VTimezoneDef>,
+) -> Option<i32> {
+    let key = tzid.trim().trim_matches('"').to_ascii_lowercase();
+    if matches!(key.as_str(), "utc" | "gmt" | "etc/utc" | "etc/gmt" | "z") {
+        return Some(0);
+    }
+
+    if let Some(vtz) = vtimezones.get(&key) {
+        match (vtz.standard_offset_secs, vtz.daylight_offset_secs) {
+            (Some(std_s), Some(dst_s)) => {
+                let dst_m = vtz.daylight_start_month.unwrap_or(3);
+                let std_m = vtz.standard_start_month.unwrap_or(11);
+                let m = dt.month();
+                let in_dst = if dst_m == 3 && std_m == 11 {
+                    is_us_dst(dt)
+                } else if dst_m == 3 && std_m == 10 {
+                    is_eu_dst(dt)
+                } else if dst_m < std_m {
+                    m >= dst_m && m < std_m
+                } else {
+                    m >= dst_m || m < std_m
+                };
+                return Some(if in_dst { dst_s } else { std_s });
+            }
+            (Some(std_s), None) => return Some(std_s),
+            (None, Some(dst_s)) => return Some(dst_s),
+            (None, None) => {}
+        }
+    }
+
+    if let Some(secs) = parse_utc_offset_secs(tzid) {
+        return Some(secs);
+    }
+
+    // Well-known IANA and Windows TZID fallback table.
+    match key.as_str() {
+        "america/new_york" | "us/eastern" | "eastern standard time" | "est5edt" => {
+            Some(if is_us_dst(dt) { -4 * 3600 } else { -5 * 3600 })
+        }
+        "america/chicago" | "us/central" | "central standard time" | "cst6cdt" => {
+            Some(if is_us_dst(dt) { -5 * 3600 } else { -6 * 3600 })
+        }
+        "america/denver" | "us/mountain" | "mountain standard time" | "mst7mdt" => {
+            Some(if is_us_dst(dt) { -6 * 3600 } else { -7 * 3600 })
+        }
+        "america/los_angeles" | "us/pacific" | "pacific standard time" | "pst8pdt" => {
+            Some(if is_us_dst(dt) { -7 * 3600 } else { -8 * 3600 })
+        }
+        "america/phoenix" | "us mountain standard time" => Some(-7 * 3600),
+        "america/anchorage" | "alaskan standard time" => {
+            Some(if is_us_dst(dt) { -8 * 3600 } else { -9 * 3600 })
+        }
+        "pacific/honolulu" | "hawaiian standard time" => Some(-10 * 3600),
+        "europe/london" | "gmt standard time" => {
+            Some(if is_eu_dst(dt) { 3600 } else { 0 })
+        }
+        "europe/paris"
+        | "europe/berlin"
+        | "europe/amsterdam"
+        | "europe/madrid"
+        | "europe/rome"
+        | "w. europe standard time"
+        | "central european standard time"
+        | "romance standard time" => Some(if is_eu_dst(dt) { 2 * 3600 } else { 3600 }),
+        "asia/tokyo" | "tokyo standard time" => Some(9 * 3600),
+        "asia/kolkata" | "india standard time" => Some(5 * 3600 + 30 * 60),
+        "australia/sydney" | "aus eastern standard time" => {
+            let m = dt.month();
+            Some(if !(4..10).contains(&m) { 11 * 3600 } else { 10 * 3600 })
+        }
+        _ => None,
+    }
 }
 
 // ── Recurrence Expansion ────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/mail-core", "src-tauri"]
+members = ["crates/mail-core", "crates/staff-sync-server", "src-tauri"]
 resolver = "2"
 
 [workspace.package]

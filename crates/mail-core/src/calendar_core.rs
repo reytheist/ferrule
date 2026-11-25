@@ -18,6 +18,7 @@ use crate::events::CoreEvent;
 use crate::ids::{ActionItemId, CalendarEventId, IcsOverlayId, UnixMs};
 use crate::staff::normalize_handle;
 use crate::store;
+use crate::sync::staff::StaffOutboxOp;
 use crate::MailCore;
 
 impl MailCore {
@@ -36,25 +37,22 @@ impl MailCore {
         input: SaveCalendarEventInput,
     ) -> Result<CalendarEventView, CoreError> {
         let ws = self.get_staff_workspace().await?;
-        let actor = if ws.connected && !ws.staff_handle.is_empty() {
-            ws.staff_handle.clone()
-        } else {
-            "staff".to_string()
-        };
+        let actor = self.staff_actor_handle(&ws);
         let now = self.now();
         let saved = self
             .inner
             .store
             .with_conn(|conn| store::save_calendar_event(conn, &input, &actor, now))?;
 
-        if ws.connected {
-            if let Some(client) = self.remote_staff_client(&ws)? {
-                if client.push_calendar_event(&saved).await.is_err() {
-                    self.mark_staff_offline("Calendar event saved locally (offline)");
-                }
-            }
-        }
-        self.emit(CoreEvent::CalendarChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            vec![StaffOutboxOp::UpsertCalendarEvent {
+                event: saved.clone(),
+            }],
+            "Calendar event saved locally (offline)",
+            CoreEvent::CalendarChanged,
+        )
+        .await?;
         Ok(saved)
     }
 
@@ -77,12 +75,13 @@ impl MailCore {
             });
         }
         let ws = self.get_staff_workspace().await?;
-        if ws.connected {
-            if let Some(client) = self.remote_staff_client(&ws)? {
-                let _ = client.delete_calendar_event(id).await;
-            }
-        }
-        self.emit(CoreEvent::CalendarChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            vec![StaffOutboxOp::DeleteCalendarEvent { id }],
+            "Calendar event deletion queued locally (offline)",
+            CoreEvent::CalendarChanged,
+        )
+        .await?;
         Ok(())
     }
 
@@ -106,16 +105,8 @@ impl MailCore {
         input: UpdateMeetingDocInput,
     ) -> Result<MeetingDocView, CoreError> {
         let ws = self.get_staff_workspace().await?;
-        let actor_handle = if ws.connected && !ws.staff_handle.is_empty() {
-            ws.staff_handle.clone()
-        } else {
-            "staff".to_string()
-        };
-        let actor_name = if ws.connected && !ws.staff_name.is_empty() {
-            ws.staff_name.clone()
-        } else {
-            "Pigment Staff".to_string()
-        };
+        let actor_handle = self.staff_actor_handle(&ws);
+        let actor_name = self.staff_actor_name(&ws);
         let now = self.now();
 
         let updated = self.inner.store.with_conn(|conn| {
@@ -177,14 +168,15 @@ impl MailCore {
             Ok(doc)
         })?;
 
-        if ws.connected {
-            if let Some(client) = self.remote_staff_client(&ws)? {
-                if client.push_meeting_doc(&updated).await.is_err() {
-                    self.mark_staff_offline("Meeting doc saved locally (offline)");
-                }
-            }
-        }
-        self.emit(CoreEvent::CalendarChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            vec![StaffOutboxOp::UpsertMeetingDoc {
+                doc: updated.clone(),
+            }],
+            "Meeting doc saved locally (offline)",
+            CoreEvent::CalendarChanged,
+        )
+        .await?;
         Ok(updated)
     }
 
@@ -200,11 +192,7 @@ impl MailCore {
             });
         }
         let ws = self.get_staff_workspace().await?;
-        let actor = if ws.connected && !ws.staff_handle.is_empty() {
-            ws.staff_handle.clone()
-        } else {
-            "staff".to_string()
-        };
+        let actor = self.staff_actor_handle(&ws);
         let now = self.now();
 
         let (item, updated_doc) = self.inner.store.with_conn(|conn| {
@@ -260,20 +248,19 @@ impl MailCore {
             Ok((item, updated_doc))
         })?;
 
-        if ws.connected {
-            if let Some(client) = self.remote_staff_client(&ws)? {
-                let mut push_failed = client.push_action_item(&item).await.is_err();
-                if let Some(doc) = &updated_doc {
-                    if client.push_meeting_doc(doc).await.is_err() {
-                        push_failed = true;
-                    }
-                }
-                if push_failed {
-                    self.mark_staff_offline("Action item saved locally (offline)");
-                }
-            }
+        let mut ops = vec![StaffOutboxOp::UpsertActionItem {
+            item: item.clone(),
+        }];
+        if let Some(doc) = updated_doc {
+            ops.push(StaffOutboxOp::UpsertMeetingDoc { doc });
         }
-        self.emit(CoreEvent::CalendarChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            ops,
+            "Action item saved locally (offline)",
+            CoreEvent::CalendarChanged,
+        )
+        .await?;
         Ok(item)
     }
 
@@ -291,14 +278,15 @@ impl MailCore {
                 entity: "actionItem".to_string(),
             })?;
         let ws = self.get_staff_workspace().await?;
-        if ws.connected {
-            if let Some(client) = self.remote_staff_client(&ws)? {
-                if client.push_action_item(&updated).await.is_err() {
-                    self.mark_staff_offline("Action item saved locally (offline)");
-                }
-            }
-        }
-        self.emit(CoreEvent::CalendarChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            vec![StaffOutboxOp::UpsertActionItem {
+                item: updated.clone(),
+            }],
+            "Action item saved locally (offline)",
+            CoreEvent::CalendarChanged,
+        )
+        .await?;
         Ok(updated)
     }
 
@@ -318,11 +306,7 @@ impl MailCore {
             });
         }
         let ws = self.get_staff_workspace().await?;
-        let actor = if ws.connected && !ws.staff_handle.is_empty() {
-            ws.staff_handle.clone()
-        } else {
-            "staff".to_string()
-        };
+        let actor = self.staff_actor_handle(&ws);
         let now = self.now();
 
         let (saved, synced_event) = self.inner.store.with_conn(|conn| {
@@ -417,17 +401,20 @@ impl MailCore {
             Ok((item, synced_event))
         })?;
 
-        if ws.connected {
-            if let Some(client) = self.remote_staff_client(&ws)? {
-                if client.push_action_item(&saved).await.is_err() {
-                    self.mark_staff_offline("Action item saved locally (offline)");
-                }
-                if let Some(ev) = &synced_event {
-                    let _ = client.push_calendar_event(ev).await;
-                }
-            }
+        let mut ops = Vec::new();
+        if let Some(ev) = synced_event {
+            ops.push(StaffOutboxOp::UpsertCalendarEvent { event: ev });
         }
-        self.emit(CoreEvent::CalendarChanged);
+        ops.push(StaffOutboxOp::UpsertActionItem {
+            item: saved.clone(),
+        });
+        self.push_or_queue_staff_ops(
+            &ws,
+            ops,
+            "Action item saved locally (offline)",
+            CoreEvent::CalendarChanged,
+        )
+        .await?;
         Ok(saved)
     }
 
@@ -442,12 +429,13 @@ impl MailCore {
             });
         }
         let ws = self.get_staff_workspace().await?;
-        if ws.connected {
-            if let Some(client) = self.remote_staff_client(&ws)? {
-                let _ = client.delete_action_item(id).await;
-            }
-        }
-        self.emit(CoreEvent::CalendarChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            vec![StaffOutboxOp::DeleteActionItem { id }],
+            "Action item deletion queued locally (offline)",
+            CoreEvent::CalendarChanged,
+        )
+        .await?;
         Ok(())
     }
 

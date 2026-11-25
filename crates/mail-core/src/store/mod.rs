@@ -44,6 +44,7 @@ const MIGRATION_0006_ACTION_ITEM_SCHEDULE: &str = "\
 ALTER TABLE action_item ADD COLUMN start_time TEXT;
 ALTER TABLE action_item ADD COLUMN end_time TEXT;
 ALTER TABLE action_item ADD COLUMN calendar_event_id BLOB REFERENCES calendar_event(id) ON DELETE SET NULL;";
+const MIGRATION_0007_STAFF_OUTBOX: &str = include_str!("0004_staff_outbox.sql");
 
 pub(crate) struct Store {
     conn: Mutex<Connection>,
@@ -103,6 +104,10 @@ impl Store {
                     reason: format!("run migration 0006: {e}"),
                 })?;
         }
+        conn.execute_batch(MIGRATION_0007_STAFF_OUTBOX)
+            .map_err(|e| CoreError::Storage {
+                reason: format!("run migration 0007: {e}"),
+            })?;
         Ok(Self {
             conn: Mutex::new(conn),
         })

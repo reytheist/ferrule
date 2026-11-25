@@ -71,6 +71,109 @@ pub enum StaffSyncEvent {
     Heartbeat,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    tag = "op",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub(crate) enum StaffOutboxOp {
+    UpsertMember {
+        member: StaffMemberView,
+    },
+    UpsertSharedThread {
+        thread: SharedThreadView,
+    },
+    UpdateHandoff {
+        shared_thread_id: SharedThreadId,
+        assignee_handle: Option<String>,
+        status: HandoffStatus,
+    },
+    AddComment {
+        comment: SharedCommentView,
+    },
+    UpsertDraft {
+        draft: SharedDraftView,
+    },
+    UpsertSharedTemplate {
+        template: SharedTemplateView,
+    },
+    DeleteSharedTemplate {
+        id: SharedTemplateId,
+    },
+    UpsertContact {
+        contact: ShowContactView,
+    },
+    DeleteContact {
+        id: ContactId,
+    },
+    UpsertPinnedLink {
+        link: PinnedLinkView,
+    },
+    DeletePinnedLink {
+        id: PinnedLinkId,
+    },
+    UpsertCalendarEvent {
+        event: CalendarEventView,
+    },
+    DeleteCalendarEvent {
+        id: CalendarEventId,
+    },
+    UpsertMeetingDoc {
+        doc: MeetingDocView,
+    },
+    UpsertActionItem {
+        item: ActionItemView,
+    },
+    DeleteActionItem {
+        id: ActionItemId,
+    },
+}
+
+impl StaffOutboxOp {
+    pub(crate) fn kind_key(&self) -> &'static str {
+        match self {
+            Self::UpsertMember { .. } => "upsert_member",
+            Self::UpsertSharedThread { .. } => "upsert_shared_thread",
+            Self::UpdateHandoff { .. } => "update_handoff",
+            Self::AddComment { .. } => "add_comment",
+            Self::UpsertDraft { .. } => "upsert_draft",
+            Self::UpsertSharedTemplate { .. } => "upsert_shared_template",
+            Self::DeleteSharedTemplate { .. } => "delete_shared_template",
+            Self::UpsertContact { .. } => "upsert_contact",
+            Self::DeleteContact { .. } => "delete_contact",
+            Self::UpsertPinnedLink { .. } => "upsert_pinned_link",
+            Self::DeletePinnedLink { .. } => "delete_pinned_link",
+            Self::UpsertCalendarEvent { .. } => "upsert_calendar_event",
+            Self::DeleteCalendarEvent { .. } => "delete_calendar_event",
+            Self::UpsertMeetingDoc { .. } => "upsert_meeting_doc",
+            Self::UpsertActionItem { .. } => "upsert_action_item",
+            Self::DeleteActionItem { .. } => "delete_action_item",
+        }
+    }
+
+    pub(crate) fn entity_key(&self) -> String {
+        match self {
+            Self::UpsertMember { member } => member.id.to_string(),
+            Self::UpsertSharedThread { thread } => thread.id.to_string(),
+            Self::UpdateHandoff { shared_thread_id, .. } => shared_thread_id.to_string(),
+            Self::AddComment { comment } => comment.id.to_string(),
+            Self::UpsertDraft { draft } => draft.shared_thread_id.to_string(),
+            Self::UpsertSharedTemplate { template } => template.id.to_string(),
+            Self::DeleteSharedTemplate { id } => id.to_string(),
+            Self::UpsertContact { contact } => contact.id.to_string(),
+            Self::DeleteContact { id } => id.to_string(),
+            Self::UpsertPinnedLink { link } => link.id.to_string(),
+            Self::DeletePinnedLink { id } => id.to_string(),
+            Self::UpsertCalendarEvent { event } => event.id.to_string(),
+            Self::DeleteCalendarEvent { id } => id.to_string(),
+            Self::UpsertMeetingDoc { doc } => doc.event_id.to_string(),
+            Self::UpsertActionItem { item } => item.id.to_string(),
+            Self::DeleteActionItem { id } => id.to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct StaffSyncClient {
     base_url: String,
@@ -146,6 +249,71 @@ impl StaffSyncClient {
                 reason: format!("invalid Staff Sync snapshot JSON: {e}"),
                 retryable: false,
             })
+    }
+
+    pub(crate) async fn push_member(&self, member: &StaffMemberView) -> Result<(), CoreError> {
+        let url = format!("{}/v1/members/{}", self.base_url, member.id);
+        self.put_json(&url, member).await
+    }
+
+    pub(crate) async fn execute_op(&self, op: &StaffOutboxOp) -> Result<(), CoreError> {
+        match op {
+            StaffOutboxOp::UpsertMember { member } => self.push_member(member).await,
+            StaffOutboxOp::UpsertSharedThread { thread } => self.push_shared_thread(thread).await,
+            StaffOutboxOp::UpdateHandoff {
+                shared_thread_id,
+                assignee_handle,
+                status,
+            } => {
+                self.push_handoff(*shared_thread_id, assignee_handle.as_deref(), *status)
+                    .await
+            }
+            StaffOutboxOp::AddComment { comment } => self.push_comment(comment).await,
+            StaffOutboxOp::UpsertDraft { draft } => self.push_draft(draft).await,
+            StaffOutboxOp::UpsertSharedTemplate { template } => {
+                self.push_shared_template(template).await
+            }
+            StaffOutboxOp::DeleteSharedTemplate { id } => self.delete_shared_template(*id).await,
+            StaffOutboxOp::UpsertContact { contact } => self.push_contact(contact).await,
+            StaffOutboxOp::DeleteContact { id } => self.delete_contact(*id).await,
+            StaffOutboxOp::UpsertPinnedLink { link } => self.push_pinned_link(link).await,
+            StaffOutboxOp::DeletePinnedLink { id } => self.delete_pinned_link(*id).await,
+            StaffOutboxOp::UpsertCalendarEvent { event } => self.push_calendar_event(event).await,
+            StaffOutboxOp::DeleteCalendarEvent { id } => self.delete_calendar_event(*id).await,
+            StaffOutboxOp::UpsertMeetingDoc { doc } => self.push_meeting_doc(doc).await,
+            StaffOutboxOp::UpsertActionItem { item } => self.push_action_item(item).await,
+            StaffOutboxOp::DeleteActionItem { id } => self.delete_action_item(*id).await,
+        }
+    }
+
+    /// Open a long-lived Server-Sent Events (`text/event-stream`) connection without
+    /// applying the short request timeout used for unary JSON calls.
+    pub(crate) async fn open_event_stream(&self) -> Result<reqwest::Response, CoreError> {
+        let sse_client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| CoreError::Network {
+                reason: format!("init Staff Sync SSE client: {e}"),
+                retryable: true,
+            })?;
+        let url = format!("{}/v1/events", self.base_url);
+        let resp = sse_client
+            .get(&url)
+            .bearer_auth(&self.token)
+            .header("Accept", "text/event-stream")
+            .send()
+            .await
+            .map_err(|e| CoreError::Network {
+                reason: format!("Staff Sync SSE unreachable: {e}"),
+                retryable: true,
+            })?;
+        if !resp.status().is_success() {
+            return Err(CoreError::Network {
+                reason: format!("Staff Sync SSE returned HTTP {}", resp.status().as_u16()),
+                retryable: resp.status().is_server_error(),
+            });
+        }
+        Ok(resp)
     }
 
     pub(crate) async fn push_shared_thread(&self, thread: &SharedThreadView) -> Result<(), CoreError> {

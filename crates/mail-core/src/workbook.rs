@@ -26,6 +26,7 @@ use crate::events::CoreEvent;
 use crate::ids::{ActionItemId, ContactId, UnixMs};
 use crate::staff::{normalize_handle, ContactCategory, ShowContactView};
 use crate::store;
+use crate::sync::staff::StaffOutboxOp;
 use crate::MailCore;
 
 pub const PIGMENT_DEPARTMENTS: &[&str] = &[
@@ -592,11 +593,7 @@ impl MailCore {
         }
 
         let ws = self.get_staff_workspace().await?;
-        let actor = if ws.connected && !ws.staff_handle.is_empty() {
-            ws.staff_handle.clone()
-        } else {
-            "staff".to_string()
-        };
+        let actor = self.staff_actor_handle(&ws);
         let now = self.now();
 
         let (report, synced_items, synced_events, synced_contacts) =
@@ -937,24 +934,36 @@ impl MailCore {
             })?;
 
         if !input.dry_run {
-            if ws.connected {
-                if let Some(client) = self.remote_staff_client(&ws)? {
-                    for item in &synced_items {
-                        let _ = client.push_action_item(item).await;
-                    }
-                    for ev in &synced_events {
-                        let _ = client.push_calendar_event(ev).await;
-                    }
-                    for contact in &synced_contacts {
-                        let _ = client.push_contact(contact).await;
-                    }
+            let has_cal = !synced_items.is_empty() || !synced_events.is_empty();
+            let has_contacts = !synced_contacts.is_empty();
+            let mut ops = Vec::with_capacity(
+                synced_events.len() + synced_items.len() + synced_contacts.len(),
+            );
+            for ev in synced_events {
+                ops.push(StaffOutboxOp::UpsertCalendarEvent { event: ev });
+            }
+            for item in synced_items {
+                ops.push(StaffOutboxOp::UpsertActionItem { item });
+            }
+            for contact in synced_contacts {
+                ops.push(StaffOutboxOp::UpsertContact { contact });
+            }
+            if !ops.is_empty() {
+                let primary_event = if has_cal {
+                    CoreEvent::CalendarChanged
+                } else {
+                    CoreEvent::StaffChanged
+                };
+                self.push_or_queue_staff_ops(
+                    &ws,
+                    ops,
+                    "Workbook import saved locally (offline)",
+                    primary_event,
+                )
+                .await?;
+                if has_cal && has_contacts {
+                    self.emit(CoreEvent::StaffChanged);
                 }
-            }
-            if !synced_items.is_empty() || !synced_events.is_empty() {
-                self.emit(CoreEvent::CalendarChanged);
-            }
-            if !synced_contacts.is_empty() {
-                self.emit(CoreEvent::StaffChanged);
             }
         }
 

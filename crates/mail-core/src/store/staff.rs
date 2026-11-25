@@ -1069,3 +1069,59 @@ pub(crate) fn seed_local_pigment_demo(
 
     Ok(())
 }
+
+// ---------------------------------------------------------------- offline outbox
+
+pub(crate) struct StaffOutboxEntry {
+    pub seq: i64,
+    pub op: crate::sync::staff::StaffOutboxOp,
+}
+
+pub(crate) fn enqueue_staff_outbox(
+    conn: &mut Connection,
+    op: &crate::sync::staff::StaffOutboxOp,
+    now: UnixMs,
+) -> Result<(), CoreError> {
+    let payload = to_json(op)?;
+    conn.execute(
+        "INSERT INTO staff_outbox (op_kind, entity_key, payload_json, created_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![op.kind_key(), op.entity_key(), payload, now.0],
+    )
+    .sq()?;
+    Ok(())
+}
+
+pub(crate) fn list_staff_outbox(
+    conn: &mut Connection,
+) -> Result<Vec<StaffOutboxEntry>, CoreError> {
+    query_all(
+        conn,
+        "SELECT seq, payload_json FROM staff_outbox ORDER BY seq ASC",
+        [],
+        |r| {
+            let seq: i64 = r.get(0).sq()?;
+            let raw: String = r.get(1).sq()?;
+            let op = from_json(&raw)?;
+            Ok(StaffOutboxEntry { seq, op })
+        },
+    )
+}
+
+pub(crate) fn delete_staff_outbox_item(conn: &mut Connection, seq: i64) -> Result<(), CoreError> {
+    conn.execute("DELETE FROM staff_outbox WHERE seq = ?1", params![seq])
+        .sq()?;
+    Ok(())
+}
+
+pub(crate) fn clear_staff_outbox(conn: &mut Connection) -> Result<(), CoreError> {
+    conn.execute("DELETE FROM staff_outbox", []).sq()?;
+    Ok(())
+}
+
+pub(crate) fn count_staff_outbox(conn: &mut Connection) -> Result<usize, CoreError> {
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM staff_outbox", [], |r| r.get(0))
+        .sq()?;
+    Ok(count.max(0) as usize)
+}

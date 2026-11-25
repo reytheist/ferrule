@@ -1,4 +1,8 @@
-//! `MailCore` facade methods for Phase B: Pigment Staff Sync & Email Collaboration.
+//! `MailCore` facade methods for Phase B & E: Pigment Staff Sync, Live SSE,
+//! Durable Offline Outbox, and Email Collaboration.
+
+use std::sync::{Arc, Weak};
+use std::time::Duration;
 
 use crate::auth::{SecretKey, SecretString};
 use crate::error::CoreError;
@@ -16,9 +20,9 @@ use crate::staff::{
     StaffWorkspaceView, UpdateHandoffInput, UpdateSharedDraftInput,
 };
 use crate::store;
-use crate::sync::staff::{StaffSyncClient, StaffSyncSnapshot};
+use crate::sync::staff::{parse_sse_frame, StaffOutboxOp, StaffSyncClient, StaffSyncEvent, StaffSyncSnapshot};
 use crate::types::{RemoteContent, SpaceKind};
-use crate::MailCore;
+use crate::{MailCore, MailCoreInner};
 
 impl MailCore {
     // ---------------------------------------------------------------- staff workspace
@@ -97,6 +101,7 @@ impl MailCore {
         };
 
         if server_url.starts_with("local://") {
+            self.stop_staff_sync_listener();
             let ws = self.inner.store.with_conn(|conn| {
                 let ws = store::upsert_staff_workspace(
                     conn,
@@ -119,9 +124,13 @@ impl MailCore {
             return Ok(ws);
         }
 
-        // Real HTTP/HTTPS Staff Sync server: persist local workspace first, then try initial pull.
+        // Real HTTP/HTTPS Staff Sync server: push member profile, flush any queued ops, then pull.
         let client = StaffSyncClient::new(&server_url, &token)?;
-        let pull_res = client.pull_snapshot(None).await;
+        let member_push = client.push_member(&current_member).await;
+        let pull_res = match member_push {
+            Ok(()) => client.pull_snapshot(None).await,
+            Err(err) => Err(err),
+        };
         let ws = self.inner.store.with_conn(|conn| {
             let (status, err_msg) = match &pull_res {
                 Ok(_) => (StaffSyncStatus::Connected, None),
@@ -143,21 +152,38 @@ impl MailCore {
             store::upsert_staff_member(conn, &current_member)?;
             if let Ok(snapshot) = &pull_res {
                 apply_snapshot_tx(conn, snapshot)?;
+            } else {
+                store::enqueue_staff_outbox(
+                    conn,
+                    &StaffOutboxOp::UpsertMember {
+                        member: current_member.clone(),
+                    },
+                    now,
+                )?;
             }
             Ok(ws)
         })?;
+        self.start_staff_sync_listener();
         self.emit(CoreEvent::StaffChanged);
         Ok(ws)
     }
 
     pub async fn disconnect_staff_workspace(&self) -> Result<(), CoreError> {
+        self.stop_staff_sync_listener();
         self.inner
             .host
             .secrets
             .delete(&SecretKey::staff_sync_token())?;
-        self.inner.store.with_conn(store::delete_staff_workspace)?;
+        self.inner.store.with_conn(|conn| {
+            store::clear_staff_outbox(conn)?;
+            store::delete_staff_workspace(conn)
+        })?;
         self.emit(CoreEvent::StaffChanged);
         Ok(())
+    }
+
+    pub async fn pending_staff_outbox_count(&self) -> Result<usize, CoreError> {
+        self.inner.store.with_conn(store::count_staff_outbox)
     }
 
     pub async fn sync_staff_workspace(&self) -> Result<StaffWorkspaceView, CoreError> {
@@ -194,8 +220,36 @@ impl MailCore {
         };
 
         let client = StaffSyncClient::new(&ws.server_url, token.expose())?;
-        match client.pull_snapshot(ws.last_sync_at).await {
+
+        // Flush any queued offline mutations before pulling the server snapshot.
+        let flushed = match self.flush_staff_outbox(&client).await {
+            Ok(count) => count,
+            Err(err) => {
+                let reason = err.to_string();
+                self.inner.store.with_conn(|conn| {
+                    store::update_staff_sync_status(
+                        conn,
+                        StaffSyncStatus::Offline,
+                        None,
+                        Some(&reason),
+                    )
+                })?;
+                self.emit(CoreEvent::StaffChanged);
+                return self.get_staff_workspace().await;
+            }
+        };
+
+        let since = if ws.status != StaffSyncStatus::Connected || flushed > 0 {
+            None
+        } else {
+            ws.last_sync_at
+        };
+
+        match client.pull_snapshot(since).await {
             Ok(snapshot) => {
+                let has_cal = !snapshot.calendar_events.is_empty()
+                    || !snapshot.meeting_docs.is_empty()
+                    || !snapshot.action_items.is_empty();
                 self.inner.store.with_conn(|conn| {
                     apply_snapshot_tx(conn, &snapshot)?;
                     store::update_staff_sync_status(
@@ -205,6 +259,9 @@ impl MailCore {
                         None,
                     )
                 })?;
+                if has_cal {
+                    self.emit(CoreEvent::CalendarChanged);
+                }
             }
             Err(err) => {
                 let reason = err.to_string();
@@ -220,6 +277,35 @@ impl MailCore {
         }
         self.emit(CoreEvent::StaffChanged);
         self.get_staff_workspace().await
+    }
+
+    /// Start (or restart) the background SSE subscriber if a remote Staff Sync
+    /// workspace is configured. Safe to call when disconnected or in `local://` mode.
+    pub fn start_staff_sync_listener(&self) {
+        self.stop_staff_sync_listener();
+        let Ok(ws) = self.inner.store.with_conn(store::get_staff_workspace) else {
+            return;
+        };
+        if !ws.connected || ws.server_url.starts_with("local://") {
+            return;
+        }
+        let Ok(rt) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let weak: Weak<MailCoreInner> = Arc::downgrade(&self.inner);
+        let handle = rt.spawn(run_staff_sse_loop(weak));
+        if let Ok(mut slot) = self.inner.staff_sse_task.lock() {
+            *slot = Some(handle);
+        }
+    }
+
+    /// Stop any running background SSE subscriber.
+    pub fn stop_staff_sync_listener(&self) {
+        if let Ok(mut slot) = self.inner.staff_sse_task.lock() {
+            if let Some(handle) = slot.take() {
+                handle.abort();
+            }
+        }
     }
 
     pub async fn list_staff_directory(&self) -> Result<Vec<StaffMemberView>, CoreError> {
@@ -407,15 +493,19 @@ impl MailCore {
             Ok((full, initial_comment))
         })?;
 
-        if let Some(client) = self.remote_staff_client(&ws)? {
-            if client.push_shared_thread(&shared).await.is_err() {
-                self.mark_staff_offline("Thread saved locally (offline)");
-            } else if let Some(comment) = &initial_comment {
-                let _ = client.push_comment(comment).await;
-            }
+        let mut ops = vec![StaffOutboxOp::UpsertSharedThread {
+            thread: shared.clone(),
+        }];
+        if let Some(comment) = initial_comment {
+            ops.push(StaffOutboxOp::AddComment { comment });
         }
-
-        self.emit(CoreEvent::StaffChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            ops,
+            "Thread saved locally (offline)",
+            CoreEvent::StaffChanged,
+        )
+        .await?;
         Ok(shared)
     }
 
@@ -449,17 +539,17 @@ impl MailCore {
             })
         })?;
 
-        if let Some(client) = self.remote_staff_client(&ws)? {
-            if client
-                .push_handoff(input.shared_thread_id, assignee.as_deref(), input.status)
-                .await
-                .is_err()
-            {
-                self.mark_staff_offline("Handoff saved locally (offline)");
-            }
-        }
-
-        self.emit(CoreEvent::StaffChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            vec![StaffOutboxOp::UpdateHandoff {
+                shared_thread_id: input.shared_thread_id,
+                assignee_handle: assignee,
+                status: input.status,
+            }],
+            "Handoff saved locally (offline)",
+            CoreEvent::StaffChanged,
+        )
+        .await?;
         Ok(updated)
     }
 
@@ -495,13 +585,15 @@ impl MailCore {
             store::insert_shared_comment(conn, &comment)
         })?;
 
-        if let Some(client) = self.remote_staff_client(&ws)? {
-            if client.push_comment(&comment).await.is_err() {
-                self.mark_staff_offline("Comment saved locally (offline)");
-            }
-        }
-
-        self.emit(CoreEvent::StaffChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            vec![StaffOutboxOp::AddComment {
+                comment: comment.clone(),
+            }],
+            "Comment saved locally (offline)",
+            CoreEvent::StaffChanged,
+        )
+        .await?;
         Ok(comment)
     }
 
@@ -683,15 +775,19 @@ impl MailCore {
             Ok((draft, auto_comment))
         })?;
 
-        if let Some(client) = self.remote_staff_client(&ws)? {
-            if client.push_draft(&draft).await.is_err() {
-                self.mark_staff_offline("Draft saved locally (offline)");
-            } else if let Some(comment) = &auto_comment {
-                let _ = client.push_comment(comment).await;
-            }
+        let mut ops = vec![StaffOutboxOp::UpsertDraft {
+            draft: draft.clone(),
+        }];
+        if let Some(comment) = auto_comment {
+            ops.push(StaffOutboxOp::AddComment { comment });
         }
-
-        self.emit(CoreEvent::StaffChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            ops,
+            "Draft saved locally (offline)",
+            CoreEvent::StaffChanged,
+        )
+        .await?;
         Ok(draft)
     }
 
@@ -706,22 +802,21 @@ impl MailCore {
         input: SaveSharedTemplateInput,
     ) -> Result<SharedTemplateView, CoreError> {
         let ws = self.get_staff_workspace().await?;
-        let actor = if ws.connected && !ws.staff_handle.is_empty() {
-            ws.staff_handle.clone()
-        } else {
-            "staff".to_string()
-        };
+        let actor = self.staff_actor_handle(&ws);
         let now = self.now();
         let saved = self
             .inner
             .store
             .with_conn(|conn| store::save_shared_template(conn, &input, &actor, now))?;
-        if ws.connected {
-            if let Some(client) = self.remote_staff_client(&ws)? {
-                let _ = client.push_shared_template(&saved).await;
-            }
-        }
-        self.emit(CoreEvent::StaffChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            vec![StaffOutboxOp::UpsertSharedTemplate {
+                template: saved.clone(),
+            }],
+            "Template saved locally (offline)",
+            CoreEvent::StaffChanged,
+        )
+        .await?;
         Ok(saved)
     }
 
@@ -736,12 +831,13 @@ impl MailCore {
             });
         }
         let ws = self.get_staff_workspace().await?;
-        if ws.connected {
-            if let Some(client) = self.remote_staff_client(&ws)? {
-                let _ = client.delete_shared_template(id).await;
-            }
-        }
-        self.emit(CoreEvent::StaffChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            vec![StaffOutboxOp::DeleteSharedTemplate { id }],
+            "Template deletion queued locally (offline)",
+            CoreEvent::StaffChanged,
+        )
+        .await?;
         Ok(())
     }
 
@@ -770,12 +866,15 @@ impl MailCore {
             .store
             .with_conn(|conn| store::save_show_contact(conn, &input, now))?;
         let ws = self.get_staff_workspace().await?;
-        if ws.connected {
-            if let Some(client) = self.remote_staff_client(&ws)? {
-                let _ = client.push_contact(&saved).await;
-            }
-        }
-        self.emit(CoreEvent::StaffChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            vec![StaffOutboxOp::UpsertContact {
+                contact: saved.clone(),
+            }],
+            "Contact saved locally (offline)",
+            CoreEvent::StaffChanged,
+        )
+        .await?;
         Ok(saved)
     }
 
@@ -790,12 +889,13 @@ impl MailCore {
             });
         }
         let ws = self.get_staff_workspace().await?;
-        if ws.connected {
-            if let Some(client) = self.remote_staff_client(&ws)? {
-                let _ = client.delete_contact(id).await;
-            }
-        }
-        self.emit(CoreEvent::StaffChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            vec![StaffOutboxOp::DeleteContact { id }],
+            "Contact deletion queued locally (offline)",
+            CoreEvent::StaffChanged,
+        )
+        .await?;
         Ok(())
     }
 
@@ -815,12 +915,15 @@ impl MailCore {
             .store
             .with_conn(|conn| store::save_pinned_link(conn, &input, now))?;
         let ws = self.get_staff_workspace().await?;
-        if ws.connected {
-            if let Some(client) = self.remote_staff_client(&ws)? {
-                let _ = client.push_pinned_link(&saved).await;
-            }
-        }
-        self.emit(CoreEvent::StaffChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            vec![StaffOutboxOp::UpsertPinnedLink {
+                link: saved.clone(),
+            }],
+            "Pinned link saved locally (offline)",
+            CoreEvent::StaffChanged,
+        )
+        .await?;
         Ok(saved)
     }
 
@@ -835,12 +938,13 @@ impl MailCore {
             });
         }
         let ws = self.get_staff_workspace().await?;
-        if ws.connected {
-            if let Some(client) = self.remote_staff_client(&ws)? {
-                let _ = client.delete_pinned_link(id).await;
-            }
-        }
-        self.emit(CoreEvent::StaffChanged);
+        self.push_or_queue_staff_ops(
+            &ws,
+            vec![StaffOutboxOp::DeletePinnedLink { id }],
+            "Pinned link deletion queued locally (offline)",
+            CoreEvent::StaffChanged,
+        )
+        .await?;
         Ok(())
     }
 
@@ -873,6 +977,115 @@ impl MailCore {
         Ok(ws)
     }
 
+    pub(crate) fn staff_actor_handle(&self, ws: &StaffWorkspaceView) -> String {
+        if ws.connected && !ws.staff_handle.is_empty() {
+            ws.staff_handle.clone()
+        } else {
+            "staff".to_string()
+        }
+    }
+
+    pub(crate) fn staff_actor_name(&self, ws: &StaffWorkspaceView) -> String {
+        if ws.connected && !ws.staff_name.is_empty() {
+            ws.staff_name.clone()
+        } else {
+            "Pigment Staff".to_string()
+        }
+    }
+
+    /// Push one or more mutations to the remote Staff Sync server, or enqueue them
+    /// in the durable SQLite `staff_outbox` if offline/unreachable, then emit `event`.
+    pub(crate) async fn push_or_queue_staff_ops(
+        &self,
+        ws: &StaffWorkspaceView,
+        ops: Vec<StaffOutboxOp>,
+        offline_reason: &str,
+        event: CoreEvent,
+    ) -> Result<(), CoreError> {
+        if ws.connected && !ops.is_empty() {
+            if let Some(client) = self.remote_staff_client(ws)? {
+                let now = self.now();
+                let pending_before = self.inner.store.with_conn(store::count_staff_outbox)?;
+                if pending_before > 0 {
+                    // Preserve strict causal ordering behind already-queued offline ops.
+                    self.inner.store.with_conn(|conn| {
+                        for op in &ops {
+                            store::enqueue_staff_outbox(conn, op, now)?;
+                        }
+                        Ok(())
+                    })?;
+                    if self.flush_staff_outbox(&client).await.is_err() {
+                        self.mark_staff_offline(offline_reason);
+                    } else {
+                        let _ = self.inner.store.with_conn(|conn| {
+                            store::update_staff_sync_status(
+                                conn,
+                                StaffSyncStatus::Connected,
+                                Some(now),
+                                None,
+                            )
+                        });
+                    }
+                } else {
+                    for (idx, op) in ops.iter().enumerate() {
+                        match client.execute_op(op).await {
+                            Ok(()) => {}
+                            Err(CoreError::Network {
+                                retryable: false, ..
+                            }) => {
+                                // Non-retryable rejection (e.g., 409 stale draft rev) will
+                                // reconcile on the next snapshot pull; do not wedge outbox.
+                            }
+                            Err(_) => {
+                                self.inner.store.with_conn(|conn| {
+                                    for remaining in &ops[idx..] {
+                                        store::enqueue_staff_outbox(conn, remaining, now)?;
+                                    }
+                                    Ok(())
+                                })?;
+                                self.mark_staff_offline(offline_reason);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        self.emit(event);
+        Ok(())
+    }
+
+    pub(crate) async fn flush_staff_outbox(
+        &self,
+        client: &StaffSyncClient,
+    ) -> Result<usize, CoreError> {
+        let entries = self.inner.store.with_conn(store::list_staff_outbox)?;
+        let mut flushed = 0usize;
+        for entry in entries {
+            match client.execute_op(&entry.op).await {
+                Ok(()) => {
+                    self.inner
+                        .store
+                        .with_conn(|conn| store::delete_staff_outbox_item(conn, entry.seq))?;
+                    flushed += 1;
+                }
+                Err(CoreError::Network {
+                    retryable: false, ..
+                }) => {
+                    // Drop permanently rejected entries (e.g. 409 Conflict on stale rev or
+                    // 404 on already-deleted item) so they do not block newer edits.
+                    self.inner
+                        .store
+                        .with_conn(|conn| store::delete_staff_outbox_item(conn, entry.seq))?;
+                }
+                Err(err) => {
+                    return Err(err);
+                }
+            }
+        }
+        Ok(flushed)
+    }
+
     pub(crate) fn remote_staff_client(
         &self,
         ws: &StaffWorkspaceView,
@@ -895,6 +1108,124 @@ impl MailCore {
         let _ = self.inner.store.with_conn(|conn| {
             store::update_staff_sync_status(conn, StaffSyncStatus::Offline, None, Some(reason))
         });
+    }
+}
+
+async fn run_staff_sse_loop(weak: Weak<MailCoreInner>) {
+    let mut backoff_ms = 200u64;
+    loop {
+        let client = {
+            let Some(inner) = weak.upgrade() else {
+                break;
+            };
+            let core = MailCore { inner };
+            let Ok(ws) = core.inner.store.with_conn(store::get_staff_workspace) else {
+                break;
+            };
+            if !ws.connected || ws.server_url.starts_with("local://") {
+                break;
+            }
+            match core.remote_staff_client(&ws) {
+                Ok(Some(c)) => c,
+                _ => {
+                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                    backoff_ms = (backoff_ms * 2).min(5_000);
+                    continue;
+                }
+            }
+        };
+
+        let mut resp = match client.open_event_stream().await {
+            Ok(resp) => {
+                backoff_ms = 200;
+                resp
+            }
+            Err(_) => {
+                if let Some(inner) = weak.upgrade() {
+                    let core = MailCore { inner };
+                    core.mark_staff_offline("Staff Sync connection lost; reconnecting");
+                } else {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                backoff_ms = (backoff_ms * 2).min(5_000);
+                continue;
+            }
+        };
+
+        // On (re)connect, flush any queued offline edits and pull a fresh snapshot.
+        if let Some(inner) = weak.upgrade() {
+            let core = MailCore { inner };
+            let _ = core.sync_staff_workspace().await;
+        } else {
+            break;
+        }
+
+        let mut buffer = String::new();
+        loop {
+            match resp.chunk().await {
+                Ok(Some(chunk)) => {
+                    let text = String::from_utf8_lossy(&chunk);
+                    buffer.push_str(&text.replace("\r\n", "\n"));
+                    while let Some(pos) = buffer.find("\n\n") {
+                        let frame = buffer[..pos].to_string();
+                        buffer.drain(..pos + 2);
+                        if let Some(event) = parse_sse_frame(&frame) {
+                            if event == StaffSyncEvent::Heartbeat {
+                                continue;
+                            }
+                            let Some(inner) = weak.upgrade() else {
+                                return;
+                            };
+                            let core = MailCore { inner };
+                            if let Ok(snapshot) = client.pull_snapshot(None).await {
+                                let now = core.now();
+                                let _ = core.inner.store.with_conn(|conn| {
+                                    apply_snapshot_tx(conn, &snapshot)?;
+                                    store::update_staff_sync_status(
+                                        conn,
+                                        StaffSyncStatus::Connected,
+                                        Some(snapshot.server_time.unwrap_or(now)),
+                                        None,
+                                    )
+                                });
+                                match event {
+                                    StaffSyncEvent::CalendarUpdated { .. }
+                                    | StaffSyncEvent::MeetingDocUpdated { .. }
+                                    | StaffSyncEvent::ActionItemUpdated { .. } => {
+                                        core.emit(CoreEvent::CalendarChanged);
+                                    }
+                                    StaffSyncEvent::SnapshotInvalidated { .. } => {
+                                        core.emit(CoreEvent::StaffChanged);
+                                        core.emit(CoreEvent::CalendarChanged);
+                                    }
+                                    StaffSyncEvent::Heartbeat => {}
+                                    StaffSyncEvent::ThreadUpdated { .. }
+                                    | StaffSyncEvent::CommentAdded { .. }
+                                    | StaffSyncEvent::DraftUpdated { .. }
+                                    | StaffSyncEvent::DirectoryUpdated
+                                    | StaffSyncEvent::ResourcesUpdated => {
+                                        core.emit(CoreEvent::StaffChanged);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(None) | Err(_) => {
+                    if let Some(inner) = weak.upgrade() {
+                        let core = MailCore { inner };
+                        core.mark_staff_offline("Staff Sync stream interrupted; reconnecting");
+                    } else {
+                        return;
+                    }
+                    break;
+                }
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+        backoff_ms = (backoff_ms * 2).min(5_000);
     }
 }
 

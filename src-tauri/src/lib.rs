@@ -78,6 +78,7 @@ pub fn run() {
             // Follow-ups fire cleanly while the desktop app stays resident.
             let sched_core = core.clone();
             tauri::async_runtime::spawn(async move {
+                sched_core.start_staff_sync_listener();
                 let mut interval = tokio::time::interval(Duration::from_secs(5));
                 loop {
                     interval.tick().await;

@@ -60,6 +60,88 @@ fn parses_ics_vevent_with_folding_and_organizer() {
 }
 
 #[test]
+fn parses_ics_tzid_vtimezone_utc_and_all_day_value_date() {
+    let raw = concat!(
+        "BEGIN:VCALENDAR\r\n",
+        "VERSION:2.0\r\n",
+        "BEGIN:VTIMEZONE\r\n",
+        "TZID:Custom/StudioPlus0530\r\n",
+        "BEGIN:STANDARD\r\n",
+        "DTSTART:19700101T000000\r\n",
+        "TZOFFSETFROM:+0530\r\n",
+        "TZOFFSETTO:+0530\r\n",
+        "END:STANDARD\r\n",
+        "END:VTIMEZONE\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:tzid-winter@pigment\r\n",
+        "SUMMARY:Austin Winter Staff Sync\r\n",
+        "DTSTART;TZID=America/Chicago:20251126T100000\r\n",
+        "DTEND;TZID=America/Chicago:20251126T110000\r\n",
+        "END:VEVENT\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:tzid-summer@pigment\r\n",
+        "SUMMARY:Austin Summer Staff Sync\r\n",
+        "DTSTART;TZID=\"Central Standard Time\":20250715T100000\r\n",
+        "DTEND;TZID=\"Central Standard Time\":20250715T110000\r\n",
+        "END:VEVENT\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:vtz-custom@pigment\r\n",
+        "SUMMARY:Custom Offset Call\r\n",
+        "DTSTART;TZID=Custom/StudioPlus0530:20251126T153000\r\n",
+        "DTEND;TZID=Custom/StudioPlus0530:20251126T163000\r\n",
+        "END:VEVENT\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:utc-z@pigment\r\n",
+        "SUMMARY:UTC Kickoff\r\n",
+        "DTSTART:20251126T160000Z\r\n",
+        "DTEND:20251126T170000Z\r\n",
+        "END:VEVENT\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:all-day@pigment\r\n",
+        "SUMMARY:Pigment Show Setup Day\r\n",
+        "DTSTART;VALUE=DATE:20251127\r\n",
+        "DTEND;VALUE=DATE:20251128\r\n",
+        "END:VEVENT\r\n",
+        "END:VCALENDAR\r\n",
+    );
+
+    let events = parse_ics(raw);
+    assert_eq!(events.len(), 5);
+
+    // 2025-11-26 10:00 America/Chicago (CST, UTC-6) == 2025-11-26 16:00 UTC
+    let winter = &events[0];
+    let utc_z = &events[3];
+    assert!(!winter.all_day);
+    assert_eq!(winter.start_at, utc_z.start_at);
+    assert_eq!(winter.end_at, utc_z.end_at);
+
+    // 2025-07-15 10:00 Central Standard Time (CDT, UTC-5) == 2025-07-15 15:00 UTC
+    let summer = &events[1];
+    assert!(!summer.all_day);
+    let expected_summer_start = chrono::DateTime::parse_from_rfc3339("2025-07-15T15:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    assert_eq!(summer.start_at, UnixMs(expected_summer_start));
+
+    // 2025-11-26 15:30 +0530 == 2025-11-26 10:00 UTC
+    let custom = &events[2];
+    assert!(!custom.all_day);
+    let expected_custom_start = chrono::DateTime::parse_from_rfc3339("2025-11-26T10:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    assert_eq!(custom.start_at, UnixMs(expected_custom_start));
+
+    // All-day VALUE=DATE: 2025-11-27 -> 2025-11-28
+    let all_day = &events[4];
+    assert!(all_day.all_day);
+    let expected_day_start = chrono::DateTime::parse_from_rfc3339("2025-11-27T00:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    assert_eq!(all_day.start_at, UnixMs(expected_day_start));
+    assert_eq!(all_day.end_at, UnixMs(expected_day_start + DAY));
+}
+
+#[test]
 fn parses_natural_language_quick_add() {
     let parsed = parse_quick_add(
         "Staff sync Thu 7pm 90m #operations @Ballroom A weekly",

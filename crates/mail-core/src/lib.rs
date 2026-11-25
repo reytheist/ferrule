@@ -81,6 +81,17 @@ struct MailCoreInner {
     host: Host,
     events: broadcast::Sender<CoreEvent>,
     token_cache: Mutex<HashMap<AccountId, CachedAccessToken>>,
+    staff_sse_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+impl Drop for MailCoreInner {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = self.staff_sse_task.lock() {
+            if let Some(handle) = guard.take() {
+                handle.abort();
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -123,6 +134,7 @@ impl MailCore {
                 host,
                 events,
                 token_cache: Mutex::new(HashMap::new()),
+                staff_sse_task: Mutex::new(None),
             }),
         })
     }
