@@ -255,6 +255,11 @@ export async function syncStaffWorkspace(): Promise<StaffWorkspaceView> {
   return invoke<StaffWorkspaceView>("sync_staff_workspace");
 }
 
+export async function pendingStaffOutboxCount(): Promise<number> {
+  if (!isTauriRuntime()) return mock.pendingStaffOutboxCount();
+  return invoke<number>("pending_staff_outbox_count");
+}
+
 export async function listStaffDirectory(): Promise<StaffMemberView[]> {
   if (!isTauriRuntime()) return mock.listStaffDirectory();
   return invoke<StaffMemberView[]>("list_staff_directory");

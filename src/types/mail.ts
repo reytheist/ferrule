@@ -354,6 +354,7 @@ export interface StaffWorkspaceView {
   lastSyncAt: UnixMs | null;
   status: StaffSyncStatus;
   lastError: string | null;
+  pendingOutboxCount: number;
 }
 
 export interface ConnectStaffWorkspaceInput {

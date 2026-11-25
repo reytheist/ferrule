@@ -34,6 +34,18 @@ export function SettingsModal({ app }: { app: MailApp }) {
 
   const devTools = app.settings.developerToolsEnabled;
   const ws = app.staffWorkspace;
+  const syncStatusLabel =
+    ws.status === "offline"
+      ? ws.pendingOutboxCount > 0
+        ? `Offline (${ws.pendingOutboxCount} pending)`
+        : "Offline"
+      : ws.status === "error"
+        ? ws.pendingOutboxCount > 0
+          ? `Error (${ws.pendingOutboxCount} pending)`
+          : "Error"
+        : ws.pendingOutboxCount > 0
+          ? `Syncing (${ws.pendingOutboxCount} pending)`
+          : "Connected";
 
   async function toggleDeveloperTools(): Promise<void> {
     if (busy) return;
@@ -105,7 +117,7 @@ export function SettingsModal({ app }: { app: MailApp }) {
                     </div>
                   </div>
                   <span className={`space-kind-badge${ws.status === "connected" ? " staff" : ""}`}>
-                    {ws.status}
+                    {syncStatusLabel}
                   </span>
                 </div>
                 {ws.lastError && <span className="error-text">{ws.lastError}</span>}
@@ -115,7 +127,7 @@ export function SettingsModal({ app }: { app: MailApp }) {
                       <span
                         key={member.id}
                         className="staff-dir-chip"
-                        title={`${member.name} — ${member.role} (${member.email})`}
+                        title={`${member.name} - ${member.role} (${member.email})`}
                       >
                         @{member.handle}
                       </span>
@@ -215,7 +227,7 @@ export function SettingsModal({ app }: { app: MailApp }) {
                     Connect Staff Sync
                   </button>
                   <span className="hint-text">
-                    Token is stored strictly in your OS keychain — never in SQLite or localStorage.
+                    Token is stored strictly in your OS keychain, never in SQLite or localStorage.
                   </span>
                 </div>
               </div>

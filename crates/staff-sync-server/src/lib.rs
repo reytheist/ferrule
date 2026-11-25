@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axum::extract::{Path, Query, Request, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
 use axum::http::{header, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -222,6 +222,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/action-items/{id}",
             put(put_action_item).delete(delete_action_item),
         )
+        .layer(DefaultBodyLimit::max(4 * 1024 * 1024))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             require_bearer_auth,
@@ -333,7 +334,7 @@ async fn put_member(
     Json(mut member): Json<StaffMemberView>,
 ) -> Result<StatusCode, ApiError> {
     member.id = id;
-    state.db.upsert_member(&member)?;
+    state.db.upsert_member(&member, now_unix_ms())?;
     state.broadcast(StaffSyncEvent::DirectoryUpdated);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -343,7 +344,7 @@ async fn post_shared_thread(
     Json(thread): Json<SharedThreadView>,
 ) -> Result<StatusCode, ApiError> {
     let id = thread.id;
-    state.db.upsert_shared_thread(&thread)?;
+    state.db.upsert_shared_thread(&thread, now_unix_ms())?;
     state.broadcast(StaffSyncEvent::ThreadUpdated {
         shared_thread_id: id,
     });
@@ -400,7 +401,7 @@ async fn put_template(
     Path(id): Path<SharedTemplateId>,
     Json(template): Json<SharedTemplateView>,
 ) -> Result<StatusCode, ApiError> {
-    state.db.upsert_template(id, &template)?;
+    state.db.upsert_template(id, &template, now_unix_ms())?;
     state.broadcast(StaffSyncEvent::ResourcesUpdated);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -409,7 +410,7 @@ async fn delete_template(
     State(state): State<Arc<AppState>>,
     Path(id): Path<SharedTemplateId>,
 ) -> Result<StatusCode, ApiError> {
-    state.db.delete_template(id)?;
+    state.db.delete_template(id, now_unix_ms())?;
     state.broadcast(StaffSyncEvent::ResourcesUpdated);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -419,7 +420,7 @@ async fn put_contact(
     Path(id): Path<ContactId>,
     Json(contact): Json<ShowContactView>,
 ) -> Result<StatusCode, ApiError> {
-    state.db.upsert_contact(id, &contact)?;
+    state.db.upsert_contact(id, &contact, now_unix_ms())?;
     state.broadcast(StaffSyncEvent::ResourcesUpdated);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -428,7 +429,7 @@ async fn delete_contact(
     State(state): State<Arc<AppState>>,
     Path(id): Path<ContactId>,
 ) -> Result<StatusCode, ApiError> {
-    state.db.delete_contact(id)?;
+    state.db.delete_contact(id, now_unix_ms())?;
     state.broadcast(StaffSyncEvent::ResourcesUpdated);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -438,7 +439,7 @@ async fn put_pinned_link(
     Path(id): Path<PinnedLinkId>,
     Json(link): Json<PinnedLinkView>,
 ) -> Result<StatusCode, ApiError> {
-    state.db.upsert_pinned_link(id, &link)?;
+    state.db.upsert_pinned_link(id, &link, now_unix_ms())?;
     state.broadcast(StaffSyncEvent::ResourcesUpdated);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -447,7 +448,7 @@ async fn delete_pinned_link(
     State(state): State<Arc<AppState>>,
     Path(id): Path<PinnedLinkId>,
 ) -> Result<StatusCode, ApiError> {
-    state.db.delete_pinned_link(id)?;
+    state.db.delete_pinned_link(id, now_unix_ms())?;
     state.broadcast(StaffSyncEvent::ResourcesUpdated);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -457,7 +458,7 @@ async fn put_calendar_event(
     Path(id): Path<CalendarEventId>,
     Json(event): Json<CalendarEventView>,
 ) -> Result<StatusCode, ApiError> {
-    state.db.upsert_calendar_event(id, &event)?;
+    state.db.upsert_calendar_event(id, &event, now_unix_ms())?;
     state.broadcast(StaffSyncEvent::CalendarUpdated { event_id: id });
     Ok(StatusCode::NO_CONTENT)
 }
@@ -466,7 +467,7 @@ async fn delete_calendar_event(
     State(state): State<Arc<AppState>>,
     Path(id): Path<CalendarEventId>,
 ) -> Result<StatusCode, ApiError> {
-    state.db.delete_calendar_event(id)?;
+    state.db.delete_calendar_event(id, now_unix_ms())?;
     state.broadcast(StaffSyncEvent::CalendarUpdated { event_id: id });
     Ok(StatusCode::NO_CONTENT)
 }
@@ -476,7 +477,7 @@ async fn put_meeting_doc(
     Path(id): Path<CalendarEventId>,
     Json(doc): Json<MeetingDocView>,
 ) -> Result<StatusCode, ApiError> {
-    state.db.upsert_meeting_doc(id, &doc)?;
+    state.db.upsert_meeting_doc(id, &doc, now_unix_ms())?;
     state.broadcast(StaffSyncEvent::MeetingDocUpdated { event_id: id });
     Ok(StatusCode::NO_CONTENT)
 }
@@ -486,7 +487,7 @@ async fn put_action_item(
     Path(id): Path<ActionItemId>,
     Json(item): Json<ActionItemView>,
 ) -> Result<StatusCode, ApiError> {
-    state.db.upsert_action_item(id, &item)?;
+    state.db.upsert_action_item(id, &item, now_unix_ms())?;
     state.broadcast(StaffSyncEvent::ActionItemUpdated { action_item_id: id });
     Ok(StatusCode::NO_CONTENT)
 }
@@ -495,7 +496,7 @@ async fn delete_action_item(
     State(state): State<Arc<AppState>>,
     Path(id): Path<ActionItemId>,
 ) -> Result<StatusCode, ApiError> {
-    state.db.delete_action_item(id)?;
+    state.db.delete_action_item(id, now_unix_ms())?;
     state.broadcast(StaffSyncEvent::ActionItemUpdated { action_item_id: id });
     Ok(StatusCode::NO_CONTENT)
 }

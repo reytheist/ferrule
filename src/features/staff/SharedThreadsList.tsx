@@ -17,13 +17,35 @@ function snapshotSender(msg: SharedMessageSnapshot): string {
 }
 
 export function SharedThreadsList({ app }: { app: MailApp }) {
+  const ws = app.staffWorkspace;
+  const outboxBadge =
+    ws.connected && (ws.status === "offline" || ws.status === "error" || ws.pendingOutboxCount > 0)
+      ? ws.status === "offline"
+        ? ws.pendingOutboxCount > 0
+          ? `Offline (${ws.pendingOutboxCount} pending)`
+          : "Offline"
+        : ws.status === "error"
+          ? ws.pendingOutboxCount > 0
+            ? `Sync error (${ws.pendingOutboxCount} pending)`
+            : "Sync error"
+          : `${ws.pendingOutboxCount} pending`
+      : null;
+
   return (
     <section className="list-col">
       <div className="list-tabs">
         <span className="list-title" style={{ flex: 1 }}>
           Shared with Me
         </span>
-        {app.staffWorkspace.connected && (
+        {outboxBadge && (
+          <span
+            className="badge"
+            title={ws.lastError ?? "Edits queued locally and will sync automatically on reconnect"}
+          >
+            {outboxBadge}
+          </span>
+        )}
+        {ws.connected && (
           <button
             className="t-btn"
             onClick={() => void app.syncStaffWorkspace()}

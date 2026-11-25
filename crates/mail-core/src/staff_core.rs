@@ -8,7 +8,8 @@ use crate::auth::{SecretKey, SecretString};
 use crate::error::CoreError;
 use crate::events::CoreEvent;
 use crate::ids::{
-    CommentId, ContactId, PinnedLinkId, SharedTemplateId, SharedThreadId, StaffMemberId, ThreadId,
+    ActionItemId, CalendarEventId, CommentId, ContactId, PinnedLinkId, SharedTemplateId,
+    SharedThreadId, StaffMemberId, ThreadId,
 };
 use crate::sanitize;
 use crate::staff::{
@@ -20,7 +21,10 @@ use crate::staff::{
     StaffWorkspaceView, UpdateHandoffInput, UpdateSharedDraftInput,
 };
 use crate::store;
-use crate::sync::staff::{parse_sse_frame, StaffOutboxOp, StaffSyncClient, StaffSyncEvent, StaffSyncSnapshot};
+use crate::sync::staff::{
+    parse_sse_frame, StaffHttpError, StaffOutboxOp, StaffSyncClient, StaffSyncEvent,
+    StaffSyncSnapshot,
+};
 use crate::types::{RemoteContent, SpaceKind};
 use crate::{MailCore, MailCoreInner};
 
@@ -134,7 +138,10 @@ impl MailCore {
         let ws = self.inner.store.with_conn(|conn| {
             let (status, err_msg) = match &pull_res {
                 Ok(_) => (StaffSyncStatus::Connected, None),
-                Err(err) => (StaffSyncStatus::Offline, Some(err.to_string())),
+                Err(StaffHttpError::AuthRejected(msg)) => {
+                    (StaffSyncStatus::Error, Some(msg.clone()))
+                }
+                Err(err) => (StaffSyncStatus::Offline, Some(err.message().to_string())),
             };
             let ws = store::upsert_staff_workspace(
                 conn,
@@ -152,6 +159,7 @@ impl MailCore {
             store::upsert_staff_member(conn, &current_member)?;
             if let Ok(snapshot) = &pull_res {
                 apply_snapshot_tx(conn, snapshot)?;
+                Ok(ws)
             } else {
                 store::enqueue_staff_outbox(
                     conn,
@@ -160,8 +168,8 @@ impl MailCore {
                     },
                     now,
                 )?;
+                store::get_staff_workspace(conn)
             }
-            Ok(ws)
         })?;
         self.start_staff_sync_listener();
         self.emit(CoreEvent::StaffChanged);
@@ -187,6 +195,7 @@ impl MailCore {
     }
 
     pub async fn sync_staff_workspace(&self) -> Result<StaffWorkspaceView, CoreError> {
+        let _sync_guard = self.inner.staff_sync_lock.lock().await;
         let ws = self.get_staff_workspace().await?;
         if !ws.connected {
             return Err(CoreError::IllegalState {
@@ -216,6 +225,7 @@ impl MailCore {
                     Some("Staff Sync token missing from OS keychain. Reconnect in Settings."),
                 )
             })?;
+            self.emit(CoreEvent::StaffChanged);
             return self.get_staff_workspace().await;
         };
 
@@ -224,8 +234,20 @@ impl MailCore {
         // Flush any queued offline mutations before pulling the server snapshot.
         let flushed = match self.flush_staff_outbox(&client).await {
             Ok(count) => count,
+            Err(StaffHttpError::AuthRejected(reason)) => {
+                self.inner.store.with_conn(|conn| {
+                    store::update_staff_sync_status(
+                        conn,
+                        StaffSyncStatus::Error,
+                        None,
+                        Some(&reason),
+                    )
+                })?;
+                self.emit(CoreEvent::StaffChanged);
+                return self.get_staff_workspace().await;
+            }
             Err(err) => {
-                let reason = err.to_string();
+                let reason = err.message().to_string();
                 self.inner.store.with_conn(|conn| {
                     store::update_staff_sync_status(
                         conn,
@@ -249,7 +271,10 @@ impl MailCore {
             Ok(snapshot) => {
                 let has_cal = !snapshot.calendar_events.is_empty()
                     || !snapshot.meeting_docs.is_empty()
-                    || !snapshot.action_items.is_empty();
+                    || !snapshot.action_items.is_empty()
+                    || snapshot.tombstones.iter().any(|t| {
+                        matches!(t.entity_kind.as_str(), "calendar_event" | "action_item")
+                    });
                 self.inner.store.with_conn(|conn| {
                     apply_snapshot_tx(conn, &snapshot)?;
                     store::update_staff_sync_status(
@@ -263,8 +288,18 @@ impl MailCore {
                     self.emit(CoreEvent::CalendarChanged);
                 }
             }
+            Err(StaffHttpError::AuthRejected(reason)) => {
+                self.inner.store.with_conn(|conn| {
+                    store::update_staff_sync_status(
+                        conn,
+                        StaffSyncStatus::Error,
+                        None,
+                        Some(&reason),
+                    )
+                })?;
+            }
             Err(err) => {
-                let reason = err.to_string();
+                let reason = err.message().to_string();
                 self.inner.store.with_conn(|conn| {
                     store::update_staff_sync_status(
                         conn,
@@ -1002,81 +1037,126 @@ impl MailCore {
         offline_reason: &str,
         event: CoreEvent,
     ) -> Result<(), CoreError> {
-        if ws.connected && !ops.is_empty() {
-            if let Some(client) = self.remote_staff_client(ws)? {
-                let now = self.now();
-                let pending_before = self.inner.store.with_conn(store::count_staff_outbox)?;
-                if pending_before > 0 {
-                    // Preserve strict causal ordering behind already-queued offline ops.
+        let mut status_or_outbox_changed = false;
+        if ws.connected && !ws.server_url.starts_with("local://") && !ops.is_empty() {
+            let _sync_guard = self.inner.staff_sync_lock.lock().await;
+            let now = self.now();
+            match self.remote_staff_client(ws)? {
+                None => {
+                    // Keychain token missing on a remote workspace: preserve edits in the
+                    // outbox and surface an auth error instead of silently dropping them.
                     self.inner.store.with_conn(|conn| {
                         for op in &ops {
                             store::enqueue_staff_outbox(conn, op, now)?;
                         }
-                        Ok(())
+                        store::update_staff_sync_status(
+                            conn,
+                            StaffSyncStatus::Error,
+                            None,
+                            Some("Staff Sync token missing from OS keychain. Reconnect in Settings."),
+                        )
                     })?;
-                    if self.flush_staff_outbox(&client).await.is_err() {
-                        self.mark_staff_offline(offline_reason);
-                    } else {
-                        let _ = self.inner.store.with_conn(|conn| {
-                            store::update_staff_sync_status(
-                                conn,
-                                StaffSyncStatus::Connected,
-                                Some(now),
-                                None,
-                            )
-                        });
-                    }
-                } else {
-                    for (idx, op) in ops.iter().enumerate() {
-                        match client.execute_op(op).await {
-                            Ok(()) => {}
-                            Err(CoreError::Network {
-                                retryable: false, ..
-                            }) => {
-                                // Non-retryable rejection (e.g., 409 stale draft rev) will
-                                // reconcile on the next snapshot pull; do not wedge outbox.
+                    status_or_outbox_changed = true;
+                }
+                Some(client) => {
+                    let pending_before = self.inner.store.with_conn(store::count_staff_outbox)?;
+                    if pending_before > 0 {
+                        // Preserve strict causal ordering behind already-queued offline ops.
+                        self.inner.store.with_conn(|conn| {
+                            for op in &ops {
+                                store::enqueue_staff_outbox(conn, op, now)?;
+                            }
+                            Ok(())
+                        })?;
+                        status_or_outbox_changed = true;
+                        match self.flush_staff_outbox(&client).await {
+                            Ok(_) => {
+                                let _ = self.inner.store.with_conn(|conn| {
+                                    store::update_staff_sync_status(
+                                        conn,
+                                        StaffSyncStatus::Connected,
+                                        None,
+                                        None,
+                                    )
+                                });
+                            }
+                            Err(StaffHttpError::AuthRejected(msg)) => {
+                                self.mark_staff_error(&msg);
                             }
                             Err(_) => {
-                                self.inner.store.with_conn(|conn| {
-                                    for remaining in &ops[idx..] {
-                                        store::enqueue_staff_outbox(conn, remaining, now)?;
-                                    }
-                                    Ok(())
-                                })?;
                                 self.mark_staff_offline(offline_reason);
-                                break;
+                            }
+                        }
+                    } else {
+                        for (idx, op) in ops.iter().enumerate() {
+                            match client.execute_op(op).await {
+                                Ok(()) => {}
+                                Err(StaffHttpError::DropConflictOrNotFound(_)) => {
+                                    // Stale draft/doc rev (409) or deleted parent (404) will
+                                    // reconcile on the next snapshot pull; do not wedge outbox.
+                                }
+                                Err(StaffHttpError::AuthRejected(msg)) => {
+                                    self.inner.store.with_conn(|conn| {
+                                        for remaining in &ops[idx..] {
+                                            store::enqueue_staff_outbox(conn, remaining, now)?;
+                                        }
+                                        Ok(())
+                                    })?;
+                                    self.mark_staff_error(&msg);
+                                    status_or_outbox_changed = true;
+                                    break;
+                                }
+                                Err(StaffHttpError::Retryable(_)) => {
+                                    self.inner.store.with_conn(|conn| {
+                                        for remaining in &ops[idx..] {
+                                            store::enqueue_staff_outbox(conn, remaining, now)?;
+                                        }
+                                        Ok(())
+                                    })?;
+                                    self.mark_staff_offline(offline_reason);
+                                    status_or_outbox_changed = true;
+                                    break;
+                                }
                             }
                         }
                     }
                 }
             }
         }
+        let is_staff_event = matches!(event, CoreEvent::StaffChanged);
         self.emit(event);
+        if status_or_outbox_changed && !is_staff_event {
+            self.emit(CoreEvent::StaffChanged);
+        }
         Ok(())
     }
 
     pub(crate) async fn flush_staff_outbox(
         &self,
         client: &StaffSyncClient,
-    ) -> Result<usize, CoreError> {
-        let entries = self.inner.store.with_conn(store::list_staff_outbox)?;
+    ) -> Result<usize, StaffHttpError> {
+        let entries = self
+            .inner
+            .store
+            .with_conn(store::list_staff_outbox)
+            .map_err(|e| StaffHttpError::Retryable(e.to_string()))?;
         let mut flushed = 0usize;
         for entry in entries {
             match client.execute_op(&entry.op).await {
                 Ok(()) => {
                     self.inner
                         .store
-                        .with_conn(|conn| store::delete_staff_outbox_item(conn, entry.seq))?;
+                        .with_conn(|conn| store::delete_staff_outbox_item(conn, entry.seq))
+                        .map_err(|e| StaffHttpError::Retryable(e.to_string()))?;
                     flushed += 1;
                 }
-                Err(CoreError::Network {
-                    retryable: false, ..
-                }) => {
-                    // Drop permanently rejected entries (e.g. 409 Conflict on stale rev or
-                    // 404 on already-deleted item) so they do not block newer edits.
+                Err(StaffHttpError::DropConflictOrNotFound(_)) => {
+                    // Drop only genuine 409/404 rejections so they do not block newer edits.
+                    // Never drop on 401/403/429/5xx or transport errors.
                     self.inner
                         .store
-                        .with_conn(|conn| store::delete_staff_outbox_item(conn, entry.seq))?;
+                        .with_conn(|conn| store::delete_staff_outbox_item(conn, entry.seq))
+                        .map_err(|e| StaffHttpError::Retryable(e.to_string()))?;
                 }
                 Err(err) => {
                     return Err(err);
@@ -1109,10 +1189,18 @@ impl MailCore {
             store::update_staff_sync_status(conn, StaffSyncStatus::Offline, None, Some(reason))
         });
     }
+
+    pub(crate) fn mark_staff_error(&self, reason: &str) {
+        let _ = self.inner.store.with_conn(|conn| {
+            store::update_staff_sync_status(conn, StaffSyncStatus::Error, None, Some(reason))
+        });
+    }
 }
 
 async fn run_staff_sse_loop(weak: Weak<MailCoreInner>) {
     let mut backoff_ms = 200u64;
+    const SSE_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
+
     loop {
         let client = {
             let Some(inner) = weak.upgrade() else {
@@ -1140,10 +1228,23 @@ async fn run_staff_sse_loop(weak: Weak<MailCoreInner>) {
                 backoff_ms = 200;
                 resp
             }
+            Err(StaffHttpError::AuthRejected(msg)) => {
+                if let Some(inner) = weak.upgrade() {
+                    let core = MailCore { inner };
+                    core.mark_staff_error(&msg);
+                    core.emit(CoreEvent::StaffChanged);
+                } else {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                backoff_ms = (backoff_ms * 2).min(5_000);
+                continue;
+            }
             Err(_) => {
                 if let Some(inner) = weak.upgrade() {
                     let core = MailCore { inner };
                     core.mark_staff_offline("Staff Sync connection lost; reconnecting");
+                    core.emit(CoreEvent::StaffChanged);
                 } else {
                     break;
                 }
@@ -1163,59 +1264,62 @@ async fn run_staff_sse_loop(weak: Weak<MailCoreInner>) {
 
         let mut buffer = String::new();
         loop {
-            match resp.chunk().await {
-                Ok(Some(chunk)) => {
+            match tokio::time::timeout(SSE_IDLE_TIMEOUT, resp.chunk()).await {
+                Ok(Ok(Some(chunk))) => {
                     let text = String::from_utf8_lossy(&chunk);
                     buffer.push_str(&text.replace("\r\n", "\n"));
+                    let mut needs_sync = false;
+                    let mut emit_staff = false;
+                    let mut emit_cal = false;
+
                     while let Some(pos) = buffer.find("\n\n") {
                         let frame = buffer[..pos].to_string();
                         buffer.drain(..pos + 2);
                         if let Some(event) = parse_sse_frame(&frame) {
-                            if event == StaffSyncEvent::Heartbeat {
-                                continue;
-                            }
-                            let Some(inner) = weak.upgrade() else {
-                                return;
-                            };
-                            let core = MailCore { inner };
-                            if let Ok(snapshot) = client.pull_snapshot(None).await {
-                                let now = core.now();
-                                let _ = core.inner.store.with_conn(|conn| {
-                                    apply_snapshot_tx(conn, &snapshot)?;
-                                    store::update_staff_sync_status(
-                                        conn,
-                                        StaffSyncStatus::Connected,
-                                        Some(snapshot.server_time.unwrap_or(now)),
-                                        None,
-                                    )
-                                });
-                                match event {
-                                    StaffSyncEvent::CalendarUpdated { .. }
-                                    | StaffSyncEvent::MeetingDocUpdated { .. }
-                                    | StaffSyncEvent::ActionItemUpdated { .. } => {
-                                        core.emit(CoreEvent::CalendarChanged);
-                                    }
-                                    StaffSyncEvent::SnapshotInvalidated { .. } => {
-                                        core.emit(CoreEvent::StaffChanged);
-                                        core.emit(CoreEvent::CalendarChanged);
-                                    }
-                                    StaffSyncEvent::Heartbeat => {}
-                                    StaffSyncEvent::ThreadUpdated { .. }
-                                    | StaffSyncEvent::CommentAdded { .. }
-                                    | StaffSyncEvent::DraftUpdated { .. }
-                                    | StaffSyncEvent::DirectoryUpdated
-                                    | StaffSyncEvent::ResourcesUpdated => {
-                                        core.emit(CoreEvent::StaffChanged);
-                                    }
+                            match event {
+                                StaffSyncEvent::Heartbeat => {}
+                                StaffSyncEvent::CalendarUpdated { .. }
+                                | StaffSyncEvent::MeetingDocUpdated { .. }
+                                | StaffSyncEvent::ActionItemUpdated { .. } => {
+                                    needs_sync = true;
+                                    emit_cal = true;
+                                }
+                                StaffSyncEvent::SnapshotInvalidated { .. } => {
+                                    needs_sync = true;
+                                    emit_staff = true;
+                                    emit_cal = true;
+                                }
+                                StaffSyncEvent::ThreadUpdated { .. }
+                                | StaffSyncEvent::CommentAdded { .. }
+                                | StaffSyncEvent::DraftUpdated { .. }
+                                | StaffSyncEvent::DirectoryUpdated
+                                | StaffSyncEvent::ResourcesUpdated => {
+                                    needs_sync = true;
+                                    emit_staff = true;
                                 }
                             }
                         }
                     }
+
+                    if needs_sync {
+                        let Some(inner) = weak.upgrade() else {
+                            return;
+                        };
+                        let core = MailCore { inner };
+                        let _ = core.sync_staff_workspace().await;
+                        if emit_cal {
+                            core.emit(CoreEvent::CalendarChanged);
+                        }
+                        if emit_staff {
+                            core.emit(CoreEvent::StaffChanged);
+                        }
+                    }
                 }
-                Ok(None) | Err(_) => {
+                Ok(Ok(None)) | Ok(Err(_)) | Err(_) => {
                     if let Some(inner) = weak.upgrade() {
                         let core = MailCore { inner };
                         core.mark_staff_offline("Staff Sync stream interrupted; reconnecting");
+                        core.emit(CoreEvent::StaffChanged);
                     } else {
                         return;
                     }
@@ -1262,6 +1366,36 @@ fn apply_snapshot_tx(
     }
     for item in &snapshot.action_items {
         store::upsert_action_item_row(conn, item)?;
+    }
+    for tombstone in &snapshot.tombstones {
+        match tombstone.entity_kind.as_str() {
+            "shared_template" => {
+                if let Ok(id) = tombstone.entity_id.parse::<SharedTemplateId>() {
+                    let _ = store::delete_shared_template(conn, id)?;
+                }
+            }
+            "show_contact" => {
+                if let Ok(id) = tombstone.entity_id.parse::<ContactId>() {
+                    let _ = store::delete_show_contact(conn, id)?;
+                }
+            }
+            "pinned_link" => {
+                if let Ok(id) = tombstone.entity_id.parse::<PinnedLinkId>() {
+                    let _ = store::delete_pinned_link(conn, id)?;
+                }
+            }
+            "calendar_event" => {
+                if let Ok(id) = tombstone.entity_id.parse::<CalendarEventId>() {
+                    let _ = store::delete_calendar_event(conn, id)?;
+                }
+            }
+            "action_item" => {
+                if let Ok(id) = tombstone.entity_id.parse::<ActionItemId>() {
+                    let _ = store::delete_action_item(conn, id)?;
+                }
+            }
+            _ => {}
+        }
     }
     Ok(())
 }

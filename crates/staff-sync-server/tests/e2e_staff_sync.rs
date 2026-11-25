@@ -18,9 +18,9 @@ use mail_core::events::CoreEvent;
 use mail_core::host::ManualClock;
 use mail_core::ids::UnixMs;
 use mail_core::staff::{
-    AddSharedCommentInput, ConnectStaffWorkspaceInput, DraftLockAction, DraftLockState,
-    HandoffStatus, ShareThreadInput, ShareVisibility, StaffSyncStatus, UpdateHandoffInput,
-    UpdateSharedDraftInput,
+    AddSharedCommentInput, ConnectStaffWorkspaceInput, ContactCategory, DraftLockAction,
+    DraftLockState, HandoffStatus, SaveShowContactInput, ShareThreadInput, ShareVisibility,
+    StaffSyncStatus, UpdateHandoffInput, UpdateSharedDraftInput,
 };
 use mail_core::types::{InboxCategory, MailboxView, Scope, SpaceKind, ThreadQuery, UpdateAccountInput};
 use mail_core::{CoreConfig, Host, MailCore};
@@ -582,4 +582,333 @@ async fn offline_outbox_queues_edits_and_flushes_on_reconnect() {
     let _ = std::fs::remove_file(&server_db);
     let _ = std::fs::remove_file(format!("{}-wal", server_db.display()));
     let _ = std::fs::remove_file(format!("{}-shm", server_db.display()));
+}
+
+#[tokio::test]
+async fn remote_deletions_propagate_via_tombstones() {
+    let server = spawn_server(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        ServerConfig::with_tokens(vec!["tombstone-token".into()], None),
+    )
+    .await
+    .expect("spawn server");
+
+    let alice = open_test_core(None, BASE_MS);
+    let bob = open_test_core(None, BASE_MS + 1_000);
+
+    alice
+        .connect_staff_workspace(ConnectStaffWorkspaceInput {
+            server_url: server.url(),
+            token: "tombstone-token".into(),
+            staff_name: "Alice".into(),
+            staff_handle: "alice".into(),
+            staff_email: "info@pigmentminiatures.com".into(),
+            staff_role: "Director".into(),
+        })
+        .await
+        .expect("connect alice");
+    bob.connect_staff_workspace(ConnectStaffWorkspaceInput {
+        server_url: server.url(),
+        token: "tombstone-token".into(),
+        staff_name: "Bob".into(),
+        staff_handle: "bob".into(),
+        staff_email: "sponsors@pigmentminiatures.com".into(),
+        staff_role: "Sponsors".into(),
+    })
+    .await
+    .expect("connect bob");
+
+    let contact = alice
+        .save_show_contact(SaveShowContactInput {
+            id: None,
+            name: "Temp Vendor".into(),
+            emails: vec!["temp@vendor.example".into()],
+            category: ContactCategory::Vendor,
+            organization: None,
+            tier: None,
+            notes: "Will be deleted".into(),
+        })
+        .await
+        .expect("save contact");
+
+    let event = alice
+        .save_calendar_event(SaveCalendarEventInput {
+            id: None,
+            series_id: None,
+            title: "Cancelled Walkthrough".into(),
+            description: String::new(),
+            start_at: UnixMs(BASE_MS + DAY),
+            end_at: UnixMs(BASE_MS + DAY + HOUR),
+            all_day: false,
+            kind: CalendarEventKind::Meeting,
+            department: Some("operations".into()),
+            location: None,
+            recurrence: RecurrenceRule::None,
+            discord_url: None,
+            attendees: Vec::new(),
+            source_ics_uid: None,
+        })
+        .await
+        .expect("save event");
+
+    let action = alice
+        .save_action_item(SaveActionItemInput {
+            id: None,
+            title: "Duplicate task to remove".into(),
+            department: Some("operations".into()),
+            milestone: None,
+            assignee_handle: None,
+            status: ActionItemStatus::Open,
+            due_at: None,
+            start_time: None,
+            end_time: None,
+            location: None,
+            cost_note: None,
+            source_event_id: None,
+            source_series_id: None,
+            source_thread_id: None,
+            sync_to_calendar: false,
+        })
+        .await
+        .expect("save action");
+
+    bob.sync_staff_workspace().await.expect("bob initial sync");
+    assert!(bob
+        .list_show_contacts()
+        .await
+        .unwrap()
+        .iter()
+        .any(|c| c.id == contact.id));
+    assert!(bob
+        .list_calendar_events(CalendarRangeQuery {
+            range_start: UnixMs(BASE_MS),
+            range_end: UnixMs(BASE_MS + 3 * DAY),
+        })
+        .await
+        .unwrap()
+        .iter()
+        .any(|o| o.event.id == event.id));
+    assert!(bob
+        .list_action_items()
+        .await
+        .unwrap()
+        .iter()
+        .any(|a| a.id == action.id));
+
+    // Alice deletes all three entities; Bob syncs and must see them removed.
+    alice.delete_show_contact(contact.id).await.expect("delete contact");
+    alice.delete_calendar_event(event.id).await.expect("delete event");
+    alice.delete_action_item(action.id).await.expect("delete action");
+
+    bob.sync_staff_workspace().await.expect("bob post-delete sync");
+    assert!(!bob
+        .list_show_contacts()
+        .await
+        .unwrap()
+        .iter()
+        .any(|c| c.id == contact.id));
+    assert!(!bob
+        .list_calendar_events(CalendarRangeQuery {
+            range_start: UnixMs(BASE_MS),
+            range_end: UnixMs(BASE_MS + 3 * DAY),
+        })
+        .await
+        .unwrap()
+        .iter()
+        .any(|o| o.event.id == event.id));
+    assert!(!bob
+        .list_action_items()
+        .await
+        .unwrap()
+        .iter()
+        .any(|a| a.id == action.id));
+
+    alice.stop_staff_sync_listener();
+    bob.stop_staff_sync_listener();
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn auth_rejection_preserves_outbox_and_surfaces_error_status() {
+    let server_db = std::env::temp_dir().join(format!("ferrule-auth-outbox-{}.db", Uuid::new_v4()));
+    let server = spawn_server(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        ServerConfig::with_tokens(vec!["token-v1".into()], Some(server_db.clone())),
+    )
+    .await
+    .expect("spawn server v1");
+    let addr = server.addr;
+    let url = server.url();
+
+    let alice = open_test_core(None, BASE_MS);
+    alice
+        .connect_staff_workspace(ConnectStaffWorkspaceInput {
+            server_url: url.clone(),
+            token: "token-v1".into(),
+            staff_name: "Alice".into(),
+            staff_handle: "alice".into(),
+            staff_email: "info@pigmentminiatures.com".into(),
+            staff_role: "Director".into(),
+        })
+        .await
+        .expect("connect alice");
+    alice.stop_staff_sync_listener();
+
+    // Rotate server token to token-v2 while Alice still holds token-v1.
+    server.shutdown().await;
+    let server_v2 = spawn_server(
+        addr,
+        ServerConfig::with_tokens(vec!["token-v2".into()], Some(server_db.clone())),
+    )
+    .await
+    .expect("spawn server v2");
+
+    // Alice saves an action item while holding the stale token -> 401 must NOT drop the op.
+    let queued_item = alice
+        .save_action_item(SaveActionItemInput {
+            id: None,
+            title: "Must survive token rotation".into(),
+            department: Some("sponsors".into()),
+            milestone: None,
+            assignee_handle: Some("alice".into()),
+            status: ActionItemStatus::Open,
+            due_at: None,
+            start_time: None,
+            end_time: None,
+            location: None,
+            cost_note: None,
+            source_event_id: None,
+            source_series_id: None,
+            source_thread_id: None,
+            sync_to_calendar: false,
+        })
+        .await
+        .expect("save action under 401");
+
+    let ws_err = alice.get_staff_workspace().await.expect("ws");
+    assert_eq!(ws_err.status, StaffSyncStatus::Error);
+    assert_eq!(ws_err.pending_outbox_count, 1);
+
+    // Manual sync with the stale token must still keep the queued edit intact.
+    let ws_still_err = alice.sync_staff_workspace().await.expect("sync under 401");
+    assert_eq!(ws_still_err.status, StaffSyncStatus::Error);
+    assert_eq!(ws_still_err.pending_outbox_count, 1);
+
+    // Reconnect with the rotated token -> outbox flushes and reaches the server.
+    alice
+        .connect_staff_workspace(ConnectStaffWorkspaceInput {
+            server_url: url.clone(),
+            token: "token-v2".into(),
+            staff_name: "Alice".into(),
+            staff_handle: "alice".into(),
+            staff_email: "info@pigmentminiatures.com".into(),
+            staff_role: "Director".into(),
+        })
+        .await
+        .expect("reconnect alice with v2");
+    let ws_ok = alice.sync_staff_workspace().await.expect("flush after reconnect");
+    assert_eq!(ws_ok.status, StaffSyncStatus::Connected);
+    assert_eq!(ws_ok.pending_outbox_count, 0);
+
+    // Verify a fresh peer sees Alice's preserved action item.
+    let bob = open_test_core(None, BASE_MS + 5_000);
+    bob.connect_staff_workspace(ConnectStaffWorkspaceInput {
+        server_url: url,
+        token: "token-v2".into(),
+        staff_name: "Bob".into(),
+        staff_handle: "bob".into(),
+        staff_email: "sponsors@pigmentminiatures.com".into(),
+        staff_role: "Sponsors".into(),
+    })
+    .await
+    .expect("connect bob");
+    assert!(bob
+        .list_action_items()
+        .await
+        .unwrap()
+        .iter()
+        .any(|a| a.id == queued_item.id));
+
+    alice.stop_staff_sync_listener();
+    bob.stop_staff_sync_listener();
+    server_v2.shutdown().await;
+    let _ = std::fs::remove_file(&server_db);
+    let _ = std::fs::remove_file(format!("{}-wal", server_db.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", server_db.display()));
+}
+
+#[tokio::test]
+async fn clock_skewed_client_edits_visible_on_incremental_since_pull() {
+    let server = spawn_server(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        ServerConfig::with_tokens(vec!["skew-token".into()], None),
+    )
+    .await
+    .expect("spawn server");
+
+    // Alice's local clock is 2 hours behind wall clock, while Bob syncs first and stores server_time.
+    let alice = open_test_core(None, BASE_MS - 2 * HOUR);
+    let bob = open_test_core(None, BASE_MS);
+
+    alice
+        .connect_staff_workspace(ConnectStaffWorkspaceInput {
+            server_url: server.url(),
+            token: "skew-token".into(),
+            staff_name: "Alice".into(),
+            staff_handle: "alice".into(),
+            staff_email: "info@pigmentminiatures.com".into(),
+            staff_role: "Director".into(),
+        })
+        .await
+        .expect("connect alice");
+    bob.connect_staff_workspace(ConnectStaffWorkspaceInput {
+        server_url: server.url(),
+        token: "skew-token".into(),
+        staff_name: "Bob".into(),
+        staff_handle: "bob".into(),
+        staff_email: "sponsors@pigmentminiatures.com".into(),
+        staff_role: "Sponsors".into(),
+    })
+    .await
+    .expect("connect bob");
+    alice.stop_staff_sync_listener();
+    bob.stop_staff_sync_listener();
+
+    // Bob performs a connected sync to establish a server_time watermark.
+    let bob_ws = bob.sync_staff_workspace().await.expect("bob watermark sync");
+    assert_eq!(bob_ws.status, StaffSyncStatus::Connected);
+    assert!(bob_ws.last_sync_at.is_some());
+
+    // Alice writes an action item with a lagging local clock.
+    let skewed = alice
+        .save_action_item(SaveActionItemInput {
+            id: None,
+            title: "Clock-skewed edit".into(),
+            department: Some("marketing".into()),
+            milestone: None,
+            assignee_handle: None,
+            status: ActionItemStatus::Open,
+            due_at: None,
+            start_time: None,
+            end_time: None,
+            location: None,
+            cost_note: None,
+            source_event_id: None,
+            source_series_id: None,
+            source_thread_id: None,
+            sync_to_calendar: false,
+        })
+        .await
+        .expect("save skewed item");
+
+    // Bob performs an incremental `since` sync and MUST receive Alice's edit.
+    bob.sync_staff_workspace().await.expect("bob incremental sync");
+    assert!(bob
+        .list_action_items()
+        .await
+        .unwrap()
+        .iter()
+        .any(|a| a.id == skewed.id));
+
+    server.shutdown().await;
 }

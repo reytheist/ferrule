@@ -21,6 +21,7 @@ use crate::store::{
 // ---------------------------------------------------------------- workspace
 
 pub(crate) fn get_staff_workspace(conn: &mut Connection) -> Result<StaffWorkspaceView, CoreError> {
+    let pending_outbox_count = count_staff_outbox(conn)?.min(u32::MAX as usize) as u32;
     let row = query_one(
         conn,
         "SELECT server_url, staff_name, staff_handle, staff_email, staff_role,
@@ -39,10 +40,14 @@ pub(crate) fn get_staff_workspace(conn: &mut Connection) -> Result<StaffWorkspac
                 last_sync_at: r.get::<_, Option<i64>>(6).sq()?.map(UnixMs),
                 status: StaffSyncStatus::from_db(&r.get::<_, String>(7).sq()?),
                 last_error: r.get(8).sq()?,
+                pending_outbox_count,
             })
         },
     )?;
-    Ok(row.unwrap_or_default())
+    Ok(row.unwrap_or(StaffWorkspaceView {
+        pending_outbox_count,
+        ..StaffWorkspaceView::default()
+    }))
 }
 
 pub(crate) struct StaffWorkspaceUpsert<'a> {

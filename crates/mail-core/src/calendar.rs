@@ -434,8 +434,8 @@ pub struct ParsedIcsEvent {
 struct VTimezoneDef {
     standard_offset_secs: Option<i32>,
     daylight_offset_secs: Option<i32>,
-    standard_start_month: Option<u32>,
-    daylight_start_month: Option<u32>,
+    standard_start_md: Option<(u32, u32)>,
+    daylight_start_md: Option<(u32, u32)>,
 }
 
 /// Unfold RFC 5545 continuation lines (CRLF or LF followed by space/tab) and parse VEVENT blocks,
@@ -653,8 +653,8 @@ fn parse_vtimezones(lines: &[String]) -> HashMap<String, VTimezoneDef> {
             "DTSTART" => {
                 if let Ok(dt) = NaiveDateTime::parse_from_str(val.trim_end_matches('Z'), "%Y%m%dT%H%M%S") {
                     match section {
-                        SubSection::Standard => current.standard_start_month = Some(dt.month()),
-                        SubSection::Daylight => current.daylight_start_month = Some(dt.month()),
+                        SubSection::Standard => current.standard_start_md = Some((dt.month(), dt.day())),
+                        SubSection::Daylight => current.daylight_start_md = Some((dt.month(), dt.day())),
                         SubSection::None => {}
                     }
                 }
@@ -816,17 +816,17 @@ fn resolve_tzid_offset_secs(
     if let Some(vtz) = vtimezones.get(&key) {
         match (vtz.standard_offset_secs, vtz.daylight_offset_secs) {
             (Some(std_s), Some(dst_s)) => {
-                let dst_m = vtz.daylight_start_month.unwrap_or(3);
-                let std_m = vtz.standard_start_month.unwrap_or(11);
-                let m = dt.month();
-                let in_dst = if dst_m == 3 && std_m == 11 {
+                let dst_md = vtz.daylight_start_md.unwrap_or((3, 8));
+                let std_md = vtz.standard_start_md.unwrap_or((11, 1));
+                let cur_md = (dt.month(), dt.day());
+                let in_dst = if dst_md.0 == 3 && std_md.0 == 11 {
                     is_us_dst(dt)
-                } else if dst_m == 3 && std_m == 10 {
+                } else if dst_md.0 == 3 && std_md.0 == 10 {
                     is_eu_dst(dt)
-                } else if dst_m < std_m {
-                    m >= dst_m && m < std_m
+                } else if dst_md < std_md {
+                    cur_md >= dst_md && cur_md < std_md
                 } else {
-                    m >= dst_m || m < std_m
+                    cur_md >= dst_md || cur_md < std_md
                 };
                 return Some(if in_dst { dst_s } else { std_s });
             }
@@ -842,23 +842,32 @@ fn resolve_tzid_offset_secs(
 
     // Well-known IANA and Windows TZID fallback table.
     match key.as_str() {
-        "america/new_york" | "us/eastern" | "eastern standard time" | "est5edt" => {
-            Some(if is_us_dst(dt) { -4 * 3600 } else { -5 * 3600 })
-        }
-        "america/chicago" | "us/central" | "central standard time" | "cst6cdt" => {
-            Some(if is_us_dst(dt) { -5 * 3600 } else { -6 * 3600 })
-        }
-        "america/denver" | "us/mountain" | "mountain standard time" | "mst7mdt" => {
-            Some(if is_us_dst(dt) { -6 * 3600 } else { -7 * 3600 })
-        }
-        "america/los_angeles" | "us/pacific" | "pacific standard time" | "pst8pdt" => {
-            Some(if is_us_dst(dt) { -7 * 3600 } else { -8 * 3600 })
-        }
+        "america/new_york"
+        | "america/toronto"
+        | "us/eastern"
+        | "eastern standard time"
+        | "est5edt" => Some(if is_us_dst(dt) { -4 * 3600 } else { -5 * 3600 }),
+        "america/chicago"
+        | "america/winnipeg"
+        | "us/central"
+        | "central standard time"
+        | "cst6cdt" => Some(if is_us_dst(dt) { -5 * 3600 } else { -6 * 3600 }),
+        "america/denver"
+        | "america/edmonton"
+        | "us/mountain"
+        | "mountain standard time"
+        | "mst7mdt" => Some(if is_us_dst(dt) { -6 * 3600 } else { -7 * 3600 }),
+        "america/los_angeles"
+        | "america/vancouver"
+        | "us/pacific"
+        | "pacific standard time"
+        | "pst8pdt" => Some(if is_us_dst(dt) { -7 * 3600 } else { -8 * 3600 }),
         "america/phoenix" | "us mountain standard time" => Some(-7 * 3600),
         "america/anchorage" | "alaskan standard time" => {
             Some(if is_us_dst(dt) { -8 * 3600 } else { -9 * 3600 })
         }
         "pacific/honolulu" | "hawaiian standard time" => Some(-10 * 3600),
+        "america/sao_paulo" | "e. south america standard time" => Some(-3 * 3600),
         "europe/london" | "gmt standard time" => {
             Some(if is_eu_dst(dt) { 3600 } else { 0 })
         }
@@ -870,11 +879,27 @@ fn resolve_tzid_offset_secs(
         | "w. europe standard time"
         | "central european standard time"
         | "romance standard time" => Some(if is_eu_dst(dt) { 2 * 3600 } else { 3600 }),
-        "asia/tokyo" | "tokyo standard time" => Some(9 * 3600),
+        "asia/dubai" | "arabian standard time" => Some(4 * 3600),
         "asia/kolkata" | "india standard time" => Some(5 * 3600 + 30 * 60),
-        "australia/sydney" | "aus eastern standard time" => {
-            let m = dt.month();
-            Some(if !(4..10).contains(&m) { 11 * 3600 } else { 10 * 3600 })
+        "asia/shanghai"
+        | "asia/hong_kong"
+        | "asia/singapore"
+        | "asia/taipei"
+        | "china standard time"
+        | "singapore standard time"
+        | "taipei standard time" => Some(8 * 3600),
+        "asia/tokyo" | "asia/seoul" | "tokyo standard time" | "korea standard time" => {
+            Some(9 * 3600)
+        }
+        "australia/sydney" | "australia/melbourne" | "aus eastern standard time" => {
+            let cur_md = (dt.month(), dt.day());
+            let in_dst = !((4, 1)..(10, 1)).contains(&cur_md);
+            Some(if in_dst { 11 * 3600 } else { 10 * 3600 })
+        }
+        "pacific/auckland" | "new zealand standard time" => {
+            let cur_md = (dt.month(), dt.day());
+            let in_dst = !((4, 1)..(9, 25)).contains(&cur_md);
+            Some(if in_dst { 13 * 3600 } else { 12 * 3600 })
         }
         _ => None,
     }

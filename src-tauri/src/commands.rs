@@ -273,6 +273,13 @@ pub async fn sync_staff_workspace(
 }
 
 #[tauri::command]
+pub async fn pending_staff_outbox_count(
+    core: tauri::State<'_, MailCore>,
+) -> Result<u32, CoreError> {
+    Ok(core.pending_staff_outbox_count().await?.min(u32::MAX as usize) as u32)
+}
+
+#[tauri::command]
 pub async fn list_staff_directory(
     core: tauri::State<'_, MailCore>,
 ) -> Result<Vec<StaffMemberView>, CoreError> {

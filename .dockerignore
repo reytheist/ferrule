@@ -1,0 +1,10 @@
+.git
+.scratch
+dist
+node_modules
+target
+src-tauri/target
+src-tauri/gen
+*.db
+*.db-shm
+*.db-wal

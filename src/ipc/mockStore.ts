@@ -221,6 +221,7 @@ function emptyWorkspace(): StaffWorkspaceView {
     lastSyncAt: null,
     status: "disconnected",
     lastError: null,
+    pendingOutboxCount: 0,
   };
 }
 
@@ -1503,6 +1504,7 @@ function seedMockStaffDemo(): void {
     lastSyncAt: t - 2 * MINUTE,
     status: "connected",
     lastError: null,
+    pendingOutboxCount: 0,
   };
   state.staffDirectory = [
     {
@@ -1772,6 +1774,7 @@ export async function connectStaffWorkspace(
     lastSyncAt: t,
     status: "connected",
     lastError: null,
+    pendingOutboxCount: 0,
   };
   if (!state.staffDirectory.some((m) => m.handle === handle)) {
     state.staffDirectory.push({
@@ -1800,8 +1803,14 @@ export async function syncStaffWorkspace(): Promise<StaffWorkspaceView> {
     lastSyncAt: now(),
     status: "connected",
     lastError: null,
+    pendingOutboxCount: 0,
   };
   return { ...state.staffWorkspace };
+}
+
+export async function pendingStaffOutboxCount(): Promise<number> {
+  seedMockStaffDemo();
+  return state.staffWorkspace.pendingOutboxCount;
 }
 
 export async function listStaffDirectory(): Promise<StaffMemberView[]> {

@@ -6,7 +6,7 @@ ship-target: commit locally on master (push to origin when approved)
 
 ## Checks
 
-- `cargo test -p mail-core`
+- `cargo test --workspace`
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `pnpm typecheck`
 - `pnpm lint` (zero warnings)

@@ -150,6 +150,7 @@ pub fn run() {
             commands::connect_staff_workspace,
             commands::disconnect_staff_workspace,
             commands::sync_staff_workspace,
+            commands::pending_staff_outbox_count,
             commands::list_staff_directory,
             commands::list_shared_threads,
             commands::open_shared_thread,

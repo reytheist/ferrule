@@ -16,7 +16,7 @@ mod staff_core;
 mod store;
 mod sync;
 
-pub use crate::sync::staff::{parse_sse_frame, StaffSyncEvent, StaffSyncSnapshot};
+pub use crate::sync::staff::{parse_sse_frame, StaffSyncEvent, StaffSyncSnapshot, StaffTombstone};
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -82,6 +82,7 @@ struct MailCoreInner {
     events: broadcast::Sender<CoreEvent>,
     token_cache: Mutex<HashMap<AccountId, CachedAccessToken>>,
     staff_sse_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    staff_sync_lock: tokio::sync::Mutex<()>,
 }
 
 impl Drop for MailCoreInner {
@@ -135,6 +136,7 @@ impl MailCore {
                 events,
                 token_cache: Mutex::new(HashMap::new()),
                 staff_sse_task: Mutex::new(None),
+                staff_sync_lock: tokio::sync::Mutex::new(()),
             }),
         })
     }

@@ -49,6 +49,8 @@ pub struct StaffWorkspaceView {
     pub last_sync_at: Option<UnixMs>,
     pub status: StaffSyncStatus,
     pub last_error: Option<String>,
+    #[serde(default)]
+    pub pending_outbox_count: u32,
 }
 
 impl Default for StaffWorkspaceView {
@@ -64,6 +66,7 @@ impl Default for StaffWorkspaceView {
             last_sync_at: None,
             status: StaffSyncStatus::Disconnected,
             last_error: None,
+            pending_outbox_count: 0,
         }
     }
 }

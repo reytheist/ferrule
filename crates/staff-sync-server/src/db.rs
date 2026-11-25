@@ -10,7 +10,7 @@ use mail_core::staff::{
     HandoffStatus, PinnedLinkView, SharedCommentView, SharedDraftView, SharedTemplateView,
     SharedThreadView, ShowContactView, StaffMemberView,
 };
-use mail_core::StaffSyncSnapshot;
+use mail_core::{StaffSyncSnapshot, StaffTombstone};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -107,6 +107,7 @@ impl SyncDb {
                 "SELECT payload_json FROM action_item WHERE updated_at >= ?1 ORDER BY updated_at ASC",
                 min_ts,
             )?;
+            let tombstones = query_tombstones(conn, min_ts)?;
             Ok(StaffSyncSnapshot {
                 members,
                 shared_threads,
@@ -116,13 +117,15 @@ impl SyncDb {
                 calendar_events,
                 meeting_docs,
                 action_items,
+                tombstones,
                 server_time: Some(server_time),
             })
         })
     }
 
-    pub fn upsert_member(&self, member: &StaffMemberView) -> Result<(), DbError> {
+    pub fn upsert_member(&self, member: &StaffMemberView, now: UnixMs) -> Result<(), DbError> {
         let json = serde_json::to_string(member)?;
+        let watermark = now.0.max(member.updated_at.0);
         self.with_conn(|conn| {
             conn.execute(
                 "INSERT INTO staff_member (id, handle, email, updated_at, payload_json)
@@ -136,7 +139,7 @@ impl SyncDb {
                     member.id.to_string(),
                     member.handle.to_ascii_lowercase(),
                     member.email.to_ascii_lowercase(),
-                    member.updated_at.0,
+                    watermark,
                     json,
                 ],
             )?;
@@ -144,12 +147,17 @@ impl SyncDb {
         })
     }
 
-    pub fn upsert_shared_thread(&self, thread: &SharedThreadView) -> Result<(), DbError> {
+    pub fn upsert_shared_thread(
+        &self,
+        thread: &SharedThreadView,
+        now: UnixMs,
+    ) -> Result<(), DbError> {
         let mut base = thread.clone();
         let comments = std::mem::take(&mut base.comments);
         let draft = base.draft.take();
         let json = serde_json::to_string(&base)?;
         let tid = thread.id.to_string();
+        let watermark = now.0.max(thread.updated_at.0);
 
         self.with_conn(|conn| {
             conn.execute(
@@ -158,7 +166,7 @@ impl SyncDb {
                  ON CONFLICT(id) DO UPDATE SET
                     updated_at = excluded.updated_at,
                     payload_json = excluded.payload_json",
-                params![tid, thread.updated_at.0, json],
+                params![tid, watermark, json],
             )?;
             for comment in &comments {
                 let cjson = serde_json::to_string(comment)?;
@@ -282,51 +290,77 @@ impl SyncDb {
         })
     }
 
-    pub fn upsert_template(&self, id: SharedTemplateId, tpl: &SharedTemplateView) -> Result<(), DbError> {
+    pub fn upsert_template(
+        &self,
+        id: SharedTemplateId,
+        tpl: &SharedTemplateView,
+        now: UnixMs,
+    ) -> Result<(), DbError> {
         let mut normalized = tpl.clone();
         normalized.id = id;
-        self.upsert_simple("shared_template", &id.to_string(), normalized.updated_at, &normalized)
+        self.upsert_simple("shared_template", &id.to_string(), normalized.updated_at, now, &normalized)
     }
 
-    pub fn delete_template(&self, id: SharedTemplateId) -> Result<(), DbError> {
-        self.delete_simple("shared_template", &id.to_string())
+    pub fn delete_template(&self, id: SharedTemplateId, now: UnixMs) -> Result<(), DbError> {
+        self.delete_simple("shared_template", &id.to_string(), now)
     }
 
-    pub fn upsert_contact(&self, id: ContactId, contact: &ShowContactView) -> Result<(), DbError> {
+    pub fn upsert_contact(
+        &self,
+        id: ContactId,
+        contact: &ShowContactView,
+        now: UnixMs,
+    ) -> Result<(), DbError> {
         let mut normalized = contact.clone();
         normalized.id = id;
-        self.upsert_simple("show_contact", &id.to_string(), normalized.updated_at, &normalized)
+        self.upsert_simple("show_contact", &id.to_string(), normalized.updated_at, now, &normalized)
     }
 
-    pub fn delete_contact(&self, id: ContactId) -> Result<(), DbError> {
-        self.delete_simple("show_contact", &id.to_string())
+    pub fn delete_contact(&self, id: ContactId, now: UnixMs) -> Result<(), DbError> {
+        self.delete_simple("show_contact", &id.to_string(), now)
     }
 
-    pub fn upsert_pinned_link(&self, id: PinnedLinkId, link: &PinnedLinkView) -> Result<(), DbError> {
+    pub fn upsert_pinned_link(
+        &self,
+        id: PinnedLinkId,
+        link: &PinnedLinkView,
+        now: UnixMs,
+    ) -> Result<(), DbError> {
         let mut normalized = link.clone();
         normalized.id = id;
-        self.upsert_simple("pinned_link", &id.to_string(), normalized.updated_at, &normalized)
+        self.upsert_simple("pinned_link", &id.to_string(), normalized.updated_at, now, &normalized)
     }
 
-    pub fn delete_pinned_link(&self, id: PinnedLinkId) -> Result<(), DbError> {
-        self.delete_simple("pinned_link", &id.to_string())
+    pub fn delete_pinned_link(&self, id: PinnedLinkId, now: UnixMs) -> Result<(), DbError> {
+        self.delete_simple("pinned_link", &id.to_string(), now)
     }
 
-    pub fn upsert_calendar_event(&self, id: CalendarEventId, event: &CalendarEventView) -> Result<(), DbError> {
+    pub fn upsert_calendar_event(
+        &self,
+        id: CalendarEventId,
+        event: &CalendarEventView,
+        now: UnixMs,
+    ) -> Result<(), DbError> {
         let mut normalized = event.clone();
         normalized.id = id;
-        self.upsert_simple("calendar_event", &id.to_string(), normalized.updated_at, &normalized)
+        self.upsert_simple("calendar_event", &id.to_string(), normalized.updated_at, now, &normalized)
     }
 
-    pub fn delete_calendar_event(&self, id: CalendarEventId) -> Result<(), DbError> {
-        self.delete_simple("calendar_event", &id.to_string())
+    pub fn delete_calendar_event(&self, id: CalendarEventId, now: UnixMs) -> Result<(), DbError> {
+        self.delete_simple("calendar_event", &id.to_string(), now)
     }
 
-    pub fn upsert_meeting_doc(&self, event_id: CalendarEventId, doc: &MeetingDocView) -> Result<(), DbError> {
+    pub fn upsert_meeting_doc(
+        &self,
+        event_id: CalendarEventId,
+        doc: &MeetingDocView,
+        now: UnixMs,
+    ) -> Result<(), DbError> {
         let mut normalized = doc.clone();
         normalized.event_id = event_id;
         let eid = event_id.to_string();
         let json = serde_json::to_string(&normalized)?;
+        let watermark = now.0.max(normalized.updated_at.0);
         self.with_conn(|conn| {
             let existing: Option<(i64, i64)> = conn
                 .query_row(
@@ -350,20 +384,25 @@ impl SyncDb {
                     rev = excluded.rev,
                     updated_at = excluded.updated_at,
                     payload_json = excluded.payload_json",
-                params![eid, i64::from(normalized.rev), normalized.updated_at.0, json],
+                params![eid, i64::from(normalized.rev), watermark, json],
             )?;
             Ok(())
         })
     }
 
-    pub fn upsert_action_item(&self, id: ActionItemId, item: &ActionItemView) -> Result<(), DbError> {
+    pub fn upsert_action_item(
+        &self,
+        id: ActionItemId,
+        item: &ActionItemView,
+        now: UnixMs,
+    ) -> Result<(), DbError> {
         let mut normalized = item.clone();
         normalized.id = id;
-        self.upsert_simple("action_item", &id.to_string(), normalized.updated_at, &normalized)
+        self.upsert_simple("action_item", &id.to_string(), normalized.updated_at, now, &normalized)
     }
 
-    pub fn delete_action_item(&self, id: ActionItemId) -> Result<(), DbError> {
-        self.delete_simple("action_item", &id.to_string())
+    pub fn delete_action_item(&self, id: ActionItemId, now: UnixMs) -> Result<(), DbError> {
+        self.delete_simple("action_item", &id.to_string(), now)
     }
 
     fn upsert_simple<T: Serialize>(
@@ -371,9 +410,11 @@ impl SyncDb {
         table: &'static str,
         id: &str,
         updated_at: UnixMs,
+        now: UnixMs,
         value: &T,
     ) -> Result<(), DbError> {
         let json = serde_json::to_string(value)?;
+        let watermark = now.0.max(updated_at.0);
         let sql = format!(
             "INSERT INTO {table} (id, updated_at, payload_json)
              VALUES (?1, ?2, ?3)
@@ -382,15 +423,30 @@ impl SyncDb {
                 payload_json = excluded.payload_json"
         );
         self.with_conn(|conn| {
-            conn.execute(&sql, params![id, updated_at.0, json])?;
+            let tx = conn.transaction()?;
+            tx.execute(&sql, params![id, watermark, json])?;
+            tx.execute(
+                "DELETE FROM tombstone WHERE entity_kind = ?1 AND entity_id = ?2",
+                params![table, id],
+            )?;
+            tx.commit()?;
             Ok(())
         })
     }
 
-    fn delete_simple(&self, table: &'static str, id: &str) -> Result<(), DbError> {
+    fn delete_simple(&self, table: &'static str, id: &str, now: UnixMs) -> Result<(), DbError> {
         let sql = format!("DELETE FROM {table} WHERE id = ?1");
         self.with_conn(|conn| {
-            conn.execute(&sql, params![id])?;
+            let tx = conn.transaction()?;
+            tx.execute(&sql, params![id])?;
+            tx.execute(
+                "INSERT INTO tombstone (entity_kind, entity_id, deleted_at)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(entity_kind, entity_id) DO UPDATE SET
+                    deleted_at = excluded.deleted_at",
+                params![table, id, now.0],
+            )?;
+            tx.commit()?;
             Ok(())
         })
     }
@@ -466,4 +522,23 @@ fn query_draft(conn: &mut Connection, tid: &str) -> Result<Option<SharedDraftVie
         Some(json) => Ok(Some(serde_json::from_str(&json)?)),
         None => Ok(None),
     }
+}
+
+fn query_tombstones(conn: &mut Connection, min_ts: i64) -> Result<Vec<StaffTombstone>, DbError> {
+    let mut stmt = conn.prepare(
+        "SELECT entity_kind, entity_id, deleted_at
+         FROM tombstone
+         WHERE deleted_at >= ?1
+         ORDER BY deleted_at ASC",
+    )?;
+    let mut rows = stmt.query(params![min_ts])?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        out.push(StaffTombstone {
+            entity_kind: row.get(0)?,
+            entity_id: row.get(1)?,
+            deleted_at: UnixMs(row.get(2)?),
+        });
+    }
+    Ok(out)
 }

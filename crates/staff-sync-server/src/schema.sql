@@ -3,6 +3,7 @@
 
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
+PRAGMA busy_timeout = 5000;
 
 CREATE TABLE IF NOT EXISTS staff_member (
     id TEXT PRIMARY KEY,
@@ -71,3 +72,13 @@ CREATE TABLE IF NOT EXISTS action_item (
     updated_at INTEGER NOT NULL,
     payload_json TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS tombstone (
+    entity_kind TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    deleted_at INTEGER NOT NULL,
+    PRIMARY KEY (entity_kind, entity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_srv_tombstone_deleted_at
+    ON tombstone(deleted_at ASC);

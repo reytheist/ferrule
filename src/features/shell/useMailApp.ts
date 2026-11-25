@@ -160,6 +160,7 @@ const EMPTY_STAFF_WORKSPACE: StaffWorkspaceView = {
   lastSyncAt: null,
   status: "disconnected",
   lastError: null,
+  pendingOutboxCount: 0,
 };
 
 export interface Anchor {
@@ -1181,10 +1182,14 @@ export function useMailApp(): MailApp {
         const refreshed = await openSharedThreadCommand(activeSharedThread.id).catch(() => null);
         if (refreshed) setActiveSharedThread(refreshed);
       }
+      const offlineMsg =
+        ws.pendingOutboxCount > 0
+          ? `Staff Sync offline (${ws.pendingOutboxCount} pending), working from local cache`
+          : "Staff Sync offline, working from local cache";
       showToast(
         ws.status === "connected"
           ? "Staff workspace synced"
-          : ws.lastError ?? "Staff Sync offline — working from local cache",
+          : ws.lastError ?? offlineMsg,
       );
     } catch (err) {
       showToast(friendlyError(err));

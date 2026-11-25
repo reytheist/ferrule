@@ -142,6 +142,67 @@ fn parses_ics_tzid_vtimezone_utc_and_all_day_value_date() {
 }
 
 #[test]
+fn parses_ics_additional_iana_tzids_and_vtimezone_transition_day() {
+    let raw = concat!(
+        "BEGIN:VCALENDAR\r\n",
+        "VERSION:2.0\r\n",
+        "BEGIN:VTIMEZONE\r\n",
+        "TZID:Custom/SouthernHalf\r\n",
+        "BEGIN:DAYLIGHT\r\n",
+        "DTSTART:19701015T020000\r\n",
+        "TZOFFSETFROM:+1000\r\n",
+        "TZOFFSETTO:+1100\r\n",
+        "END:DAYLIGHT\r\n",
+        "BEGIN:STANDARD\r\n",
+        "DTSTART:19700405T030000\r\n",
+        "TZOFFSETFROM:+1100\r\n",
+        "TZOFFSETTO:+1000\r\n",
+        "END:STANDARD\r\n",
+        "END:VTIMEZONE\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:shanghai@pigment\r\n",
+        "SUMMARY:Shanghai Sculptor Call\r\n",
+        "DTSTART;TZID=Asia/Shanghai:20251126T180000\r\n",
+        "DTEND;TZID=Asia/Shanghai:20251126T190000\r\n",
+        "END:VEVENT\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:vtz-before-transition@pigment\r\n",
+        "SUMMARY:Before Oct 15 Transition\r\n",
+        "DTSTART;TZID=Custom/SouthernHalf:20251010T100000\r\n",
+        "DTEND;TZID=Custom/SouthernHalf:20251010T110000\r\n",
+        "END:VEVENT\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:vtz-after-transition@pigment\r\n",
+        "SUMMARY:After Oct 15 Transition\r\n",
+        "DTSTART;TZID=Custom/SouthernHalf:20251020T110000\r\n",
+        "DTEND;TZID=Custom/SouthernHalf:20251020T120000\r\n",
+        "END:VEVENT\r\n",
+        "END:VCALENDAR\r\n",
+    );
+
+    let events = parse_ics(raw);
+    assert_eq!(events.len(), 3);
+
+    // 2025-11-26 18:00 Asia/Shanghai (UTC+8) == 2025-11-26 10:00 UTC
+    let shanghai_expected = chrono::DateTime::parse_from_rfc3339("2025-11-26T10:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    assert_eq!(events[0].start_at, UnixMs(shanghai_expected));
+
+    // Oct 10 is before Oct 15 DST start -> +10:00 -> 00:00 UTC
+    let before_expected = chrono::DateTime::parse_from_rfc3339("2025-10-10T00:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    assert_eq!(events[1].start_at, UnixMs(before_expected));
+
+    // Oct 20 is after Oct 15 DST start -> +11:00 -> 00:00 UTC
+    let after_expected = chrono::DateTime::parse_from_rfc3339("2025-10-20T00:00:00Z")
+        .unwrap()
+        .timestamp_millis();
+    assert_eq!(events[2].start_at, UnixMs(after_expected));
+}
+
+#[test]
 fn parses_natural_language_quick_add() {
     let parsed = parse_quick_add(
         "Staff sync Thu 7pm 90m #operations @Ballroom A weekly",
