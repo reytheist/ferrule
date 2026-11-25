@@ -9,16 +9,17 @@ use crate::ids::{AccountId, IdentityId};
 use crate::store::{
     from_json, fts_delete, id_to_blob, query_all, query_one, row_id, to_json, SqlResultExt,
 };
-use crate::types::{AccountView, IdentityView, SpaceColor, SyncState};
+use crate::types::{AccountView, IdentityView, SpaceColor, SpaceKind, SyncState};
 
 const ACCOUNT_COLS: &str =
-    "id, display_name, provider, color, email, position, auth_json, sync_state_json";
+    "id, display_name, provider, color, space_kind, email, position, auth_json, sync_state_json";
 
 pub(crate) struct AccountRow {
     pub id: AccountId,
     pub display_name: String,
     pub provider: ProviderKind,
     pub color: SpaceColor,
+    pub space_kind: SpaceKind,
     pub email: String,
     pub position: u32,
     pub auth: ProviderAuth,
@@ -61,8 +62,9 @@ fn provider_db(kind: ProviderKind) -> &'static str {
 fn map_account(row: &Row<'_>) -> Result<AccountRow, CoreError> {
     let provider_raw: String = row.get(2).sq()?;
     let color_raw: String = row.get(3).sq()?;
-    let auth_raw: String = row.get(6).sq()?;
-    let sync_raw: String = row.get(7).sq()?;
+    let space_kind_raw: String = row.get(4).sq()?;
+    let auth_raw: String = row.get(7).sq()?;
+    let sync_raw: String = row.get(8).sq()?;
     Ok(AccountRow {
         id: row_id(row, 0, AccountId::from_bytes)?,
         display_name: row.get(1).sq()?,
@@ -72,8 +74,9 @@ fn map_account(row: &Row<'_>) -> Result<AccountRow, CoreError> {
             _ => ProviderKind::Imap,
         },
         color: SpaceColor::from_db(&color_raw),
-        email: row.get(4).sq()?,
-        position: row.get::<_, i64>(5).sq()?.max(0) as u32,
+        space_kind: SpaceKind::from_db(&space_kind_raw),
+        email: row.get(5).sq()?,
+        position: row.get::<_, i64>(6).sq()?.max(0) as u32,
         auth: from_json(&auth_raw)?,
         sync: from_json(&sync_raw)?,
     })
@@ -114,6 +117,7 @@ pub(crate) fn insert_account(
     conn: &mut Connection,
     display_name: &str,
     color: SpaceColor,
+    space_kind: SpaceKind,
     auth: &ProviderAuth,
     sync: &SyncState,
     created_at: UnixMs,
@@ -128,13 +132,14 @@ pub(crate) fn insert_account(
         .sq()?;
     let id = AccountId::fresh();
     conn.execute(
-        "INSERT INTO account (id, display_name, provider, color, email, position, auth_json, sync_state_json, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO account (id, display_name, provider, color, space_kind, email, position, auth_json, sync_state_json, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             id_to_blob(id.as_bytes()),
             display_name,
             provider_db(auth.provider_kind()),
             color.as_str(),
+            space_kind.as_str(),
             auth.address(),
             position,
             to_json(auth)?,
@@ -241,13 +246,27 @@ pub(crate) fn update_account_meta(
     id: AccountId,
     display_name: &str,
     color: SpaceColor,
+    space_kind: Option<SpaceKind>,
 ) -> Result<bool, CoreError> {
-    let changed = conn
-        .execute(
-            "UPDATE account SET display_name = ?2, color = ?3 WHERE id = ?1",
-            params![id_to_blob(id.as_bytes()), display_name, color.as_str()],
-        )
-        .sq()?;
+    let changed = match space_kind {
+        Some(kind) => conn
+            .execute(
+                "UPDATE account SET display_name = ?2, color = ?3, space_kind = ?4 WHERE id = ?1",
+                params![
+                    id_to_blob(id.as_bytes()),
+                    display_name,
+                    color.as_str(),
+                    kind.as_str()
+                ],
+            )
+            .sq()?,
+        None => conn
+            .execute(
+                "UPDATE account SET display_name = ?2, color = ?3 WHERE id = ?1",
+                params![id_to_blob(id.as_bytes()), display_name, color.as_str()],
+            )
+            .sq()?,
+    };
     Ok(changed > 0)
 }
 
@@ -362,6 +381,7 @@ pub(crate) fn account_views(conn: &mut Connection) -> Result<Vec<AccountView>, C
             display_name: row.display_name,
             provider: row.provider,
             color: row.color,
+            space_kind: row.space_kind,
             email: row.email,
             identities: identities.iter().map(IdentityRow::to_view).collect(),
             sync: row.sync,

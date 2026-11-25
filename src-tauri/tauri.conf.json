@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Ferrule",
         "width": 1280,
         "height": 820,
@@ -25,7 +26,13 @@
     }
   },
   "bundle": {
-    "active": false,
-    "icon": ["icons/icon.png"]
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "Low-memory email and staff collaboration client",
+    "icon": ["icons/icon.png", "icons/icon.ico", "icons/icon.icns"],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
   }
 }

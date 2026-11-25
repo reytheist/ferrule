@@ -8,6 +8,7 @@ import type {
   AccountId,
   AccountView,
   ActionOutcome,
+  AppSettings,
   CreateDraftInput,
   DraftId,
   DraftView,
@@ -42,6 +43,16 @@ export async function healthCheck(): Promise<string> {
     return "browser-preview";
   }
   return invoke<string>("health_check");
+}
+
+export async function getSettings(): Promise<AppSettings> {
+  if (!isTauriRuntime()) return mock.getSettings();
+  return invoke<AppSettings>("get_settings");
+}
+
+export async function updateSettings(settings: AppSettings): Promise<AppSettings> {
+  if (!isTauriRuntime()) return mock.updateSettings(settings);
+  return invoke<AppSettings>("update_settings", { settings });
 }
 
 export async function listAccounts(): Promise<AccountView[]> {

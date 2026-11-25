@@ -28,6 +28,10 @@ const MIGRATION_0001: &str = include_str!("0001_init.sql");
 /// because `ALTER TABLE … ADD COLUMN` is not idempotent.
 const MIGRATION_0002_JOB_PAYLOAD: &str =
     "ALTER TABLE job ADD COLUMN payload TEXT;\nALTER TABLE job ADD COLUMN message_id_hdr TEXT;";
+/// Adds `space_kind` to existing `account` tables so Pigment Staff spaces are distinguished
+/// from personal spaces (which have Staff Sharing disabled by default).
+const MIGRATION_0003_ACCOUNT_SPACE_KIND: &str =
+    "ALTER TABLE account ADD COLUMN space_kind TEXT NOT NULL DEFAULT 'personal' CHECK (space_kind IN ('personal', 'pigment_staff'));";
 
 pub(crate) struct Store {
     conn: Mutex<Connection>,
@@ -65,6 +69,12 @@ impl Store {
             conn.execute_batch(MIGRATION_0002_JOB_PAYLOAD)
                 .map_err(|e| CoreError::Storage {
                     reason: format!("run migration 0002: {e}"),
+                })?;
+        }
+        if !column_exists(&conn, "account", "space_kind")? {
+            conn.execute_batch(MIGRATION_0003_ACCOUNT_SPACE_KIND)
+                .map_err(|e| CoreError::Storage {
+                    reason: format!("run migration 0003: {e}"),
                 })?;
         }
         Ok(Self {
@@ -205,6 +215,34 @@ pub(crate) fn fts_delete(conn: &mut Connection, rowid: i64) -> Result<(), CoreEr
     conn.execute(
         "DELETE FROM message_fts WHERE rowid = ?1",
         rusqlite::params![rowid],
+    )
+    .sq()?;
+    Ok(())
+}
+
+const APP_SETTINGS_KEY: &str = "app_settings";
+
+pub(crate) fn get_app_settings(conn: &mut Connection) -> Result<crate::types::AppSettings, CoreError> {
+    let raw: Option<String> = query_one(
+        conn,
+        "SELECT value_json FROM app_setting WHERE key = ?1",
+        rusqlite::params![APP_SETTINGS_KEY],
+        |row| row.get(0).sq(),
+    )?;
+    match raw {
+        Some(json) => from_json(&json),
+        None => Ok(crate::types::AppSettings::default()),
+    }
+}
+
+pub(crate) fn save_app_settings(
+    conn: &mut Connection,
+    settings: &crate::types::AppSettings,
+) -> Result<(), CoreError> {
+    conn.execute(
+        "INSERT INTO app_setting (key, value_json) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
+        rusqlite::params![APP_SETTINGS_KEY, to_json(settings)?],
     )
     .sq()?;
     Ok(())

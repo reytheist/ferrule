@@ -1,5 +1,7 @@
-import { Moon, PenLine, Plus, RefreshCw, Search, Sun } from "lucide-react";
+import { Moon, PenLine, Plus, RefreshCw, Search, Settings, Sun } from "lucide-react";
 import type { MailApp } from "../shell/useMailApp";
+
+const IS_MAC = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
 
 const SPLIT_ICON = (
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -33,7 +35,7 @@ export function Topbar({ app }: { app: MailApp }) {
   return (
     <header className="topbar">
       <div className="brand-mark">
-        <span className="logo-dot">G</span>
+        <span className="logo-dot">F</span>
         <span>Ferrule</span>
       </div>
 
@@ -42,7 +44,7 @@ export function Topbar({ app }: { app: MailApp }) {
           <Search />
           Search mail, labels, or commands…
         </span>
-        <span className="kbd">Ctrl K</span>
+        <span className="kbd">{IS_MAC ? "⌘ K" : "Ctrl K"}</span>
       </button>
 
       <div className="topbar-right">
@@ -67,6 +69,14 @@ export function Topbar({ app }: { app: MailApp }) {
           title={app.layout === "split" ? "Switch to classic layout" : "Switch to split layout"}
         >
           {app.layout === "split" ? SPLIT_ICON : CLASSIC_ICON}
+        </button>
+        <button
+          className="icon-btn"
+          onClick={app.openSettings}
+          title={IS_MAC ? "Settings (⌘,)" : "Settings (Ctrl+,)"}
+          aria-label="Settings"
+        >
+          <Settings />
         </button>
         <button className="ghost-btn" onClick={app.openAddAccount} title="Add account">
           <Plus />

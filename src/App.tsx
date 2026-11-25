@@ -2,6 +2,7 @@ import { AddAccountModal } from "./features/accounts/AddAccountModal";
 import { CommandBar } from "./features/command-bar/CommandBar";
 import { ComposeModal } from "./features/compose/ComposeModal";
 import { ReadingPane } from "./features/reading/ReadingPane";
+import { SettingsModal } from "./features/settings/SettingsModal";
 import { MailboxSidebar } from "./features/sidebar/MailboxSidebar";
 import { SpaceSwitcher } from "./features/spaces/SpaceSwitcher";
 import { useMailApp } from "./features/shell/useMailApp";
@@ -18,7 +19,7 @@ export function App() {
     return (
       <div className="boot-screen">
         <div className="brand-mark">
-          <span className="logo-dot">G</span>
+          <span className="logo-dot">F</span>
           <span>Ferrule</span>
         </div>
         <span>Booting mail core…</span>
@@ -30,7 +31,7 @@ export function App() {
     return (
       <div className="boot-screen error">
         <div className="brand-mark">
-          <span className="logo-dot">G</span>
+          <span className="logo-dot">F</span>
           <span>Ferrule</span>
         </div>
         <span>Mail core failed to start: {app.error}</span>
@@ -52,6 +53,7 @@ export function App() {
       {app.composeOpen && <ComposeModal app={app} />}
       {app.addAccountOpen && <AddAccountModal app={app} />}
       {app.templatesOpen && <TemplatesModal app={app} />}
+      {app.settingsOpen && <SettingsModal app={app} />}
       <SchedulePopover app={app} />
       <UndoToast app={app} />
     </div>

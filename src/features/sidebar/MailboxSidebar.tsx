@@ -118,12 +118,14 @@ export function MailboxSidebar({ app }: { app: MailApp }) {
         <span className="nav-count">{app.templates.length}</span>
       </button>
 
-      <div className="sidebar-footer">
-        <div className="agent-slot" title="Phase 2: Local MCP agent draft approval queue">
-          <Sparkles />
-          <span>Agent Queue · Ph2</span>
+      {app.settings.developerToolsEnabled && (
+        <div className="sidebar-footer">
+          <div className="agent-slot" title="Developer Tools: Local MCP agent draft approval queue">
+            <Sparkles />
+            <span>Agent Queue · Dev</span>
+          </div>
         </div>
-      </div>
+      )}
     </aside>
   );
 }

@@ -7,9 +7,52 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
 
+#[cfg(target_os = "macos")]
+fn install_macos_app_menu(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::menu::{PredefinedMenuItem, SubmenuBuilder};
+
+    let app_menu = SubmenuBuilder::new(app, "Ferrule")
+        .item(&PredefinedMenuItem::about(app, Some("About Ferrule"), None)?)
+        .separator()
+        .item(&PredefinedMenuItem::services(app, None)?)
+        .separator()
+        .item(&PredefinedMenuItem::hide(app, None)?)
+        .item(&PredefinedMenuItem::hide_others(app, None)?)
+        .item(&PredefinedMenuItem::show_all(app, None)?)
+        .separator()
+        .item(&PredefinedMenuItem::quit(app, None)?)
+        .build()?;
+
+    let edit_menu = SubmenuBuilder::new(app, "Edit")
+        .item(&PredefinedMenuItem::undo(app, None)?)
+        .item(&PredefinedMenuItem::redo(app, None)?)
+        .separator()
+        .item(&PredefinedMenuItem::cut(app, None)?)
+        .item(&PredefinedMenuItem::copy(app, None)?)
+        .item(&PredefinedMenuItem::paste(app, None)?)
+        .item(&PredefinedMenuItem::select_all(app, None)?)
+        .build()?;
+
+    let window_menu = SubmenuBuilder::new(app, "Window")
+        .item(&PredefinedMenuItem::minimize(app, None)?)
+        .item(&PredefinedMenuItem::maximize(app, None)?)
+        .separator()
+        .item(&PredefinedMenuItem::close_window(app, None)?)
+        .build()?;
+
+    let menu = MenuBuilder::new(app)
+        .items(&[&app_menu, &edit_menu, &window_menu])
+        .build()?;
+    app.set_menu(menu)?;
+    Ok(())
+}
+
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            install_macos_app_menu(app)?;
+
             let db_path = app
                 .path()
                 .app_data_dir()
@@ -51,6 +94,7 @@ pub fn run() {
 
             let mut tray = TrayIconBuilder::new()
                 .menu(&menu)
+                .show_menu_on_left_click(cfg!(target_os = "macos"))
                 .tooltip("Ferrule")
                 .on_menu_event(|app_handle, event| match event.id().as_ref() {
                     "show" => {
@@ -74,6 +118,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
+            commands::get_settings,
+            commands::update_settings,
             commands::list_accounts,
             commands::add_account,
             commands::oauth_sign_in_account,
@@ -100,6 +146,22 @@ pub fn run() {
             commands::delete_template,
             commands::tick_scheduler,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Ferrule");
+        .build(tauri::generate_context!())
+        .expect("error while building Ferrule");
+
+    app.run(|_app_handle, _event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } = _event
+        {
+            if !has_visible_windows {
+                if let Some(window) = _app_handle.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        }
+    });
 }

@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS account (
     display_name TEXT NOT NULL,
     provider TEXT NOT NULL CHECK (provider IN ('gmail', 'outlook', 'imap')),
     color TEXT NOT NULL CHECK (color IN ('azure', 'berry', 'teal', 'amber', 'violet', 'emerald')),
+    space_kind TEXT NOT NULL DEFAULT 'personal' CHECK (space_kind IN ('personal', 'pigment_staff')),
     email TEXT NOT NULL,
     position INTEGER NOT NULL,
     auth_json TEXT NOT NULL,
@@ -138,4 +139,9 @@ CREATE TABLE IF NOT EXISTS sender_allow (
     account_id BLOB NOT NULL REFERENCES account(id) ON DELETE CASCADE,
     address TEXT NOT NULL,
     PRIMARY KEY (account_id, address)
+);
+
+CREATE TABLE IF NOT EXISTS app_setting (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL
 );

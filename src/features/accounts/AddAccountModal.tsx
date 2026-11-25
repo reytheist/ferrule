@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check, ExternalLink, Pencil, Plus, X } from "lucide-react";
+import { ArrowLeft, Check, ExternalLink, Pencil, Plus, Users, X } from "lucide-react";
 import type {
   AccountView,
   NewAccountInput,
   ProviderAuth,
   SpaceColor,
+  SpaceKind,
 } from "../../types/mail";
 import type { MailApp } from "../shell/useMailApp";
 import { SPACE_COLORS, spaceClass } from "../spaces/SpaceSwitcher";
 import {
   IMAP_PRESETS,
+  PIGMENT_STAFF_IONOS_PRESET,
   type ImapPresetId,
   detectImapPresetByEmail,
   findImapPreset,
@@ -17,9 +19,11 @@ import {
   formatSmtpSecurity,
   isImapPresetId,
   matchesPresetEndpoints,
+  suggestPigmentSpaceName,
 } from "./imapPresets";
 
 type ProviderStep =
+  | "pigmentStaff"
   | "gmailOAuth"
   | "outlookOAuth"
   | "gmailAppPassword"
@@ -31,6 +35,8 @@ interface ProviderOption {
   kind: ProviderStep;
   name: string;
   description: string;
+  featured?: boolean;
+  badge?: string;
 }
 
 const GOOGLE_CLIENT_KEY = "ferrule.googleClientId";
@@ -74,10 +80,12 @@ function pickNextColor(accounts: AccountView[]): SpaceColor {
 
 export function AddAccountModal({ app }: { app: MailApp }) {
   const [step, setStep] = useState<WizardStep>("provider");
-  const [provider, setProvider] = useState<ProviderStep>("gmailOAuth");
+  const [provider, setProvider] = useState<ProviderStep>("pigmentStaff");
   const [connected, setConnected] = useState<AccountView | null>(null);
   const [displayName, setDisplayName] = useState("");
+  const [displayNameTouched, setDisplayNameTouched] = useState(false);
   const [color, setColor] = useState<SpaceColor>(() => pickNextColor(app.accounts));
+  const [spaceKind, setSpaceKind] = useState<SpaceKind>("personal");
   const [address, setAddress] = useState("");
   const [secret, setSecret] = useState("");
   const [googleClientId, setGoogleClientId] = useState(
@@ -117,8 +125,9 @@ export function AddAccountModal({ app }: { app: MailApp }) {
   const effectiveOutlookClientId =
     outlookClientId.trim() || app.savedOAuthClients.outlookClientId || "";
   const isOAuth = provider === "gmailOAuth" || provider === "outlookOAuth";
+  const isPigmentStaff = provider === "pigmentStaff";
   const oauthProviderName = provider === "outlookOAuth" ? "Microsoft" : "Google";
-  const activePreset = findImapPreset(presetId);
+  const activePreset = isPigmentStaff ? PIGMENT_STAFF_IONOS_PRESET : findImapPreset(presetId);
   const isPresetModified =
     activePreset !== null &&
     !matchesPresetEndpoints(
@@ -128,6 +137,14 @@ export function AddAccountModal({ app }: { app: MailApp }) {
     );
 
   const providers: ProviderOption[] = [
+    {
+      kind: "pigmentStaff",
+      name: "Pigment Staff (IONOS)",
+      badge: "Staff Space",
+      featured: true,
+      description:
+        "One-click IONOS setup (imap.ionos.com / smtp.ionos.com) for info@, sponsors@, exhibition@, marketing@, or volunteers@. Marks this account as a Pigment Staff Space.",
+    },
     {
       kind: "gmailOAuth",
       name: "Gmail · Sign in with Google",
@@ -215,7 +232,9 @@ export function AddAccountModal({ app }: { app: MailApp }) {
   function pick(next: ProviderStep): void {
     setProvider(next);
     setError(null);
+    setDisplayNameTouched(false);
     if (next === "gmailOAuth") {
+      setSpaceKind("personal");
       if (effectiveGoogleClientId) {
         void launchOAuth("gmailOAuth", effectiveGoogleClientId);
       } else {
@@ -224,6 +243,7 @@ export function AddAccountModal({ app }: { app: MailApp }) {
       return;
     }
     if (next === "outlookOAuth") {
+      setSpaceKind("personal");
       if (effectiveOutlookClientId) {
         void launchOAuth("outlookOAuth", effectiveOutlookClientId);
       } else {
@@ -232,6 +252,26 @@ export function AddAccountModal({ app }: { app: MailApp }) {
       return;
     }
     setColor(pickNextColor(app.accounts));
+    if (next === "pigmentStaff") {
+      setSpaceKind("pigmentStaff");
+      setPresetId("ionos");
+      setImapHost(PIGMENT_STAFF_IONOS_PRESET.imap.host);
+      setImapPort(String(PIGMENT_STAFF_IONOS_PRESET.imap.port));
+      setImapTls(PIGMENT_STAFF_IONOS_PRESET.imap.tls);
+      setSmtpHost(PIGMENT_STAFF_IONOS_PRESET.smtp.host);
+      setSmtpPort(String(PIGMENT_STAFF_IONOS_PRESET.smtp.port));
+      setSmtpTls(PIGMENT_STAFF_IONOS_PRESET.smtp.tls);
+      setEditingServers(false);
+      setDisplayName(address.trim() ? suggestPigmentSpaceName(address) : "Pigment Staff");
+    } else {
+      setSpaceKind("personal");
+      if (next === "imapPassword" && presetId === "ionos" && displayName.startsWith("Pigment")) {
+        setPresetId("custom");
+        setImapHost("");
+        setSmtpHost("");
+        setDisplayName("");
+      }
+    }
     setStep("form");
   }
 
@@ -339,6 +379,12 @@ export function AddAccountModal({ app }: { app: MailApp }) {
 
   function handleAddressChange(nextAddress: string): void {
     setAddress(nextAddress);
+    if (provider === "pigmentStaff") {
+      if (!displayNameTouched) {
+        setDisplayName(suggestPigmentSpaceName(nextAddress));
+      }
+      return;
+    }
     if (
       provider === "imapPassword" &&
       presetId === "custom" &&
@@ -393,6 +439,7 @@ export function AddAccountModal({ app }: { app: MailApp }) {
     const input: NewAccountInput = {
       displayName: displayName.trim() || auth.address.split("@")[0] || "New account",
       color,
+      spaceKind,
       auth,
       secret,
     };
@@ -505,10 +552,18 @@ export function AddAccountModal({ app }: { app: MailApp }) {
               {providers.map((option) => (
                 <button
                   key={option.kind}
-                  className={`provider-card${provider === option.kind ? " selected" : ""}`}
+                  className={`provider-card${option.featured ? " featured" : ""}${provider === option.kind ? " selected" : ""}`}
                   onClick={() => pick(option.kind)}
                 >
-                  <span className="pc-name">{option.name}</span>
+                  <div className="pc-head">
+                    <span className="pc-name">{option.name}</span>
+                    {option.badge && (
+                      <span className="space-kind-badge staff">
+                        <Users />
+                        {option.badge}
+                      </span>
+                    )}
+                  </div>
                   <span className="pc-desc">{option.description}</span>
                 </button>
               ))}
@@ -703,37 +758,51 @@ export function AddAccountModal({ app }: { app: MailApp }) {
               </>
             )}
 
-            {provider === "imapPassword" && (
+            {(provider === "imapPassword" || provider === "pigmentStaff") && (
               <>
-                <div className="field">
-                  <label>Mail provider</label>
-                  <select
-                    className="select"
-                    value={presetId}
-                    onChange={(event) => {
-                      const next = event.target.value;
-                      if (isImapPresetId(next)) {
-                        selectImapPreset(next);
-                      }
-                    }}
-                  >
-                    <option value="custom">Custom server (manual)</option>
-                    <optgroup label="Presets">
-                      {IMAP_PRESETS.map((preset) => (
-                        <option key={preset.id} value={preset.id}>
-                          {preset.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  </select>
-                  {activePreset && <span className="hint-text">{activePreset.hint}</span>}
-                </div>
+                {isPigmentStaff ? (
+                  <div className="staff-preset-banner">
+                    <div className="staff-preset-head">
+                      <span className="space-kind-badge staff">
+                        <Users />
+                        Pigment Staff Space
+                      </span>
+                      <span className="hint-text">Eligible for Staff Sharing</span>
+                    </div>
+                    <span className="hint-text">{PIGMENT_STAFF_IONOS_PRESET.hint}</span>
+                  </div>
+                ) : (
+                  <div className="field">
+                    <label>Mail provider</label>
+                    <select
+                      className="select"
+                      value={presetId}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        if (isImapPresetId(next)) {
+                          selectImapPreset(next);
+                        }
+                      }}
+                    >
+                      <option value="custom">Custom server (manual)</option>
+                      <optgroup label="Presets">
+                        {IMAP_PRESETS.map((preset) => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                    {activePreset && <span className="hint-text">{activePreset.hint}</span>}
+                  </div>
+                )}
 
                 <div className="field-row">
                   <div className="field">
                     <label>Email address</label>
                     <input
                       className="input"
+                      autoFocus={isPigmentStaff}
                       placeholder={activePreset?.emailPlaceholder ?? "you@example.com"}
                       value={address}
                       onChange={(event) => handleAddressChange(event.target.value)}
@@ -899,9 +968,12 @@ export function AddAccountModal({ app }: { app: MailApp }) {
                   <label>Space name</label>
                   <input
                     className="input"
-                    placeholder="e.g. Domain Mail"
+                    placeholder={isPigmentStaff ? "e.g. Pigment · Sponsors" : "e.g. Domain Mail"}
                     value={displayName}
-                    onChange={(event) => setDisplayName(event.target.value)}
+                    onChange={(event) => {
+                      setDisplayNameTouched(true);
+                      setDisplayName(event.target.value);
+                    }}
                   />
                 </div>
 

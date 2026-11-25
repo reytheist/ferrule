@@ -157,6 +157,19 @@ impl MailCore {
         let _ = self.inner.events.send(event);
     }
 
+    // ---------------------------------------------------------------- settings
+
+    pub async fn get_settings(&self) -> Result<AppSettings, CoreError> {
+        self.inner.store.with_conn(store::get_app_settings)
+    }
+
+    pub async fn update_settings(&self, settings: AppSettings) -> Result<AppSettings, CoreError> {
+        self.inner
+            .store
+            .with_conn(|conn| store::save_app_settings(conn, &settings))?;
+        Ok(settings)
+    }
+
     // ---------------------------------------------------------------- accounts
 
     pub async fn list_accounts(&self) -> Result<Vec<AccountView>, CoreError> {
@@ -204,6 +217,7 @@ impl MailCore {
                 conn,
                 display_name,
                 input.color,
+                input.space_kind,
                 &input.auth,
                 &SyncState::Idle { last_ok: None },
                 now,
@@ -290,7 +304,13 @@ impl MailCore {
             });
         }
         let updated = self.inner.store.with_conn(|conn| {
-            store::update_account_meta(conn, input.account_id, display_name, input.color)
+            store::update_account_meta(
+                conn,
+                input.account_id,
+                display_name,
+                input.color,
+                input.space_kind,
+            )
         })?;
         if !updated {
             return Err(CoreError::NotFound {
@@ -455,6 +475,7 @@ impl MailCore {
             .add_account(NewAccountInput {
                 display_name,
                 color,
+                space_kind: input.space_kind,
                 auth,
                 secret: Some(refresh),
             })

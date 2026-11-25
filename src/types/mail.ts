@@ -19,6 +19,12 @@ export type SpaceColor =
   | "violet"
   | "emerald";
 
+export type SpaceKind = "personal" | "pigmentStaff";
+
+export interface AppSettings {
+  developerToolsEnabled: boolean;
+}
+
 export type ProviderKind = "gmail" | "outlook" | "imap";
 
 export interface Endpoint {
@@ -82,6 +88,7 @@ export interface AccountView {
   displayName: string;
   provider: ProviderKind;
   color: SpaceColor;
+  spaceKind: SpaceKind;
   email: string;
   identities: IdentityView[];
   sync: SyncState;
@@ -92,6 +99,7 @@ export interface AccountView {
 export interface NewAccountInput {
   displayName: string;
   color: SpaceColor;
+  spaceKind?: SpaceKind;
   auth: ProviderAuth;
   secret: string | null;
 }
@@ -103,12 +111,14 @@ export interface OAuthSignInInput {
   tenant: string | null;
   displayName: string | null;
   color: SpaceColor | null;
+  spaceKind?: SpaceKind;
 }
 
 export interface UpdateAccountInput {
   accountId: AccountId;
   displayName: string;
   color: SpaceColor;
+  spaceKind?: SpaceKind | null;
 }
 
 export interface SavedOAuthClients {

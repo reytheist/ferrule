@@ -17,6 +17,7 @@ import type {
   AccountId,
   AccountView,
   ActionOutcome,
+  AppSettings,
   AttachmentMeta,
   CreateDraftInput,
   DraftId,
@@ -43,6 +44,7 @@ import type {
   SendMode,
   SendReceipt,
   SpaceColor,
+  SpaceKind,
   SyncState,
   TemplateId,
   TemplateView,
@@ -74,6 +76,7 @@ interface StoredAccount {
   displayName: string;
   provider: ProviderKind;
   color: SpaceColor;
+  spaceKind: SpaceKind;
   email: string;
   identities: IdentityView[];
   sync: SyncState;
@@ -139,10 +142,18 @@ interface MockState {
   drafts: Map<DraftId, DraftView>;
   jobs: StoredJob[];
   templates: TemplateView[];
+  settings: AppSettings;
 }
 
 function emptyState(): MockState {
-  return { accounts: [], threads: [], drafts: new Map(), jobs: [], templates: [] };
+  return {
+    accounts: [],
+    threads: [],
+    drafts: new Map(),
+    jobs: [],
+    templates: [],
+    settings: { developerToolsEnabled: false },
+  };
 }
 
 const state: MockState = emptyState();
@@ -189,6 +200,7 @@ function accountView(account: StoredAccount): AccountView {
     displayName: account.displayName,
     provider: account.provider,
     color: account.color,
+    spaceKind: account.spaceKind,
     email: account.email,
     identities: account.identities,
     sync: account.sync,
@@ -420,6 +432,7 @@ function makeAccount(
   email: string,
   aliases: string[],
   position: number,
+  spaceKind: SpaceKind = "personal",
 ): StoredAccount {
   const primary: IdentityView = {
     id: newIdentityId(),
@@ -438,6 +451,7 @@ function makeAccount(
     displayName,
     provider,
     color,
+    spaceKind,
     email,
     identities: [primary, ...rest],
     sync: { kind: "idle", lastOk: now() - 4 * MINUTE },
@@ -880,6 +894,15 @@ function seedDemo(): void {
 
 // ── Command implementations ─────────────────────────────────────────────────
 
+export async function getSettings(): Promise<AppSettings> {
+  return { ...state.settings };
+}
+
+export async function updateSettings(settings: AppSettings): Promise<AppSettings> {
+  state.settings = { ...settings };
+  return { ...state.settings };
+}
+
 export async function seedDemoIfEmpty(): Promise<void> {
   if (state.accounts.length === 0) seedDemo();
 }
@@ -907,6 +930,7 @@ export async function addAccount(input: NewAccountInput): Promise<AccountView> {
     displayName: input.displayName,
     provider,
     color: input.color,
+    spaceKind: input.spaceKind ?? "personal",
     email: address,
     identities: [identity],
     sync: { kind: "idle", lastOk: null },
@@ -957,6 +981,7 @@ export async function oauthSignInAccount(input: OAuthSignInInput): Promise<Accou
     displayName,
     provider: input.provider,
     color,
+    spaceKind: input.spaceKind ?? "personal",
     email,
     identities: [identity],
     sync: { kind: "idle", lastOk: null },
@@ -973,6 +998,9 @@ export async function updateAccount(input: UpdateAccountInput): Promise<AccountV
   if (!name) throw new Error("Space name is required");
   account.displayName = name;
   account.color = input.color;
+  if (input.spaceKind !== undefined && input.spaceKind !== null) {
+    account.spaceKind = input.spaceKind;
+  }
   return accountView(account);
 }
 

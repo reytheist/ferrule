@@ -32,6 +32,7 @@ pub(crate) fn seed_demo(conn: &mut Connection, now: UnixMs) -> Result<bool, Core
         conn,
         "Studio Gmail",
         SpaceColor::Azure,
+        SpaceKind::Personal,
         &studio_auth,
         &idle,
         now,
@@ -55,6 +56,7 @@ pub(crate) fn seed_demo(conn: &mut Connection, now: UnixMs) -> Result<bool, Core
         conn,
         "Personal Gmail",
         SpaceColor::Berry,
+        SpaceKind::Personal,
         &personal_auth,
         &idle,
         now,
@@ -72,7 +74,15 @@ pub(crate) fn seed_demo(conn: &mut Connection, now: UnixMs) -> Result<bool, Core
         client_id: "00000000-0000-4000-8000-abcdef012345".to_string(),
         tenant: "common".to_string(),
     };
-    let outlook = insert_account(conn, "Outlook", SpaceColor::Teal, &outlook_auth, &idle, now)?;
+    let outlook = insert_account(
+        conn,
+        "Outlook",
+        SpaceColor::Teal,
+        SpaceKind::Personal,
+        &outlook_auth,
+        &idle,
+        now,
+    )?;
     insert_identity(conn, outlook, "reyth@outlook.com", Some("Reyth"), true)?;
     let outlook_ident = primary_identity(conn, outlook)?.ok_or(CoreError::NotFound {
         entity: "identity".to_string(),
@@ -96,6 +106,7 @@ pub(crate) fn seed_demo(conn: &mut Connection, now: UnixMs) -> Result<bool, Core
         conn,
         "Custom IMAP",
         SpaceColor::Amber,
+        SpaceKind::Personal,
         &imap_auth,
         &idle,
         now,

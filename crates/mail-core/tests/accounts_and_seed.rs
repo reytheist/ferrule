@@ -182,6 +182,7 @@ async fn add_account_requires_password_and_validates_address() {
         .add_account(NewAccountInput {
             display_name: "Broken".into(),
             color: SpaceColor::Violet,
+            space_kind: SpaceKind::Personal,
             auth: ProviderAuth::GmailAppPassword {
                 address: "someone@gmail.com".into(),
             },
@@ -197,6 +198,7 @@ async fn add_account_requires_password_and_validates_address() {
         .add_account(NewAccountInput {
             display_name: "Broken".into(),
             color: SpaceColor::Violet,
+            space_kind: SpaceKind::Personal,
             auth: ProviderAuth::GmailAppPassword {
                 address: "not-an-email".into(),
             },
@@ -234,6 +236,7 @@ async fn secrets_never_touch_sqlite_and_remove_account_cascades() {
         .add_account(NewAccountInput {
             display_name: "Secret Space".into(),
             color: SpaceColor::Teal,
+            space_kind: SpaceKind::Personal,
             auth: ProviderAuth::ImapPassword {
                 address: "keeper@example.com".into(),
                 username: "keeper@example.com".into(),
@@ -377,6 +380,7 @@ async fn gmail_app_password_strips_spaces() {
         .add_account(NewAccountInput {
             display_name: "Personal".into(),
             color: SpaceColor::Azure,
+            space_kind: SpaceKind::Personal,
             auth: ProviderAuth::GmailAppPassword {
                 address: "person@gmail.com".into(),
             },
@@ -418,6 +422,7 @@ async fn second_gmail_oauth_reuses_saved_client_secret_from_first_account() {
         .add_account(NewAccountInput {
             display_name: "First".into(),
             color: SpaceColor::Azure,
+            space_kind: SpaceKind::Personal,
             auth: first_auth,
             secret: Some("refresh-1".into()),
         })
@@ -483,6 +488,7 @@ async fn update_account_changes_space_name_and_color_and_picks_unique_colors() {
         .add_account(NewAccountInput {
             display_name: "reytheist".into(),
             color: SpaceColor::Azure,
+            space_kind: SpaceKind::Personal,
             auth: ProviderAuth::GmailAppPassword {
                 address: "reytheist@gmail.com".into(),
             },
@@ -496,21 +502,95 @@ async fn update_account_changes_space_name_and_color_and_picks_unique_colors() {
             account_id: account.id,
             display_name: "Personal Gmail".into(),
             color: SpaceColor::Emerald,
+            space_kind: None,
         })
         .await
         .expect("update");
     assert_eq!(updated.display_name, "Personal Gmail");
     assert_eq!(updated.color, SpaceColor::Emerald);
+    assert_eq!(updated.space_kind, SpaceKind::Personal);
 
     let blank = core
         .update_account(UpdateAccountInput {
             account_id: account.id,
             display_name: "   ".into(),
             color: SpaceColor::Berry,
+            space_kind: None,
         })
         .await;
     assert!(matches!(
         blank,
         Err(mail_core::error::CoreError::InvalidInput { .. })
     ));
+}
+
+#[tokio::test]
+async fn pigment_staff_space_and_developer_tools_settings_persist() {
+    let (_, clock) = test_clock();
+    let core = MailCore::open(
+        CoreConfig::default(),
+        Host {
+            secrets: Arc::new(MemorySecretStore::default()),
+            clock,
+        },
+    )
+    .expect("open core");
+
+    // Developer Tools must be off by default.
+    let initial = core.get_settings().await.expect("initial settings");
+    assert!(!initial.developer_tools_enabled);
+
+    let enabled = core
+        .update_settings(AppSettings {
+            developer_tools_enabled: true,
+        })
+        .await
+        .expect("enable dev tools");
+    assert!(enabled.developer_tools_enabled);
+    assert!(core
+        .get_settings()
+        .await
+        .expect("re-read settings")
+        .developer_tools_enabled);
+
+    // Pigment Staff (IONOS) space persists SpaceKind::PigmentStaff and can be toggled.
+    let staff = core
+        .add_account(NewAccountInput {
+            display_name: "Pigment · Sponsors".into(),
+            color: SpaceColor::Amber,
+            space_kind: SpaceKind::PigmentStaff,
+            auth: ProviderAuth::ImapPassword {
+                address: "sponsors@pigmentminiatures.com".into(),
+                username: "sponsors@pigmentminiatures.com".into(),
+                imap: mail_core::auth::Endpoint {
+                    host: "imap.ionos.com".into(),
+                    port: 993,
+                    tls: true,
+                },
+                smtp: mail_core::auth::Endpoint {
+                    host: "smtp.ionos.com".into(),
+                    port: 587,
+                    tls: true,
+                },
+            },
+            secret: Some("ionos-mailbox-pass".into()),
+        })
+        .await
+        .expect("add staff account");
+    assert_eq!(staff.space_kind, SpaceKind::PigmentStaff);
+
+    let listed = core.list_accounts().await.expect("list");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].space_kind, SpaceKind::PigmentStaff);
+
+    let switched = core
+        .update_account(UpdateAccountInput {
+            account_id: staff.id,
+            display_name: staff.display_name.clone(),
+            color: staff.color,
+            space_kind: Some(SpaceKind::Personal),
+        })
+        .await
+        .expect("switch to personal");
+    assert_eq!(switched.space_kind, SpaceKind::Personal);
 }

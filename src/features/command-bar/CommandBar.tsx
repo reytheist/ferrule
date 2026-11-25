@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  Settings,
   Star,
   Sun,
   Trash2,
@@ -101,6 +102,7 @@ export function CommandBar({ app }: { app: MailApp }) {
         run: app.toggleLayout,
       },
       { id: "add-account", label: "Add account", icon: Plus, run: app.openAddAccount },
+      { id: "settings", label: "Open Settings", hint: "Ctrl ,", icon: Settings, run: app.openSettings },
       { id: "templates", label: "Manage templates & snippets", icon: FileText, run: app.openTemplates },
       {
         id: "archive",

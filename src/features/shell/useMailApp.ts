@@ -6,6 +6,7 @@ import {
   createDraft,
   deleteTemplate,
   dismissFollowUp,
+  getSettings,
   listAccounts,
   listJobs,
   listTemplates,
@@ -25,10 +26,12 @@ import {
   tickScheduler,
   unsnoozeThread,
   updateAccount as updateAccountCommand,
+  updateSettings as updateSettingsCommand,
 } from "../../ipc/core";
 import type {
   AccountId,
   AccountView,
+  AppSettings,
   CreateDraftInput,
   InboxCategory,
   JobId,
@@ -136,6 +139,7 @@ export interface MailApp {
   error: string | null;
   accounts: AccountView[];
   savedOAuthClients: SavedOAuthClients;
+  settings: AppSettings;
   counts: MailboxCounts | null;
   threads: ThreadSummary[];
   jobs: JobView[];
@@ -152,6 +156,7 @@ export interface MailApp {
   composeOpen: boolean;
   addAccountOpen: boolean;
   templatesOpen: boolean;
+  settingsOpen: boolean;
   popover: PopoverState | null;
   replyText: string;
   replyNonce: number;
@@ -180,6 +185,9 @@ export interface MailApp {
   closeAddAccount(): void;
   openTemplates(): void;
   closeTemplates(): void;
+  openSettings(): void;
+  closeSettings(): void;
+  setDeveloperToolsEnabled(enabled: boolean): Promise<void>;
   openCommand(): void;
   closeCommand(): void;
   closeTopLayer(): void;
@@ -216,6 +224,7 @@ export function useMailApp(): MailApp {
     outlookClientId: null,
     outlookTenant: null,
   });
+  const [settings, setSettings] = useState<AppSettings>({ developerToolsEnabled: false });
   const [counts, setCounts] = useState<MailboxCounts | null>(null);
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [jobs, setJobs] = useState<JobView[]>([]);
@@ -233,6 +242,7 @@ export function useMailApp(): MailApp {
   const [composeOpen, setComposeOpen] = useState(false);
   const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [popover, setPopover] = useState<PopoverState | null>(null);
   const [replyText, setReplyText] = useState("");
   const [replyNonce, setReplyNonce] = useState(0);
@@ -275,16 +285,18 @@ export function useMailApp(): MailApp {
   }, []);
 
   const reloadMeta = useCallback(async () => {
-    const [nextAccounts, nextJobs, nextTemplates, nextClients] = await Promise.all([
+    const [nextAccounts, nextJobs, nextTemplates, nextClients, nextSettings] = await Promise.all([
       listAccounts(),
       listJobs(),
       listTemplates(),
       savedOAuthClientsCommand(),
+      getSettings(),
     ]);
     setAccounts(nextAccounts);
     setJobs(nextJobs);
     setTemplates(nextTemplates);
     setSavedOAuthClients(nextClients);
+    setSettings(nextSettings);
     jobsSignature.current = nextJobs.map((j) => `${j.id}:${j.state}`).join("|");
   }, []);
 
@@ -605,6 +617,27 @@ export function useMailApp(): MailApp {
     setTemplatesOpen(false);
   }
 
+  function openSettings(): void {
+    setSettingsOpen(true);
+  }
+
+  function closeSettings(): void {
+    setSettingsOpen(false);
+  }
+
+  async function setDeveloperToolsEnabled(enabled: boolean): Promise<void> {
+    try {
+      const updated = await updateSettingsCommand({
+        ...settings,
+        developerToolsEnabled: enabled,
+      });
+      setSettings(updated);
+      showToast(enabled ? "Developer Tools enabled" : "Developer Tools disabled");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
   function openCommand(): void {
     setCommandOpen(true);
   }
@@ -661,6 +694,10 @@ export function useMailApp(): MailApp {
     }
     if (addAccountOpen) {
       closeAddAccount();
+      return;
+    }
+    if (settingsOpen) {
+      closeSettings();
       return;
     }
     if (templatesOpen) closeTemplates();
@@ -834,6 +871,11 @@ export function useMailApp(): MailApp {
       else setCommandOpen(true);
       return;
     }
+    if (mod && event.key === ",") {
+      event.preventDefault();
+      setSettingsOpen((prev) => !prev);
+      return;
+    }
     if (event.key === "Escape") {
       closeTopLayer();
       return;
@@ -847,7 +889,16 @@ export function useMailApp(): MailApp {
         target.tagName === "SELECT" ||
         target.isContentEditable);
     if (inField || mod || event.altKey) return;
-    if (commandOpen || composeOpen || addAccountOpen || templatesOpen || popover !== null) return;
+    if (
+      commandOpen ||
+      composeOpen ||
+      addAccountOpen ||
+      templatesOpen ||
+      settingsOpen ||
+      popover !== null
+    ) {
+      return;
+    }
 
     const key = event.key.toLowerCase();
     switch (key) {
@@ -901,6 +952,7 @@ export function useMailApp(): MailApp {
     error,
     accounts,
     savedOAuthClients,
+    settings,
     counts,
     threads,
     jobs,
@@ -917,6 +969,7 @@ export function useMailApp(): MailApp {
     composeOpen,
     addAccountOpen,
     templatesOpen,
+    settingsOpen,
     popover,
     replyText,
     replyNonce,
@@ -944,6 +997,9 @@ export function useMailApp(): MailApp {
     closeAddAccount,
     openTemplates,
     closeTemplates,
+    openSettings,
+    closeSettings,
+    setDeveloperToolsEnabled,
     openCommand,
     closeCommand,
     closeTopLayer,

@@ -1,10 +1,10 @@
 use mail_core::error::CoreError;
 use mail_core::ids::{AccountId, DraftId, JobId, TemplateId, ThreadId, UnixMs};
 use mail_core::types::{
-    AccountView, ActionOutcome, CreateDraftInput, DraftView, JobView, MailAction, MailboxCounts,
-    NewAccountInput, OAuthSignInInput, RemoteContent, SaveTemplateInput, SavedOAuthClients, Scope,
-    SendMode, SendReceipt, TemplateView, ThreadPage, ThreadQuery, ThreadView, UndoOutcome,
-    UpdateAccountInput,
+    AccountView, ActionOutcome, AppSettings, CreateDraftInput, DraftView, JobView, MailAction,
+    MailboxCounts, NewAccountInput, OAuthSignInInput, RemoteContent, SaveTemplateInput,
+    SavedOAuthClients, Scope, SendMode, SendReceipt, TemplateView, ThreadPage, ThreadQuery,
+    ThreadView, UndoOutcome, UpdateAccountInput,
 };
 use mail_core::MailCore;
 
@@ -203,6 +203,19 @@ pub async fn delete_template(
     template_id: TemplateId,
 ) -> Result<(), CoreError> {
     core.delete_template(template_id).await
+}
+
+#[tauri::command]
+pub async fn get_settings(core: tauri::State<'_, MailCore>) -> Result<AppSettings, CoreError> {
+    core.get_settings().await
+}
+
+#[tauri::command]
+pub async fn update_settings(
+    core: tauri::State<'_, MailCore>,
+    settings: AppSettings,
+) -> Result<AppSettings, CoreError> {
+    core.update_settings(settings).await
 }
 
 #[tauri::command]
