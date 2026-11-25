@@ -1,6 +1,7 @@
 import {
   Archive,
   CalendarClock,
+  CalendarDays,
   Contact,
   ExternalLink,
   FileText,
@@ -124,6 +125,15 @@ export function MailboxSidebar({ app }: { app: MailApp }) {
         <Users />
         <span className="nav-label">Shared with Me</span>
         <span className="nav-count">{app.sharedThreads.length}</span>
+      </button>
+      <button
+        className={`nav-item${app.activeSection === "calendar" ? " active" : ""}`}
+        onClick={app.openCalendarSection}
+        title="Pigment Shared Calendar & Meetings"
+      >
+        <CalendarDays />
+        <span className="nav-label">Calendar</span>
+        <span className="nav-count">{app.calendarOccurrences.length}</span>
       </button>
       <button className="nav-item" onClick={app.openContacts} title="Shared Show Contacts">
         <Contact />

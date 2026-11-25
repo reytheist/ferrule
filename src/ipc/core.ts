@@ -7,23 +7,43 @@ import * as mock from "./mockStore";
 import type {
   AccountId,
   AccountView,
+  ActionItemId,
+  ActionItemStatus,
+  ActionItemView,
   ActionOutcome,
+  AddInviteToCalendarInput,
   AddSharedCommentInput,
   AppSettings,
+  AvailabilityQuery,
+  AvailabilitySlot,
+  CalendarEventId,
+  CalendarEventView,
+  CalendarInviteView,
+  CalendarOccurrence,
+  CalendarRangeQuery,
   ConnectStaffWorkspaceInput,
   ContactId,
   CreateDraftInput,
+  DiscordWebhookStatus,
   DraftId,
   DraftView,
+  IcsOverlayId,
+  IcsOverlayView,
   JobId,
   JobView,
   MailboxCounts,
   MailAction,
+  MeetingDocView,
   NewAccountInput,
   OAuthSignInInput,
+  OverlayBusyBlock,
   PinnedLinkId,
   PinnedLinkView,
+  PromoteActionItemInput,
   RemoteContent,
+  RsvpInviteInput,
+  SaveCalendarEventInput,
+  SaveIcsOverlayInput,
   SavePinnedLinkInput,
   SaveSharedTemplateInput,
   SaveShowContactInput,
@@ -52,6 +72,7 @@ import type {
   UndoOutcome,
   UpdateAccountInput,
   UpdateHandoffInput,
+  UpdateMeetingDocInput,
   UpdateSharedDraftInput,
 } from "../types/mail";
 
@@ -341,4 +362,129 @@ export async function openExternalUrl(url: string): Promise<void> {
     return;
   }
   return invoke<void>("open_external_url", { url });
+}
+
+// ── Phase C: Calendar & Meetings ────────────────────────────────────────────
+
+export async function listCalendarEvents(
+  query: CalendarRangeQuery,
+): Promise<CalendarOccurrence[]> {
+  if (!isTauriRuntime()) return mock.listCalendarEvents(query);
+  return invoke<CalendarOccurrence[]>("list_calendar_events", { query });
+}
+
+export async function saveCalendarEvent(
+  input: SaveCalendarEventInput,
+): Promise<CalendarEventView> {
+  if (!isTauriRuntime()) return mock.saveCalendarEvent(input);
+  return invoke<CalendarEventView>("save_calendar_event", { input });
+}
+
+export async function quickAddCalendarEvent(text: string): Promise<CalendarEventView> {
+  if (!isTauriRuntime()) return mock.quickAddCalendarEvent(text);
+  return invoke<CalendarEventView>("quick_add_calendar_event", { text });
+}
+
+export async function deleteCalendarEvent(eventId: CalendarEventId): Promise<void> {
+  if (!isTauriRuntime()) return mock.deleteCalendarEvent(eventId);
+  return invoke<void>("delete_calendar_event", { eventId });
+}
+
+export async function getMeetingDoc(eventId: CalendarEventId): Promise<MeetingDocView> {
+  if (!isTauriRuntime()) return mock.getMeetingDoc(eventId);
+  return invoke<MeetingDocView>("get_meeting_doc", { eventId });
+}
+
+export async function updateMeetingDoc(input: UpdateMeetingDocInput): Promise<MeetingDocView> {
+  if (!isTauriRuntime()) return mock.updateMeetingDoc(input);
+  return invoke<MeetingDocView>("update_meeting_doc", { input });
+}
+
+export async function promoteToActionItem(
+  input: PromoteActionItemInput,
+): Promise<ActionItemView> {
+  if (!isTauriRuntime()) return mock.promoteToActionItem(input);
+  return invoke<ActionItemView>("promote_to_action_item", { input });
+}
+
+export async function toggleActionItem(
+  actionItemId: ActionItemId,
+  status: ActionItemStatus,
+): Promise<ActionItemView> {
+  if (!isTauriRuntime()) return mock.toggleActionItem(actionItemId, status);
+  return invoke<ActionItemView>("toggle_action_item", { actionItemId, status });
+}
+
+export async function listActionItems(): Promise<ActionItemView[]> {
+  if (!isTauriRuntime()) return mock.listActionItems();
+  return invoke<ActionItemView[]>("list_action_items");
+}
+
+export async function rsvpCalendarInvite(input: RsvpInviteInput): Promise<CalendarInviteView> {
+  if (!isTauriRuntime()) return mock.rsvpCalendarInvite(input);
+  return invoke<CalendarInviteView>("rsvp_calendar_invite", { input });
+}
+
+export async function addInviteToPigmentCalendar(
+  input: AddInviteToCalendarInput,
+): Promise<CalendarEventView> {
+  if (!isTauriRuntime()) return mock.addInviteToPigmentCalendar(input);
+  return invoke<CalendarEventView>("add_invite_to_pigment_calendar", { input });
+}
+
+export async function listIcsOverlays(): Promise<IcsOverlayView[]> {
+  if (!isTauriRuntime()) return mock.listIcsOverlays();
+  return invoke<IcsOverlayView[]>("list_ics_overlays");
+}
+
+export async function saveIcsOverlay(input: SaveIcsOverlayInput): Promise<IcsOverlayView> {
+  if (!isTauriRuntime()) return mock.saveIcsOverlay(input);
+  return invoke<IcsOverlayView>("save_ics_overlay", { input });
+}
+
+export async function deleteIcsOverlay(overlayId: IcsOverlayId): Promise<void> {
+  if (!isTauriRuntime()) return mock.deleteIcsOverlay(overlayId);
+  return invoke<void>("delete_ics_overlay", { overlayId });
+}
+
+export async function refreshIcsOverlay(overlayId: IcsOverlayId): Promise<IcsOverlayView> {
+  if (!isTauriRuntime()) return mock.refreshIcsOverlay(overlayId);
+  return invoke<IcsOverlayView>("refresh_ics_overlay", { overlayId });
+}
+
+export async function listOverlayBusyBlocks(
+  query: CalendarRangeQuery,
+): Promise<OverlayBusyBlock[]> {
+  if (!isTauriRuntime()) return mock.listOverlayBusyBlocks(query);
+  return invoke<OverlayBusyBlock[]>("list_overlay_busy_blocks", { query });
+}
+
+export async function findAvailabilitySlots(
+  query: AvailabilityQuery,
+): Promise<AvailabilitySlot[]> {
+  if (!isTauriRuntime()) return mock.findAvailabilitySlots(query);
+  return invoke<AvailabilitySlot[]>("find_availability_slots", { query });
+}
+
+export async function getDiscordWebhookStatus(): Promise<DiscordWebhookStatus> {
+  if (!isTauriRuntime()) return mock.getDiscordWebhookStatus();
+  return invoke<DiscordWebhookStatus>("get_discord_webhook_status");
+}
+
+export async function setDiscordWebhook(url: string | null): Promise<DiscordWebhookStatus> {
+  if (!isTauriRuntime()) return mock.setDiscordWebhook(url);
+  return invoke<DiscordWebhookStatus>("set_discord_webhook", { url });
+}
+
+export async function formatMeetingRecap(eventId: CalendarEventId): Promise<string> {
+  if (!isTauriRuntime()) return mock.formatMeetingRecap(eventId);
+  return invoke<string>("format_meeting_recap", { eventId });
+}
+
+export async function postMeetingRecapToDiscord(
+  eventId: CalendarEventId,
+  customMarkdown: string | null,
+): Promise<void> {
+  if (!isTauriRuntime()) return mock.postMeetingRecapToDiscord(eventId, customMarkdown);
+  return invoke<void>("post_meeting_recap_to_discord", { eventId, customMarkdown });
 }

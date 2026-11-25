@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Clock, Lock, X } from "lucide-react";
+import { CalendarClock, ChevronDown, Clock, Lock, X } from "lucide-react";
 import type { CreateDraftInput } from "../../types/mail";
+import { AvailabilityPicker } from "../calendar/AvailabilityPicker";
 import type { MailApp } from "../shell/useMailApp";
 import { spaceClass } from "../spaces/SpaceSwitcher";
 import { anchorBelow } from "../ui/anchor";
@@ -22,6 +23,7 @@ export function ComposeModal({ app }: { app: MailApp }) {
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [snippetsOpen, setSnippetsOpen] = useState(false);
+  const [availOpen, setAvailOpen] = useState(false);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   const fieldsRef = useRef({ accountId, to, cc, showCc, subject, body });
@@ -214,7 +216,16 @@ export function ComposeModal({ app }: { app: MailApp }) {
         </div>
 
         <div className="modal-foot">
-          <div className="tpl-wrap">
+          <div className="tpl-wrap" style={{ display: "flex", gap: 6 }}>
+            <button
+              type="button"
+              className="tpl-btn"
+              onClick={() => setAvailOpen(true)}
+              title="Insert open calendar availability slots"
+            >
+              <CalendarClock style={{ width: 12, height: 12 }} />
+              Availability
+            </button>
             <button className="tpl-btn" onClick={() => setSnippetsOpen((v) => !v)}>
               Snippets
               <ChevronDown />
@@ -298,6 +309,15 @@ export function ComposeModal({ app }: { app: MailApp }) {
           </button>
         </div>
       </div>
+      {availOpen && (
+        <AvailabilityPicker
+          onInsert={(text) => {
+            setBody((prev) => (prev ? `${prev}\n\n${text}` : text));
+            bodyRef.current?.focus();
+          }}
+          onClose={() => setAvailOpen(false)}
+        />
+      )}
     </div>
   );
 }

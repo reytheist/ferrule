@@ -1,0 +1,968 @@
+//! Phase C — Pigment Shared Calendar, Email ↔ Calendar Bridges (.ics invites,
+//! read-only personal .ics overlays, availability slots), Meeting Docs with
+//! recurring carryover, and Discord meeting integration.
+
+use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc, Weekday};
+use serde::{Deserialize, Serialize};
+
+use crate::error::CoreError;
+use crate::ids::{ActionItemId, CalendarEventId, IcsOverlayId, MessageId, ThreadId, UnixMs};
+
+// ── Calendar Events & Recurrence ────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CalendarEventKind {
+    #[default]
+    Meeting,
+    Milestone,
+    Deadline,
+    RoomSchedule,
+    ShowEvent,
+}
+
+impl CalendarEventKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Meeting => "meeting",
+            Self::Milestone => "milestone",
+            Self::Deadline => "deadline",
+            Self::RoomSchedule => "room_schedule",
+            Self::ShowEvent => "show_event",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "milestone" => Self::Milestone,
+            "deadline" => Self::Deadline,
+            "room_schedule" => Self::RoomSchedule,
+            "show_event" => Self::ShowEvent,
+            _ => Self::Meeting,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RecurrenceRule {
+    #[default]
+    None,
+    Weekly,
+    Biweekly,
+    Monthly,
+}
+
+impl RecurrenceRule {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Weekly => "weekly",
+            Self::Biweekly => "biweekly",
+            Self::Monthly => "monthly",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "weekly" => Self::Weekly,
+            "biweekly" => Self::Biweekly,
+            "monthly" => Self::Monthly,
+            _ => Self::None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarEventView {
+    pub id: CalendarEventId,
+    pub series_id: Option<String>,
+    pub title: String,
+    pub description: String,
+    pub start_at: UnixMs,
+    pub end_at: UnixMs,
+    pub all_day: bool,
+    pub kind: CalendarEventKind,
+    pub department: Option<String>,
+    pub location: Option<String>,
+    pub recurrence: RecurrenceRule,
+    pub discord_url: Option<String>,
+    pub attendees: Vec<String>,
+    pub source_ics_uid: Option<String>,
+    pub created_by: String,
+    pub updated_at: UnixMs,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveCalendarEventInput {
+    pub id: Option<CalendarEventId>,
+    #[serde(default)]
+    pub series_id: Option<String>,
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    pub start_at: UnixMs,
+    pub end_at: UnixMs,
+    #[serde(default)]
+    pub all_day: bool,
+    #[serde(default)]
+    pub kind: CalendarEventKind,
+    #[serde(default)]
+    pub department: Option<String>,
+    #[serde(default)]
+    pub location: Option<String>,
+    #[serde(default)]
+    pub recurrence: RecurrenceRule,
+    #[serde(default)]
+    pub discord_url: Option<String>,
+    #[serde(default)]
+    pub attendees: Vec<String>,
+    #[serde(default)]
+    pub source_ics_uid: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarOccurrence {
+    pub event: CalendarEventView,
+    pub occurrence_start: UnixMs,
+    pub occurrence_end: UnixMs,
+    pub is_recurring_instance: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarRangeQuery {
+    pub range_start: UnixMs,
+    pub range_end: UnixMs,
+}
+
+// ── Inline .ics Invites ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RsvpStatus {
+    #[default]
+    NeedsAction,
+    Accepted,
+    Tentative,
+    Declined,
+}
+
+impl RsvpStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NeedsAction => "needs_action",
+            Self::Accepted => "accepted",
+            Self::Tentative => "tentative",
+            Self::Declined => "declined",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "accepted" => Self::Accepted,
+            "tentative" => Self::Tentative,
+            "declined" => Self::Declined,
+            _ => Self::NeedsAction,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarInviteView {
+    pub message_id: MessageId,
+    pub uid: String,
+    pub summary: String,
+    pub description: String,
+    pub location: Option<String>,
+    pub organizer_name: Option<String>,
+    pub organizer_email: String,
+    pub start_at: UnixMs,
+    pub end_at: UnixMs,
+    pub all_day: bool,
+    pub rsvp_status: RsvpStatus,
+    pub added_event_id: Option<CalendarEventId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RsvpInviteInput {
+    pub message_id: MessageId,
+    pub uid: String,
+    pub status: RsvpStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddInviteToCalendarInput {
+    pub message_id: MessageId,
+    pub uid: String,
+    #[serde(default)]
+    pub department: Option<String>,
+}
+
+// ── Local-Only Personal .ics Overlays ───────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IcsOverlayView {
+    pub id: IcsOverlayId,
+    pub name: String,
+    pub url: String,
+    pub color: String,
+    pub enabled: bool,
+    pub last_fetched_at: Option<UnixMs>,
+    pub last_error: Option<String>,
+    pub event_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveIcsOverlayInput {
+    pub id: Option<IcsOverlayId>,
+    pub name: String,
+    pub url: String,
+    pub color: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayBusyBlock {
+    pub overlay_id: IcsOverlayId,
+    pub overlay_name: String,
+    pub overlay_color: String,
+    pub uid: String,
+    pub summary: String,
+    pub start_at: UnixMs,
+    pub end_at: UnixMs,
+    pub all_day: bool,
+}
+
+// ── Availability Picker ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvailabilityQuery {
+    pub range_start: UnixMs,
+    pub range_end: UnixMs,
+    pub slot_minutes: u32,
+    pub workday_start_hour: u8,
+    pub workday_end_hour: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvailabilitySlot {
+    pub start_at: UnixMs,
+    pub end_at: UnixMs,
+    pub label: String,
+}
+
+// ── Meeting Docs & Shared Action Items (Phase C + Phase D table) ────────────
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgendaItem {
+    pub id: String,
+    pub text: String,
+    pub checked: bool,
+    pub added_by: String,
+    pub promoted_action_id: Option<ActionItemId>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ActionItemStatus {
+    #[default]
+    Open,
+    Done,
+}
+
+impl ActionItemStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Done => "done",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "done" => Self::Done,
+            _ => Self::Open,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionItemView {
+    pub id: ActionItemId,
+    pub title: String,
+    pub department: Option<String>,
+    pub milestone: Option<String>,
+    pub assignee_handle: Option<String>,
+    pub status: ActionItemStatus,
+    pub due_at: Option<UnixMs>,
+    pub location: Option<String>,
+    pub cost_note: Option<String>,
+    pub source_event_id: Option<CalendarEventId>,
+    pub source_series_id: Option<String>,
+    pub source_thread_id: Option<ThreadId>,
+    pub created_by: String,
+    pub created_at: UnixMs,
+    pub updated_at: UnixMs,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingDocView {
+    pub event_id: CalendarEventId,
+    pub series_id: Option<String>,
+    pub agenda: Vec<AgendaItem>,
+    pub notes_markdown: String,
+    pub notes_editor_handle: Option<String>,
+    pub notes_editor_name: Option<String>,
+    pub rev: u32,
+    pub updated_at: UnixMs,
+    pub action_items: Vec<ActionItemView>,
+    pub carryover_items: Vec<ActionItemView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum MeetingDocAction {
+    UpdateAgenda { agenda: Vec<AgendaItem> },
+    ClaimNotesLock,
+    SaveNotes { notes_markdown: String, release_lock: bool },
+    ReleaseNotesLock,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMeetingDocInput {
+    pub event_id: CalendarEventId,
+    pub action: MeetingDocAction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromoteActionItemInput {
+    pub event_id: CalendarEventId,
+    pub agenda_item_id: Option<String>,
+    pub title: String,
+    #[serde(default)]
+    pub department: Option<String>,
+    #[serde(default)]
+    pub assignee_handle: Option<String>,
+    #[serde(default)]
+    pub due_at: Option<UnixMs>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscordWebhookStatus {
+    pub configured: bool,
+}
+
+// ── Pure RFC 5545 .ics Parser ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedIcsEvent {
+    pub uid: String,
+    pub summary: String,
+    pub description: String,
+    pub location: Option<String>,
+    pub organizer_name: Option<String>,
+    pub organizer_email: String,
+    pub start_at: UnixMs,
+    pub end_at: UnixMs,
+    pub all_day: bool,
+}
+
+/// Unfold RFC 5545 continuation lines (CRLF or LF followed by space/tab) and parse VEVENT blocks.
+pub fn parse_ics(raw: &str) -> Vec<ParsedIcsEvent> {
+    let mut unfolded: Vec<String> = Vec::new();
+    for line in raw.replace("\r\n", "\n").split('\n') {
+        if let Some(rest) = line.strip_prefix(' ').or_else(|| line.strip_prefix('\t')) {
+            if let Some(last) = unfolded.last_mut() {
+                last.push_str(rest);
+                continue;
+            }
+        }
+        unfolded.push(line.to_string());
+    }
+
+    let mut events = Vec::new();
+    let mut in_event = false;
+    let mut uid = String::new();
+    let mut summary = String::new();
+    let mut description = String::new();
+    let mut location: Option<String> = None;
+    let mut organizer_name: Option<String> = None;
+    let mut organizer_email = String::new();
+    let mut start_at: Option<(UnixMs, bool)> = None;
+    let mut end_at: Option<UnixMs> = None;
+
+    for line in unfolded {
+        let trimmed = line.trim();
+        if trimmed.eq_ignore_ascii_case("BEGIN:VEVENT") {
+            in_event = true;
+            uid.clear();
+            summary.clear();
+            description.clear();
+            location = None;
+            organizer_name = None;
+            organizer_email.clear();
+            start_at = None;
+            end_at = None;
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case("END:VEVENT") {
+            if in_event {
+                if let Some((start, all_day)) = start_at {
+                    let default_end = if all_day {
+                        UnixMs(start.0 + 86_400_000)
+                    } else {
+                        UnixMs(start.0 + 3_600_000)
+                    };
+                    let end = end_at.filter(|e| e.0 > start.0).unwrap_or(default_end);
+                    let final_uid = if uid.is_empty() {
+                        format!("ics-{}-{}", start.0, summary.len())
+                    } else {
+                        uid.clone()
+                    };
+                    events.push(ParsedIcsEvent {
+                        uid: final_uid,
+                        summary: if summary.is_empty() {
+                            "(Untitled event)".to_string()
+                        } else {
+                            summary.clone()
+                        },
+                        description: description.clone(),
+                        location: location.clone(),
+                        organizer_name: organizer_name.clone(),
+                        organizer_email: organizer_email.clone(),
+                        start_at: start,
+                        end_at: end,
+                        all_day,
+                    });
+                }
+            }
+            in_event = false;
+            continue;
+        }
+        if !in_event {
+            continue;
+        }
+        let Some((prop_part, value_raw)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let mut parts = prop_part.split(';');
+        let prop_name = parts.next().unwrap_or("").to_ascii_uppercase();
+        let params: Vec<&str> = parts.collect();
+        let value = unescape_ics_text(value_raw);
+
+        match prop_name.as_str() {
+            "UID" => uid = value,
+            "SUMMARY" => summary = value,
+            "DESCRIPTION" => description = value,
+            "LOCATION" => {
+                if !value.trim().is_empty() {
+                    location = Some(value);
+                }
+            }
+            "ORGANIZER" => {
+                organizer_email = value_raw
+                    .trim()
+                    .strip_prefix("mailto:")
+                    .or_else(|| value_raw.trim().strip_prefix("MAILTO:"))
+                    .unwrap_or(value_raw.trim())
+                    .to_string();
+                for param in &params {
+                    if let Some((k, v)) = param.split_once('=') {
+                        if k.eq_ignore_ascii_case("CN") {
+                            let cleaned = v.trim_matches('"').trim();
+                            if !cleaned.is_empty() {
+                                organizer_name = Some(cleaned.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            "DTSTART" => {
+                let is_date = params
+                    .iter()
+                    .any(|p| p.eq_ignore_ascii_case("VALUE=DATE"));
+                if let Some((ts, all_day)) = parse_ics_datetime(value_raw.trim(), is_date) {
+                    start_at = Some((ts, all_day));
+                }
+            }
+            "DTEND" => {
+                let is_date = params
+                    .iter()
+                    .any(|p| p.eq_ignore_ascii_case("VALUE=DATE"));
+                if let Some((ts, _)) = parse_ics_datetime(value_raw.trim(), is_date) {
+                    end_at = Some(ts);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    events
+}
+
+fn unescape_ics_text(raw: &str) -> String {
+    raw.replace("\\n", "\n")
+        .replace("\\N", "\n")
+        .replace("\\,", ",")
+        .replace("\\;", ";")
+        .replace("\\\\", "\\")
+}
+
+fn parse_ics_datetime(raw: &str, force_date: bool) -> Option<(UnixMs, bool)> {
+    let trimmed = raw.trim();
+    if force_date || (trimmed.len() == 8 && trimmed.bytes().all(|b| b.is_ascii_digit())) {
+        let date = NaiveDate::parse_from_str(trimmed, "%Y%m%d").ok()?;
+        let dt = date.and_hms_opt(0, 0, 0)?;
+        return Some((UnixMs(Utc.from_utc_datetime(&dt).timestamp_millis()), true));
+    }
+    if let Some(utc_raw) = trimmed.strip_suffix('Z') {
+        let dt = NaiveDateTime::parse_from_str(utc_raw, "%Y%m%dT%H%M%S").ok()?;
+        return Some((UnixMs(Utc.from_utc_datetime(&dt).timestamp_millis()), false));
+    }
+    if let Ok(dt) = NaiveDateTime::parse_from_str(trimmed, "%Y%m%dT%H%M%S") {
+        return Some((UnixMs(Utc.from_utc_datetime(&dt).timestamp_millis()), false));
+    }
+    None
+}
+
+// ── Recurrence Expansion ────────────────────────────────────────────────────
+
+pub fn expand_occurrences(
+    events: &[CalendarEventView],
+    range_start: UnixMs,
+    range_end: UnixMs,
+) -> Vec<CalendarOccurrence> {
+    let mut out = Vec::new();
+    for event in events {
+        let duration_ms = (event.end_at.0 - event.start_at.0).max(900_000);
+        if event.recurrence == RecurrenceRule::None {
+            if event.end_at.0 >= range_start.0 && event.start_at.0 <= range_end.0 {
+                out.push(CalendarOccurrence {
+                    event: event.clone(),
+                    occurrence_start: event.start_at,
+                    occurrence_end: event.end_at,
+                    is_recurring_instance: false,
+                });
+            }
+            continue;
+        }
+
+        let Some(mut cursor) = DateTime::from_timestamp_millis(event.start_at.0) else {
+            continue;
+        };
+        let mut idx = 0usize;
+        // Cap expansion to 120 occurrences to stay fast even on wide ranges.
+        while cursor.timestamp_millis() <= range_end.0 && idx < 120 {
+            let occ_start = UnixMs(cursor.timestamp_millis());
+            let occ_end = UnixMs(occ_start.0 + duration_ms);
+            if occ_end.0 >= range_start.0 && occ_start.0 <= range_end.0 {
+                out.push(CalendarOccurrence {
+                    event: event.clone(),
+                    occurrence_start: occ_start,
+                    occurrence_end: occ_end,
+                    is_recurring_instance: idx > 0,
+                });
+            }
+            cursor = match event.recurrence {
+                RecurrenceRule::None => break,
+                RecurrenceRule::Weekly => cursor + Duration::days(7),
+                RecurrenceRule::Biweekly => cursor + Duration::days(14),
+                RecurrenceRule::Monthly => advance_one_month(cursor),
+            };
+            idx += 1;
+        }
+    }
+    out.sort_by_key(|o| o.occurrence_start.0);
+    out
+}
+
+fn advance_one_month(dt: DateTime<Utc>) -> DateTime<Utc> {
+    let (year, month) = if dt.month() == 12 {
+        (dt.year() + 1, 1)
+    } else {
+        (dt.year(), dt.month() + 1)
+    };
+    let mut day = dt.day();
+    while day > 28 {
+        if let Some(d) = NaiveDate::from_ymd_opt(year, month, day) {
+            let naive = d.and_hms_opt(dt.hour(), dt.minute(), dt.second()).unwrap();
+            return Utc.from_utc_datetime(&naive);
+        }
+        day -= 1;
+    }
+    let d = NaiveDate::from_ymd_opt(year, month, day).expect("valid day <= 28");
+    let naive = d.and_hms_opt(dt.hour(), dt.minute(), dt.second()).unwrap();
+    Utc.from_utc_datetime(&naive)
+}
+
+// ── Natural-Language Quick-Add Parser ───────────────────────────────────────
+
+/// Parse a natural-language quick-add string like:
+/// `"Staff sync Thu 7pm #operations @Ballroom A weekly"`
+pub fn parse_quick_add(raw: &str, now: UnixMs) -> Result<SaveCalendarEventInput, CoreError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(CoreError::InvalidInput {
+            field: "text".to_string(),
+            reason: "Enter an event like \"Staff sync Thu 7pm #operations\"".to_string(),
+        });
+    }
+
+    let base_dt = DateTime::from_timestamp_millis(now.0)
+        .unwrap_or_else(|| DateTime::from_timestamp(0, 0).expect("epoch"));
+    let mut target_date = base_dt.date_naive();
+    let mut hour: u32 = 10;
+    let mut minute: u32 = 0;
+    let mut duration_mins: i64 = 60;
+    let mut department: Option<String> = None;
+    let mut location_tokens: Vec<String> = Vec::new();
+    let mut collecting_location = false;
+    let mut recurrence = RecurrenceRule::None;
+    let mut kind = CalendarEventKind::Meeting;
+    let mut title_tokens: Vec<String> = Vec::new();
+
+    for token in trimmed.split_whitespace() {
+        let lower = token.to_ascii_lowercase();
+
+        if let Some(tag) = token.strip_prefix('#') {
+            collecting_location = false;
+            let cleaned = tag
+                .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_')
+                .to_ascii_lowercase();
+            if !cleaned.is_empty() {
+                department = Some(cleaned);
+            }
+            continue;
+        }
+
+        if let Some(loc) = token.strip_prefix('@') {
+            collecting_location = true;
+            if !loc.is_empty() {
+                location_tokens.push(loc.to_string());
+            }
+            continue;
+        }
+
+        if lower == "weekly" {
+            collecting_location = false;
+            recurrence = RecurrenceRule::Weekly;
+            continue;
+        }
+        if lower == "biweekly" {
+            collecting_location = false;
+            recurrence = RecurrenceRule::Biweekly;
+            continue;
+        }
+        if lower == "monthly" {
+            collecting_location = false;
+            recurrence = RecurrenceRule::Monthly;
+            continue;
+        }
+
+        if lower == "today" {
+            collecting_location = false;
+            target_date = base_dt.date_naive();
+            continue;
+        }
+        if lower == "tomorrow" || lower == "tmrw" {
+            collecting_location = false;
+            target_date = base_dt.date_naive() + Duration::days(1);
+            continue;
+        }
+        if let Some(wd) = parse_weekday(&lower) {
+            collecting_location = false;
+            target_date = next_weekday(base_dt.date_naive(), wd);
+            continue;
+        }
+        if let Ok(parsed_date) = NaiveDate::parse_from_str(token, "%Y-%m-%d") {
+            collecting_location = false;
+            target_date = parsed_date;
+            continue;
+        }
+        if let Some((h, m)) = parse_time_token(&lower) {
+            collecting_location = false;
+            hour = h;
+            minute = m;
+            continue;
+        }
+        if let Some(mins) = parse_duration_token(&lower) {
+            collecting_location = false;
+            duration_mins = mins;
+            continue;
+        }
+
+        if lower.contains("deadline") {
+            kind = CalendarEventKind::Deadline;
+        } else if lower.contains("milestone") {
+            kind = CalendarEventKind::Milestone;
+        }
+
+        if collecting_location {
+            location_tokens.push(token.to_string());
+        } else {
+            title_tokens.push(token.to_string());
+        }
+    }
+
+    let title = if title_tokens.is_empty() {
+        "Staff Event".to_string()
+    } else {
+        title_tokens.join(" ")
+    };
+    let location = if location_tokens.is_empty() {
+        None
+    } else {
+        Some(location_tokens.join(" "))
+    };
+    if location.is_some() && kind == CalendarEventKind::Meeting && title.to_ascii_lowercase().contains("room") {
+        kind = CalendarEventKind::RoomSchedule;
+    }
+
+    let start_naive = target_date
+        .and_hms_opt(hour, minute, 0)
+        .unwrap_or_else(|| target_date.and_hms_opt(10, 0, 0).expect("10:00"));
+    let start_at = UnixMs(Utc.from_utc_datetime(&start_naive).timestamp_millis());
+    let end_at = UnixMs(start_at.0 + duration_mins * 60_000);
+
+    Ok(SaveCalendarEventInput {
+        id: None,
+        series_id: None,
+        title,
+        description: String::new(),
+        start_at,
+        end_at,
+        all_day: false,
+        kind,
+        department,
+        location,
+        recurrence,
+        discord_url: None,
+        attendees: Vec::new(),
+        source_ics_uid: None,
+    })
+}
+
+fn parse_weekday(token: &str) -> Option<Weekday> {
+    match token.trim_end_matches(',') {
+        "mon" | "monday" => Some(Weekday::Mon),
+        "tue" | "tues" | "tuesday" => Some(Weekday::Tue),
+        "wed" | "wednesday" => Some(Weekday::Wed),
+        "thu" | "thur" | "thurs" | "thursday" => Some(Weekday::Thu),
+        "fri" | "friday" => Some(Weekday::Fri),
+        "sat" | "saturday" => Some(Weekday::Sat),
+        "sun" | "sunday" => Some(Weekday::Sun),
+        _ => None,
+    }
+}
+
+fn next_weekday(from: NaiveDate, target: Weekday) -> NaiveDate {
+    let from_num = from.weekday().num_days_from_monday() as i64;
+    let target_num = target.num_days_from_monday() as i64;
+    let mut delta = (target_num - from_num).rem_euclid(7);
+    if delta == 0 {
+        delta = 7;
+    }
+    from + Duration::days(delta)
+}
+
+fn parse_time_token(token: &str) -> Option<(u32, u32)> {
+    if token == "noon" {
+        return Some((12, 0));
+    }
+    let (body, is_pm, has_meridiem) = if let Some(b) = token.strip_suffix("pm") {
+        (b, true, true)
+    } else if let Some(b) = token.strip_suffix("am") {
+        (b, false, true)
+    } else if token.contains(':') {
+        (token, false, false)
+    } else {
+        return None;
+    };
+
+    let (h_str, m_str) = match body.split_once(':') {
+        Some((h, m)) => (h, m),
+        None => (body, "0"),
+    };
+    let mut h: u32 = h_str.parse().ok()?;
+    let m: u32 = m_str.parse().ok()?;
+    if m >= 60 {
+        return None;
+    }
+    if has_meridiem {
+        if h == 0 || h > 12 {
+            return None;
+        }
+        if is_pm && h != 12 {
+            h += 12;
+        } else if !is_pm && h == 12 {
+            h = 0;
+        }
+    } else if h >= 24 {
+        return None;
+    }
+    Some((h, m))
+}
+
+fn parse_duration_token(token: &str) -> Option<i64> {
+    if let Some(h) = token.strip_suffix('h') {
+        let hours: i64 = h.parse().ok()?;
+        if (1..=12).contains(&hours) {
+            return Some(hours * 60);
+        }
+    }
+    if let Some(m) = token.strip_suffix('m') {
+        let mins: i64 = m.parse().ok()?;
+        if (15..=480).contains(&mins) {
+            return Some(mins);
+        }
+    }
+    None
+}
+
+// ── Availability Slot Computation ───────────────────────────────────────────
+
+pub fn compute_availability_slots(
+    query: &AvailabilityQuery,
+    busy_intervals: &[(UnixMs, UnixMs)],
+) -> Vec<AvailabilitySlot> {
+    let slot_ms = i64::from(query.slot_minutes.clamp(15, 240)) * 60_000;
+    let start_hour = u32::from(query.workday_start_hour.min(22));
+    let end_hour = u32::from(query.workday_end_hour.clamp(query.workday_start_hour + 1, 23));
+
+    let Some(start_dt) = DateTime::from_timestamp_millis(query.range_start.0) else {
+        return Vec::new();
+    };
+    let Some(end_dt) = DateTime::from_timestamp_millis(query.range_end.0) else {
+        return Vec::new();
+    };
+
+    let mut merged: Vec<(i64, i64)> = busy_intervals
+        .iter()
+        .filter(|(s, e)| e.0 > s.0)
+        .map(|(s, e)| (s.0, e.0))
+        .collect();
+    merged.sort_by_key(|(s, _)| *s);
+
+    let mut slots = Vec::new();
+    let mut day = start_dt.date_naive();
+    let last_day = end_dt.date_naive();
+    let mut day_count = 0;
+
+    while day <= last_day && day_count < 14 && slots.len() < 24 {
+        let day_start = Utc
+            .from_utc_datetime(&day.and_hms_opt(start_hour, 0, 0).expect("valid start hour"))
+            .timestamp_millis();
+        let day_end = Utc
+            .from_utc_datetime(&day.and_hms_opt(end_hour, 0, 0).expect("valid end hour"))
+            .timestamp_millis();
+
+        let mut cursor = day_start.max(query.range_start.0);
+        while cursor + slot_ms <= day_end && slots.len() < 24 {
+            let candidate_end = cursor + slot_ms;
+            let conflict = merged
+                .iter()
+                .find(|(bs, be)| *bs < candidate_end && *be > cursor);
+            if let Some((_, busy_end)) = conflict {
+                cursor = (*busy_end).max(cursor + 900_000);
+                // Align to 15-minute boundary
+                let rem = cursor % 900_000;
+                if rem != 0 {
+                    cursor += 900_000 - rem;
+                }
+            } else {
+                let s_dt = DateTime::from_timestamp_millis(cursor).expect("valid ts");
+                let e_dt = DateTime::from_timestamp_millis(candidate_end).expect("valid ts");
+                let label = format!(
+                    "{} · {} – {} UTC",
+                    s_dt.format("%a, %b %-d"),
+                    s_dt.format("%-I:%M %p"),
+                    e_dt.format("%-I:%M %p")
+                );
+                slots.push(AvailabilitySlot {
+                    start_at: UnixMs(cursor),
+                    end_at: UnixMs(candidate_end),
+                    label,
+                });
+                cursor = candidate_end;
+            }
+        }
+        day += Duration::days(1);
+        day_count += 1;
+    }
+
+    slots
+}
+
+// ── Discord Markdown Recap Formatter ────────────────────────────────────────
+
+pub fn render_discord_recap(event: &CalendarEventView, doc: &MeetingDocView) -> String {
+    let start_str = DateTime::from_timestamp_millis(event.start_at.0)
+        .map(|dt| dt.format("%a, %b %-d · %-I:%M %p UTC").to_string())
+        .unwrap_or_else(|| "Scheduled".to_string());
+
+    let mut out = String::new();
+    out.push_str(&format!("**Meeting Recap: {}**\n", event.title));
+    let mut meta = vec![start_str];
+    if let Some(dept) = &event.department {
+        meta.push(format!("#{dept}"));
+    }
+    if let Some(loc) = &event.location {
+        meta.push(format!("📍 {loc}"));
+    }
+    out.push_str(&format!("_{}_\n", meta.join(" · ")));
+
+    if !doc.notes_markdown.trim().is_empty() {
+        out.push_str("\n**Notes**\n");
+        out.push_str(doc.notes_markdown.trim());
+        out.push('\n');
+    }
+
+    if !doc.agenda.is_empty() {
+        out.push_str("\n**Agenda**\n");
+        for item in &doc.agenda {
+            let mark = if item.checked { "x" } else { " " };
+            out.push_str(&format!("- [{mark}] {}\n", item.text));
+        }
+    }
+
+    if !doc.action_items.is_empty() || !doc.carryover_items.is_empty() {
+        out.push_str("\n**Action Items**\n");
+        for item in doc.action_items.iter().chain(doc.carryover_items.iter()) {
+            let mark = if item.status == ActionItemStatus::Done {
+                "✅"
+            } else {
+                "⬜"
+            };
+            let owner = item
+                .assignee_handle
+                .as_deref()
+                .map(|h| format!(" (@{h})"))
+                .unwrap_or_default();
+            out.push_str(&format!("- {mark} {}{owner}\n", item.title));
+        }
+    }
+
+    out.trim_end().to_string()
+}

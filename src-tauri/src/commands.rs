@@ -1,7 +1,14 @@
+use mail_core::calendar::{
+    ActionItemStatus, ActionItemView, AddInviteToCalendarInput, AvailabilityQuery,
+    AvailabilitySlot, CalendarEventView, CalendarInviteView, CalendarOccurrence,
+    CalendarRangeQuery, DiscordWebhookStatus, IcsOverlayView, MeetingDocView, OverlayBusyBlock,
+    PromoteActionItemInput, RsvpInviteInput, SaveCalendarEventInput, SaveIcsOverlayInput,
+    UpdateMeetingDocInput,
+};
 use mail_core::error::CoreError;
 use mail_core::ids::{
-    AccountId, ContactId, DraftId, JobId, PinnedLinkId, SharedTemplateId, SharedThreadId,
-    TemplateId, ThreadId, UnixMs,
+    AccountId, ActionItemId, CalendarEventId, ContactId, DraftId, IcsOverlayId, JobId,
+    PinnedLinkId, SharedTemplateId, SharedThreadId, TemplateId, ThreadId, UnixMs,
 };
 use mail_core::staff::{
     AddSharedCommentInput, ConnectStaffWorkspaceInput, PinnedLinkView, SavePinnedLinkInput,
@@ -409,4 +416,174 @@ pub fn open_external_url(
     url: String,
 ) -> Result<(), CoreError> {
     core.open_external_url(&url)
+}
+
+// ---------------------------------------------------------------- Phase C: Calendar & Meetings
+
+#[tauri::command]
+pub async fn list_calendar_events(
+    core: tauri::State<'_, MailCore>,
+    query: CalendarRangeQuery,
+) -> Result<Vec<CalendarOccurrence>, CoreError> {
+    core.list_calendar_events(query).await
+}
+
+#[tauri::command]
+pub async fn save_calendar_event(
+    core: tauri::State<'_, MailCore>,
+    input: SaveCalendarEventInput,
+) -> Result<CalendarEventView, CoreError> {
+    core.save_calendar_event(input).await
+}
+
+#[tauri::command]
+pub async fn quick_add_calendar_event(
+    core: tauri::State<'_, MailCore>,
+    text: String,
+) -> Result<CalendarEventView, CoreError> {
+    core.quick_add_calendar_event(text).await
+}
+
+#[tauri::command]
+pub async fn delete_calendar_event(
+    core: tauri::State<'_, MailCore>,
+    event_id: CalendarEventId,
+) -> Result<(), CoreError> {
+    core.delete_calendar_event(event_id).await
+}
+
+#[tauri::command]
+pub async fn get_meeting_doc(
+    core: tauri::State<'_, MailCore>,
+    event_id: CalendarEventId,
+) -> Result<MeetingDocView, CoreError> {
+    core.get_meeting_doc(event_id).await
+}
+
+#[tauri::command]
+pub async fn update_meeting_doc(
+    core: tauri::State<'_, MailCore>,
+    input: UpdateMeetingDocInput,
+) -> Result<MeetingDocView, CoreError> {
+    core.update_meeting_doc(input).await
+}
+
+#[tauri::command]
+pub async fn promote_to_action_item(
+    core: tauri::State<'_, MailCore>,
+    input: PromoteActionItemInput,
+) -> Result<ActionItemView, CoreError> {
+    core.promote_to_action_item(input).await
+}
+
+#[tauri::command]
+pub async fn toggle_action_item(
+    core: tauri::State<'_, MailCore>,
+    action_item_id: ActionItemId,
+    status: ActionItemStatus,
+) -> Result<ActionItemView, CoreError> {
+    core.toggle_action_item(action_item_id, status).await
+}
+
+#[tauri::command]
+pub async fn list_action_items(
+    core: tauri::State<'_, MailCore>,
+) -> Result<Vec<ActionItemView>, CoreError> {
+    core.list_action_items().await
+}
+
+#[tauri::command]
+pub async fn rsvp_calendar_invite(
+    core: tauri::State<'_, MailCore>,
+    input: RsvpInviteInput,
+) -> Result<CalendarInviteView, CoreError> {
+    core.rsvp_calendar_invite(input).await
+}
+
+#[tauri::command]
+pub async fn add_invite_to_pigment_calendar(
+    core: tauri::State<'_, MailCore>,
+    input: AddInviteToCalendarInput,
+) -> Result<CalendarEventView, CoreError> {
+    core.add_invite_to_pigment_calendar(input).await
+}
+
+#[tauri::command]
+pub async fn list_ics_overlays(
+    core: tauri::State<'_, MailCore>,
+) -> Result<Vec<IcsOverlayView>, CoreError> {
+    core.list_ics_overlays().await
+}
+
+#[tauri::command]
+pub async fn save_ics_overlay(
+    core: tauri::State<'_, MailCore>,
+    input: SaveIcsOverlayInput,
+) -> Result<IcsOverlayView, CoreError> {
+    core.save_ics_overlay(input).await
+}
+
+#[tauri::command]
+pub async fn delete_ics_overlay(
+    core: tauri::State<'_, MailCore>,
+    overlay_id: IcsOverlayId,
+) -> Result<(), CoreError> {
+    core.delete_ics_overlay(overlay_id).await
+}
+
+#[tauri::command]
+pub async fn refresh_ics_overlay(
+    core: tauri::State<'_, MailCore>,
+    overlay_id: IcsOverlayId,
+) -> Result<IcsOverlayView, CoreError> {
+    core.refresh_ics_overlay(overlay_id).await
+}
+
+#[tauri::command]
+pub async fn list_overlay_busy_blocks(
+    core: tauri::State<'_, MailCore>,
+    query: CalendarRangeQuery,
+) -> Result<Vec<OverlayBusyBlock>, CoreError> {
+    core.list_overlay_busy_blocks(query).await
+}
+
+#[tauri::command]
+pub async fn find_availability_slots(
+    core: tauri::State<'_, MailCore>,
+    query: AvailabilityQuery,
+) -> Result<Vec<AvailabilitySlot>, CoreError> {
+    core.find_availability_slots(query).await
+}
+
+#[tauri::command]
+pub async fn get_discord_webhook_status(
+    core: tauri::State<'_, MailCore>,
+) -> Result<DiscordWebhookStatus, CoreError> {
+    core.get_discord_webhook_status().await
+}
+
+#[tauri::command]
+pub async fn set_discord_webhook(
+    core: tauri::State<'_, MailCore>,
+    url: Option<String>,
+) -> Result<DiscordWebhookStatus, CoreError> {
+    core.set_discord_webhook(url).await
+}
+
+#[tauri::command]
+pub async fn format_meeting_recap(
+    core: tauri::State<'_, MailCore>,
+    event_id: CalendarEventId,
+) -> Result<String, CoreError> {
+    core.format_meeting_recap(event_id).await
+}
+
+#[tauri::command]
+pub async fn post_meeting_recap_to_discord(
+    core: tauri::State<'_, MailCore>,
+    event_id: CalendarEventId,
+    custom_markdown: Option<String>,
+) -> Result<(), CoreError> {
+    core.post_meeting_recap_to_discord(event_id, custom_markdown)
+        .await
 }

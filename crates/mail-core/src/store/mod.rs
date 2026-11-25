@@ -1,6 +1,7 @@
 //! Private SQLite + FTS5 persistence. Nothing in this module crosses the crate boundary.
 
 mod accounts;
+mod calendar;
 mod demo;
 mod drafts;
 mod jobs;
@@ -9,6 +10,7 @@ mod templates;
 mod threads;
 
 pub(crate) use accounts::*;
+pub(crate) use calendar::*;
 pub(crate) use demo::*;
 pub(crate) use drafts::*;
 pub(crate) use jobs::*;
@@ -35,6 +37,7 @@ const MIGRATION_0002_JOB_PAYLOAD: &str =
 const MIGRATION_0003_ACCOUNT_SPACE_KIND: &str =
     "ALTER TABLE account ADD COLUMN space_kind TEXT NOT NULL DEFAULT 'personal' CHECK (space_kind IN ('personal', 'pigment_staff'));";
 const MIGRATION_0004_STAFF_COLLAB: &str = include_str!("0002_staff_collab.sql");
+const MIGRATION_0005_CALENDAR_MEETINGS: &str = include_str!("0003_calendar_meetings.sql");
 
 pub(crate) struct Store {
     conn: Mutex<Connection>,
@@ -83,6 +86,10 @@ impl Store {
         conn.execute_batch(MIGRATION_0004_STAFF_COLLAB)
             .map_err(|e| CoreError::Storage {
                 reason: format!("run migration 0004: {e}"),
+            })?;
+        conn.execute_batch(MIGRATION_0005_CALENDAR_MEETINGS)
+            .map_err(|e| CoreError::Storage {
+                reason: format!("run migration 0005: {e}"),
             })?;
         Ok(Self {
             conn: Mutex::new(conn),

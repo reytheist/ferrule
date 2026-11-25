@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod auth;
+pub mod calendar;
 pub mod error;
 pub mod events;
 pub mod host;
@@ -9,6 +10,7 @@ pub mod schedule;
 pub mod staff;
 pub mod types;
 
+mod calendar_core;
 mod staff_core;
 mod store;
 mod sync;
@@ -616,9 +618,9 @@ impl MailCore {
         auth: &ProviderAuth,
     ) -> Result<Option<SecretString>, CoreError> {
         match auth.credential_kind() {
-            CredentialKind::Password | CredentialKind::StaffSyncToken => {
-                self.secret_for(account_id, auth)
-            }
+            CredentialKind::Password
+            | CredentialKind::StaffSyncToken
+            | CredentialKind::DiscordWebhookUrl => self.secret_for(account_id, auth),
             CredentialKind::OAuthRefreshToken | CredentialKind::OAuthClientSecret => {
                 let now = self.now();
                 if let Ok(cache) = self.inner.token_cache.lock() {
@@ -713,6 +715,7 @@ impl MailCore {
                     None => sanitize::text_to_html(&message.body_text),
                 };
                 let doc = sanitize::sanitize_html(&raw, remote_content);
+                let invites = store::load_message_invites(conn, message.id)?;
                 out.push(MessageView {
                     id: message.id,
                     from_name: message.from_name.clone(),
@@ -726,6 +729,7 @@ impl MailCore {
                     privacy: doc.privacy,
                     attachments: Vec::new(),
                     unsubscribe: message.unsub.clone(),
+                    invites,
                 });
             }
 

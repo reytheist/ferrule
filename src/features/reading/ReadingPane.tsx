@@ -1,19 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Archive,
+  CalendarClock,
+  CalendarDays,
+  CalendarPlus,
   ChevronDown,
   ChevronLeft,
   Clock,
   Flag,
   Image,
   Lock,
+  MapPin,
   Paperclip,
   Share2,
   ShieldCheck,
   Star,
   Users,
 } from "lucide-react";
-import type { MessageView, ThreadView } from "../../types/mail";
+import type { CalendarInviteView, MessageView, RsvpStatus, ThreadView } from "../../types/mail";
+import { AvailabilityPicker } from "../calendar/AvailabilityPicker";
 import type { MailApp } from "../shell/useMailApp";
 import { spaceClass } from "../spaces/SpaceSwitcher";
 import { StaffCollabSidebar } from "../staff/StaffCollabSidebar";
@@ -71,7 +76,96 @@ function AttachmentChip({ name, size }: { name: string; size: number }) {
   );
 }
 
-function MessageBubble({ message }: { message: MessageView }) {
+function CalendarInviteCard({
+  app,
+  invite,
+}: {
+  app: MailApp;
+  invite: CalendarInviteView;
+}) {
+  const when = new Date(invite.startAt).toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const endTime = new Date(invite.endAt).toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const rsvpOptions: Array<{ status: RsvpStatus; label: string }> = [
+    { status: "accepted", label: "Accept" },
+    { status: "tentative", label: "Maybe" },
+    { status: "declined", label: "Decline" },
+  ];
+
+  return (
+    <div className="ics-invite-card">
+      <div className="ics-invite-head">
+        <CalendarDays style={{ width: 15, height: 15, color: "var(--app-accent)", flexShrink: 0 }} />
+        <div className="ics-invite-main">
+          <strong>{invite.summary}</strong>
+          <div className="hint-text">
+            {when} – {endTime}
+            {invite.location && (
+              <>
+                {" · "}
+                <MapPin style={{ width: 10, height: 10, display: "inline", verticalAlign: "-1px" }} />{" "}
+                {invite.location}
+              </>
+            )}
+          </div>
+          {invite.organizerEmail && (
+            <div className="hint-text">
+              Organizer: {invite.organizerName ?? invite.organizerEmail}
+            </div>
+          )}
+        </div>
+        <span className="kbd">
+          {invite.rsvpStatus === "needsAction" ? "Invite" : invite.rsvpStatus}
+        </span>
+      </div>
+
+      <div className="ics-invite-actions">
+        {rsvpOptions.map((opt) => (
+          <button
+            key={opt.status}
+            type="button"
+            className={`btn compact${invite.rsvpStatus === opt.status ? " primary" : ""}`}
+            onClick={() =>
+              void app.rsvpInvite({
+                messageId: invite.messageId,
+                uid: invite.uid,
+                status: opt.status,
+              })
+            }
+          >
+            {opt.label}
+          </button>
+        ))}
+        <span style={{ flex: 1 }} />
+        <button
+          type="button"
+          className="btn compact"
+          onClick={() =>
+            void app.addInviteToCalendar({
+              messageId: invite.messageId,
+              uid: invite.uid,
+              department: "operations",
+            })
+          }
+        >
+          <CalendarPlus />
+          {invite.addedEventId ? "In Pigment Calendar" : "Add to Pigment Calendar"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MessageBubble({ app, message }: { app: MailApp; message: MessageView }) {
+  const invites = message.invites ?? [];
   return (
     <div className="msg-bubble">
       <div className="msg-meta">
@@ -82,6 +176,9 @@ function MessageBubble({ message }: { message: MessageView }) {
         </div>
         <span className="msg-time">{formatFull(message.date)}</span>
       </div>
+      {invites.map((invite) => (
+        <CalendarInviteCard key={`${invite.messageId}-${invite.uid}`} app={app} invite={invite} />
+      ))}
       <iframe
         className="msg-frame"
         sandbox=""
@@ -112,6 +209,7 @@ function CollapsedMessage({ message, onToggle }: { message: MessageView; onToggl
 
 function ReplyDock({ app, thread }: { app: MailApp; thread: ThreadView }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [availOpen, setAvailOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const account = app.accounts.find((a) => a.id === thread.accountId);
   const identity = account?.identities.find((i) => i.isPrimary) ?? account?.identities[0];
@@ -131,7 +229,11 @@ function ReplyDock({ app, thread }: { app: MailApp; thread: ThreadView }) {
           <span className="fp-label">From:</span>
           {fromAddress}
         </span>
-        <div className="tpl-wrap">
+        <div className="tpl-wrap" style={{ display: "flex", gap: 6 }}>
+          <button className="tpl-btn" onClick={() => setAvailOpen(true)} title="Insert open calendar availability slots">
+            <CalendarClock style={{ width: 12, height: 12 }} />
+            Availability
+          </button>
           <button className="tpl-btn" onClick={() => setMenuOpen((v) => !v)}>
             Snippets
             <ChevronDown />
@@ -227,6 +329,15 @@ function ReplyDock({ app, thread }: { app: MailApp; thread: ThreadView }) {
           </button>
         </div>
       </div>
+      {availOpen && (
+        <AvailabilityPicker
+          onInsert={(text) => {
+            app.setReplyText(app.replyText ? `${app.replyText}\n\n${text}` : text);
+            inputRef.current?.focus();
+          }}
+          onClose={() => setAvailOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -355,7 +466,7 @@ export function ReadingPane({ app }: { app: MailApp }) {
 
             {earlier.map((message) =>
               app.expanded.has(message.id) ? (
-                <MessageBubble key={message.id} message={message} />
+                <MessageBubble key={message.id} app={app} message={message} />
               ) : (
                 <CollapsedMessage
                   key={message.id}
@@ -365,7 +476,7 @@ export function ReadingPane({ app }: { app: MailApp }) {
               ),
             )}
 
-            {current && <MessageBubble message={current} />}
+            {current && <MessageBubble app={app} message={current} />}
           </div>
 
           <StaffCollabSidebar

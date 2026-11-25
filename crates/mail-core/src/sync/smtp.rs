@@ -118,7 +118,9 @@ fn transport_for(
 ) -> Result<AsyncSmtpTransport<Tokio1Executor>, CoreError> {
     let credentials = Credentials::new(username.to_string(), secret.to_string());
     let mechanism = match auth.credential_kind() {
-        CredentialKind::Password | CredentialKind::StaffSyncToken => {
+        CredentialKind::Password
+        | CredentialKind::StaffSyncToken
+        | CredentialKind::DiscordWebhookUrl => {
             vec![Mechanism::Login, Mechanism::Plain]
         }
         CredentialKind::OAuthRefreshToken | CredentialKind::OAuthClientSecret => {

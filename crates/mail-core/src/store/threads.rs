@@ -766,10 +766,11 @@ pub(crate) fn ingest_messages(
                 category: incoming.category,
             },
         )?;
+        let msg_id = MessageId::fresh();
         let inserted = insert_message(
             conn,
             &NewMessage {
-                id: MessageId::fresh(),
+                id: msg_id,
                 account_id,
                 thread_id,
                 message_id_hdr: incoming.message_id_hdr.clone(),
@@ -792,8 +793,15 @@ pub(crate) fn ingest_messages(
                     .unwrap_or(0),
             },
         )?;
-        if inserted && !touched.contains(&thread_id) {
-            touched.push(thread_id);
+        if inserted {
+            for payload in &incoming.ics_payloads {
+                for parsed in crate::calendar::parse_ics(payload) {
+                    crate::store::upsert_message_invite(conn, msg_id, &parsed)?;
+                }
+            }
+            if !touched.contains(&thread_id) {
+                touched.push(thread_id);
+            }
         }
     }
     Ok(touched)

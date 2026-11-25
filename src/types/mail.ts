@@ -15,6 +15,9 @@ export type CommentId = Brand<string, "CommentId">;
 export type SharedTemplateId = Brand<string, "SharedTemplateId">;
 export type ContactId = Brand<string, "ContactId">;
 export type PinnedLinkId = Brand<string, "PinnedLinkId">;
+export type CalendarEventId = Brand<string, "CalendarEventId">;
+export type ActionItemId = Brand<string, "ActionItemId">;
+export type IcsOverlayId = Brand<string, "IcsOverlayId">;
 export type UnixMs = number;
 
 export type SpaceColor =
@@ -221,6 +224,7 @@ export interface MessageView {
   privacy: PrivacyReport;
   attachments: AttachmentMeta[];
   unsubscribe: UnsubscribeInfo | null;
+  invites?: CalendarInviteView[];
 }
 
 export interface ThreadView {
@@ -552,4 +556,201 @@ export interface SavePinnedLinkInput {
   url: string;
   category: string;
   description: string | null;
+}
+
+// ── Phase C: Calendar & Meetings ────────────────────────────────────────────
+
+export type CalendarEventKind =
+  | "meeting"
+  | "milestone"
+  | "deadline"
+  | "roomSchedule"
+  | "showEvent";
+
+export type RecurrenceRule = "none" | "weekly" | "biweekly" | "monthly";
+
+export interface CalendarEventView {
+  id: CalendarEventId;
+  seriesId: string | null;
+  title: string;
+  description: string;
+  startAt: UnixMs;
+  endAt: UnixMs;
+  allDay: boolean;
+  kind: CalendarEventKind;
+  department: string | null;
+  location: string | null;
+  recurrence: RecurrenceRule;
+  discordUrl: string | null;
+  attendees: string[];
+  sourceIcsUid: string | null;
+  createdBy: string;
+  updatedAt: UnixMs;
+}
+
+export interface SaveCalendarEventInput {
+  id: CalendarEventId | null;
+  seriesId?: string | null;
+  title: string;
+  description: string;
+  startAt: UnixMs;
+  endAt: UnixMs;
+  allDay: boolean;
+  kind: CalendarEventKind;
+  department: string | null;
+  location: string | null;
+  recurrence: RecurrenceRule;
+  discordUrl: string | null;
+  attendees: string[];
+  sourceIcsUid?: string | null;
+}
+
+export interface CalendarOccurrence {
+  event: CalendarEventView;
+  occurrenceStart: UnixMs;
+  occurrenceEnd: UnixMs;
+  isRecurringInstance: boolean;
+}
+
+export interface CalendarRangeQuery {
+  rangeStart: UnixMs;
+  rangeEnd: UnixMs;
+}
+
+export type RsvpStatus = "needsAction" | "accepted" | "tentative" | "declined";
+
+export interface CalendarInviteView {
+  messageId: MessageId;
+  uid: string;
+  summary: string;
+  description: string;
+  location: string | null;
+  organizerName: string | null;
+  organizerEmail: string;
+  startAt: UnixMs;
+  endAt: UnixMs;
+  allDay: boolean;
+  rsvpStatus: RsvpStatus;
+  addedEventId: CalendarEventId | null;
+}
+
+export interface RsvpInviteInput {
+  messageId: MessageId;
+  uid: string;
+  status: RsvpStatus;
+}
+
+export interface AddInviteToCalendarInput {
+  messageId: MessageId;
+  uid: string;
+  department: string | null;
+}
+
+export interface IcsOverlayView {
+  id: IcsOverlayId;
+  name: string;
+  url: string;
+  color: string;
+  enabled: boolean;
+  lastFetchedAt: UnixMs | null;
+  lastError: string | null;
+  eventCount: number;
+}
+
+export interface SaveIcsOverlayInput {
+  id: IcsOverlayId | null;
+  name: string;
+  url: string;
+  color: string;
+  enabled: boolean;
+}
+
+export interface OverlayBusyBlock {
+  overlayId: IcsOverlayId;
+  overlayName: string;
+  overlayColor: string;
+  uid: string;
+  summary: string;
+  startAt: UnixMs;
+  endAt: UnixMs;
+  allDay: boolean;
+}
+
+export interface AvailabilityQuery {
+  rangeStart: UnixMs;
+  rangeEnd: UnixMs;
+  slotMinutes: number;
+  workdayStartHour: number;
+  workdayEndHour: number;
+}
+
+export interface AvailabilitySlot {
+  startAt: UnixMs;
+  endAt: UnixMs;
+  label: string;
+}
+
+export interface AgendaItem {
+  id: string;
+  text: string;
+  checked: boolean;
+  addedBy: string;
+  promotedActionId: ActionItemId | null;
+}
+
+export type ActionItemStatus = "open" | "done";
+
+export interface ActionItemView {
+  id: ActionItemId;
+  title: string;
+  department: string | null;
+  milestone: string | null;
+  assigneeHandle: string | null;
+  status: ActionItemStatus;
+  dueAt: UnixMs | null;
+  location: string | null;
+  costNote: string | null;
+  sourceEventId: CalendarEventId | null;
+  sourceSeriesId: string | null;
+  sourceThreadId: ThreadId | null;
+  createdBy: string;
+  createdAt: UnixMs;
+  updatedAt: UnixMs;
+}
+
+export interface MeetingDocView {
+  eventId: CalendarEventId;
+  seriesId: string | null;
+  agenda: AgendaItem[];
+  notesMarkdown: string;
+  notesEditorHandle: string | null;
+  notesEditorName: string | null;
+  rev: number;
+  updatedAt: UnixMs;
+  actionItems: ActionItemView[];
+  carryoverItems: ActionItemView[];
+}
+
+export type MeetingDocAction =
+  | { kind: "updateAgenda"; agenda: AgendaItem[] }
+  | { kind: "claimNotesLock" }
+  | { kind: "saveNotes"; notesMarkdown: string; releaseLock: boolean }
+  | { kind: "releaseNotesLock" };
+
+export interface UpdateMeetingDocInput {
+  eventId: CalendarEventId;
+  action: MeetingDocAction;
+}
+
+export interface PromoteActionItemInput {
+  eventId: CalendarEventId;
+  agendaItemId: string | null;
+  title: string;
+  department: string | null;
+  assigneeHandle: string | null;
+  dueAt: UnixMs | null;
+}
+
+export interface DiscordWebhookStatus {
+  configured: boolean;
 }

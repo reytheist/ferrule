@@ -1,4 +1,5 @@
 import { AddAccountModal } from "./features/accounts/AddAccountModal";
+import { CalendarView } from "./features/calendar/CalendarView";
 import { CommandBar } from "./features/command-bar/CommandBar";
 import { ComposeModal } from "./features/compose/ComposeModal";
 import { ReadingPane } from "./features/reading/ReadingPane";
@@ -52,7 +53,9 @@ export function App() {
       <SpaceSwitcher app={app} />
       <div className="workspace">
         <MailboxSidebar app={app} />
-        {app.activeSection === "shared" ? (
+        {app.activeSection === "calendar" ? (
+          <CalendarView app={app} />
+        ) : app.activeSection === "shared" ? (
           <>
             <SharedThreadsList app={app} />
             <SharedThreadReadingPane app={app} />

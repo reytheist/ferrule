@@ -109,6 +109,7 @@ impl MailCore {
                     None,
                 )?;
                 store::seed_local_pigment_demo(conn, &current_member, now)?;
+                store::seed_local_calendar_demo(conn, now)?;
                 Ok(ws)
             })?;
             self.emit(CoreEvent::StaffChanged);
@@ -837,7 +838,7 @@ impl MailCore {
         Ok(ws)
     }
 
-    fn remote_staff_client(
+    pub(crate) fn remote_staff_client(
         &self,
         ws: &StaffWorkspaceView,
     ) -> Result<Option<StaffSyncClient>, CoreError> {
@@ -855,7 +856,7 @@ impl MailCore {
         Ok(Some(StaffSyncClient::new(&ws.server_url, token.expose())?))
     }
 
-    fn mark_staff_offline(&self, reason: &str) {
+    pub(crate) fn mark_staff_offline(&self, reason: &str) {
         let _ = self.inner.store.with_conn(|conn| {
             store::update_staff_sync_status(conn, StaffSyncStatus::Offline, None, Some(reason))
         });
@@ -886,6 +887,15 @@ fn apply_snapshot_tx(
     }
     for link in &snapshot.pinned_links {
         store::upsert_pinned_link_row(conn, link)?;
+    }
+    for event in &snapshot.calendar_events {
+        store::upsert_calendar_event_row(conn, event)?;
+    }
+    for doc in &snapshot.meeting_docs {
+        store::upsert_meeting_doc_row(conn, doc)?;
+    }
+    for item in &snapshot.action_items {
+        store::upsert_action_item_row(conn, item)?;
     }
     Ok(())
 }

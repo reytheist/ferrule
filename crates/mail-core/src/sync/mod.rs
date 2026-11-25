@@ -5,6 +5,7 @@ pub(crate) mod oauth;
 pub(crate) mod smtp;
 pub(crate) mod staff;
 
+use mail_parser::MimeHeaders;
 use regex::Regex;
 
 use crate::auth::{ProviderAuth, ProviderKind};
@@ -52,6 +53,7 @@ pub(crate) struct IngestMessage {
     pub raw_html: Option<String>,
     pub unsub: Option<UnsubscribeInfo>,
     pub category: InboxCategory,
+    pub ics_payloads: Vec<String>,
 }
 
 /// Read one header (unfolded, last occurrence wins) out of raw RFC822 bytes.
@@ -191,6 +193,32 @@ pub(crate) fn parse_raw(
         InboxCategory::Primary
     };
 
+    let mut ics_payloads = Vec::new();
+    for part in &parsed.parts {
+        let is_calendar = part
+            .content_type()
+            .map(|ct| {
+                ct.c_type.eq_ignore_ascii_case("text")
+                    && ct
+                        .c_subtype
+                        .as_deref()
+                        .map(|s| s.eq_ignore_ascii_case("calendar"))
+                        .unwrap_or(false)
+            })
+            .unwrap_or(false);
+        let is_ics_file = part
+            .attachment_name()
+            .map(|n| n.to_ascii_lowercase().ends_with(".ics"))
+            .unwrap_or(false);
+        if is_calendar || is_ics_file {
+            if let Ok(text) = std::str::from_utf8(part.contents()) {
+                if text.contains("BEGIN:VEVENT") {
+                    ics_payloads.push(text.to_string());
+                }
+            }
+        }
+    }
+
     Some(IngestMessage {
         message_id_hdr,
         in_reply_to,
@@ -207,6 +235,7 @@ pub(crate) fn parse_raw(
         raw_html: html,
         unsub,
         category,
+        ics_payloads,
     })
 }
 

@@ -4,10 +4,13 @@
 
 import {
   newAccountId,
+  newActionItemId,
   newAttachmentId,
+  newCalendarEventId,
   newCommentId,
   newContactId,
   newDraftId,
+  newIcsOverlayId,
   newIdentityId,
   newJobId,
   newLabelId,
@@ -22,15 +25,30 @@ import {
 import type {
   AccountId,
   AccountView,
+  ActionItemId,
+  ActionItemStatus,
+  ActionItemView,
   ActionOutcome,
+  AddInviteToCalendarInput,
   AddSharedCommentInput,
   AppSettings,
   AttachmentMeta,
+  AvailabilityQuery,
+  AvailabilitySlot,
+  CalendarEventId,
+  CalendarEventKind,
+  CalendarEventView,
+  CalendarInviteView,
+  CalendarOccurrence,
+  CalendarRangeQuery,
   ConnectStaffWorkspaceInput,
   ContactId,
   CreateDraftInput,
+  DiscordWebhookStatus,
   DraftId,
   DraftView,
+  IcsOverlayId,
+  IcsOverlayView,
   IdentityView,
   InboxCategory,
   JobId,
@@ -39,16 +57,23 @@ import type {
   MailAction,
   MailboxCounts,
   MailboxView,
+  MeetingDocView,
   MessageId,
   MessageView,
   NewAccountInput,
   OAuthSignInInput,
+  OverlayBusyBlock,
   PinnedLinkId,
   PinnedLinkView,
   PrivacyReport,
+  PromoteActionItemInput,
   ProviderKind,
+  RecurrenceRule,
   RemoteContent,
   RemoteImagesStatus,
+  RsvpInviteInput,
+  SaveCalendarEventInput,
+  SaveIcsOverlayInput,
   SavePinnedLinkInput,
   SaveSharedTemplateInput,
   SaveShowContactInput,
@@ -85,6 +110,7 @@ import type {
   UnsubscribeInfo,
   UpdateAccountInput,
   UpdateHandoffInput,
+  UpdateMeetingDocInput,
   UpdateSharedDraftInput,
 } from "../types/mail";
 
@@ -416,6 +442,7 @@ function messageView(message: StoredMessage, remoteContent: RemoteContent): Mess
     privacy: privacyReport(sanitized, remoteContent),
     attachments: message.attachments,
     unsubscribe: message.unsubscribe,
+    invites: mockInvitesForMessage(message),
   };
 }
 
@@ -2133,4 +2160,776 @@ export async function savePinnedLink(input: SavePinnedLinkInput): Promise<Pinned
 
 export async function deletePinnedLink(linkId: PinnedLinkId): Promise<void> {
   state.pinnedLinks = state.pinnedLinks.filter((l) => l.id !== linkId);
+}
+
+// ── Phase C: Calendar & Meetings Mock Backend ───────────────────────────────
+
+interface MockCalendarState {
+  seeded: boolean;
+  events: CalendarEventView[];
+  meetingDocs: Map<CalendarEventId, MeetingDocView>;
+  actionItems: ActionItemView[];
+  invites: Map<string, CalendarInviteView>;
+  overlays: IcsOverlayView[];
+  overlayBlocks: OverlayBusyBlock[];
+  discordWebhookConfigured: boolean;
+}
+
+const calState: MockCalendarState = {
+  seeded: false,
+  events: [],
+  meetingDocs: new Map(),
+  actionItems: [],
+  invites: new Map(),
+  overlays: [],
+  overlayBlocks: [],
+  discordWebhookConfigured: false,
+};
+
+function startOfTodayLocal(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function seedMockCalendarDemo(): void {
+  if (calState.seeded) return;
+  calState.seeded = true;
+  const base = startOfTodayLocal();
+  const t = now();
+  const series = "series-pigment-weekly-staff";
+
+  const prevSyncId = newCalendarEventId();
+  const thisSyncId = newCalendarEventId();
+  const sponsorId = newCalendarEventId();
+  const roomId = newCalendarEventId();
+  const workshopId = newCalendarEventId();
+
+  calState.events = [
+    {
+      id: prevSyncId,
+      seriesId: series,
+      title: "Pigment Weekly Staff Sync",
+      description: "Previous week's staff operations sync.",
+      startAt: base - 7 * DAY + 19 * HOUR,
+      endAt: base - 7 * DAY + 20 * HOUR,
+      allDay: false,
+      kind: "meeting",
+      department: "operations",
+      location: "Discord #staff-voice",
+      recurrence: "none",
+      discordUrl: "https://discord.com/channels/pigment-staff/staff-voice",
+      attendees: ["reyth", "elena", "marcus", "priya"],
+      sourceIcsUid: null,
+      createdBy: "reyth",
+      updatedAt: t,
+    },
+    {
+      id: thisSyncId,
+      seriesId: series,
+      title: "Pigment Weekly Staff Sync",
+      description: "Weekly operations, sponsor, and exhibition check-in.",
+      startAt: base + DAY + 19 * HOUR,
+      endAt: base + DAY + 20 * HOUR,
+      allDay: false,
+      kind: "meeting",
+      department: "operations",
+      location: "Discord #staff-voice",
+      recurrence: "weekly",
+      discordUrl: "https://discord.com/channels/pigment-staff/staff-voice",
+      attendees: ["reyth", "elena", "marcus", "priya"],
+      sourceIcsUid: null,
+      createdBy: "reyth",
+      updatedAt: t,
+    },
+    {
+      id: sponsorId,
+      seriesId: null,
+      title: "Gold Sponsor Deposit Deadline",
+      description: "Confirm Monument Hobbies & Vallejo booth deposits and logo assets.",
+      startAt: base + 3 * DAY + 17 * HOUR,
+      endAt: base + 3 * DAY + 18 * HOUR,
+      allDay: false,
+      kind: "deadline",
+      department: "sponsors",
+      location: null,
+      recurrence: "none",
+      discordUrl: null,
+      attendees: ["elena", "reyth"],
+      sourceIcsUid: null,
+      createdBy: "elena",
+      updatedAt: t,
+    },
+    {
+      id: roomId,
+      seriesId: null,
+      title: "Ballroom A & Paint Lab AV Walkthrough",
+      description: "Verify power drops, display case lighting rigs, and judging table layout.",
+      startAt: base + 2 * DAY + 14 * HOUR,
+      endAt: base + 2 * DAY + 15.5 * HOUR,
+      allDay: false,
+      kind: "roomSchedule",
+      department: "exhibition",
+      location: "Ballroom A",
+      recurrence: "none",
+      discordUrl: null,
+      attendees: ["marcus", "reyth"],
+      sourceIcsUid: null,
+      createdBy: "marcus",
+      updatedAt: t,
+    },
+    {
+      id: workshopId,
+      seriesId: null,
+      title: "Airbrush Workshop Prep Check-in",
+      description: "Confirm compressor count and booth ventilation with instructors.",
+      startAt: base + 4 * DAY + 11 * HOUR,
+      endAt: base + 4 * DAY + 12 * HOUR,
+      allDay: false,
+      kind: "meeting",
+      department: "workshops",
+      location: "Paint Lab 2",
+      recurrence: "none",
+      discordUrl: "https://discord.com/channels/pigment-staff/workshops",
+      attendees: ["marcus", "priya"],
+      sourceIcsUid: null,
+      createdBy: "marcus",
+      updatedAt: t,
+    },
+  ];
+
+  const carryoverItem: ActionItemView = {
+    id: newActionItemId(),
+    title: "Confirm Ballroom A power drop map with hotel AV",
+    department: "operations",
+    milestone: "PMS 2027",
+    assigneeHandle: "marcus",
+    status: "open",
+    dueAt: base + 2 * DAY,
+    location: "Ballroom A",
+    costNote: null,
+    sourceEventId: prevSyncId,
+    sourceSeriesId: series,
+    sourceThreadId: null,
+    createdBy: "reyth",
+    createdAt: base - 7 * DAY,
+    updatedAt: t,
+  };
+  calState.actionItems.push(carryoverItem);
+
+  calState.meetingDocs.set(thisSyncId, {
+    eventId: thisSyncId,
+    seriesId: series,
+    agenda: [
+      {
+        id: "ag-1",
+        text: "Review Monument Hobbies & Vallejo booth deposits",
+        checked: false,
+        addedBy: "elena",
+        promotedActionId: null,
+      },
+      {
+        id: "ag-2",
+        text: "Finalize volunteer shift schedule for Friday setup",
+        checked: false,
+        addedBy: "priya",
+        promotedActionId: null,
+      },
+    ],
+    notesMarkdown:
+      "## Quick Updates\n- Exhibition display cases confirmed for Ballroom A.\n- Workshop registration opens next Monday.",
+    notesEditorHandle: null,
+    notesEditorName: null,
+    rev: 1,
+    updatedAt: t,
+    actionItems: [],
+    carryoverItems: [],
+  });
+
+  const personalOverlayId = newIcsOverlayId();
+  calState.overlays.push({
+    id: personalOverlayId,
+    name: "Personal (Google .ics)",
+    url: "local://personal-demo",
+    color: "violet",
+    enabled: true,
+    lastFetchedAt: t,
+    lastError: null,
+    eventCount: 2,
+  });
+  calState.overlayBlocks.push(
+    {
+      overlayId: personalOverlayId,
+      overlayName: "Personal (Google .ics)",
+      overlayColor: "violet",
+      uid: "personal-busy-1",
+      summary: "Busy (Personal Calendar)",
+      startAt: base + DAY + 14 * HOUR,
+      endAt: base + DAY + 15 * HOUR,
+      allDay: false,
+    },
+    {
+      overlayId: personalOverlayId,
+      overlayName: "Personal (Google .ics)",
+      overlayColor: "violet",
+      uid: "personal-busy-2",
+      summary: "Busy (Family Pickup)",
+      startAt: base + 2 * DAY + 16 * HOUR,
+      endAt: base + 2 * DAY + 17 * HOUR,
+      allDay: false,
+    },
+  );
+}
+
+function mockInvitesForMessage(message: StoredMessage): CalendarInviteView[] {
+  seedMockCalendarDemo();
+  // Surface a realistic .ics invite on the first message of the first Pigment Staff thread
+  // (or any thread mentioning "booth" / "walkthrough" / "invoice").
+  const existing = Array.from(calState.invites.values()).filter(
+    (inv) => inv.messageId === message.id,
+  );
+  if (existing.length > 0) return existing;
+
+  const subjectMatch =
+    /booth|sponsor|venue|walkthrough|retainer|pigment/i.test(message.snippet) ||
+    /monument|pigment|ferngate/i.test(message.fromEmail);
+  if (subjectMatch && calState.invites.size === 0) {
+    const base = startOfTodayLocal();
+    const uid = `ics-${message.id}`;
+    const inv: CalendarInviteView = {
+      messageId: message.id,
+      uid,
+      summary: "Pigment 2027 Sponsor & Booth Floor Walkthrough",
+      description: "Quick walkthrough of Gold Sponsor booth placement and electrical drops.",
+      location: "Ballroom A · Conference Line",
+      organizerName: message.fromName,
+      organizerEmail: message.fromEmail,
+      startAt: base + 2 * DAY + 11 * HOUR,
+      endAt: base + 2 * DAY + 12 * HOUR,
+      allDay: false,
+      rsvpStatus: "needsAction",
+      addedEventId: null,
+    };
+    calState.invites.set(`${message.id}:${uid}`, inv);
+    return [inv];
+  }
+  return [];
+}
+
+function expandMockOccurrences(
+  events: CalendarEventView[],
+  rangeStart: UnixMs,
+  rangeEnd: UnixMs,
+): CalendarOccurrence[] {
+  const out: CalendarOccurrence[] = [];
+  for (const ev of events) {
+    const dur = Math.max(ev.endAt - ev.startAt, 15 * MINUTE);
+    if (ev.recurrence === "none") {
+      if (ev.endAt >= rangeStart && ev.startAt <= rangeEnd) {
+        out.push({
+          event: ev,
+          occurrenceStart: ev.startAt,
+          occurrenceEnd: ev.endAt,
+          isRecurringInstance: false,
+        });
+      }
+      continue;
+    }
+    let cursor = new Date(ev.startAt);
+    let idx = 0;
+    while (cursor.getTime() <= rangeEnd && idx < 120) {
+      const s = cursor.getTime();
+      const e = s + dur;
+      if (e >= rangeStart && s <= rangeEnd) {
+        out.push({
+          event: ev,
+          occurrenceStart: s,
+          occurrenceEnd: e,
+          isRecurringInstance: idx > 0,
+        });
+      }
+      const next = new Date(cursor.getTime());
+      if (ev.recurrence === "weekly") next.setDate(next.getDate() + 7);
+      else if (ev.recurrence === "biweekly") next.setDate(next.getDate() + 14);
+      else if (ev.recurrence === "monthly") next.setMonth(next.getMonth() + 1);
+      cursor = next;
+      idx += 1;
+    }
+  }
+  return out.sort((a, b) => a.occurrenceStart - b.occurrenceStart);
+}
+
+export async function listCalendarEvents(
+  query: CalendarRangeQuery,
+): Promise<CalendarOccurrence[]> {
+  seedMockCalendarDemo();
+  return expandMockOccurrences(calState.events, query.rangeStart, query.rangeEnd);
+}
+
+export async function saveCalendarEvent(
+  input: SaveCalendarEventInput,
+): Promise<CalendarEventView> {
+  seedMockCalendarDemo();
+  const title = input.title.trim();
+  if (!title) throw new Error("Event title is required");
+  if (input.endAt <= input.startAt) throw new Error("End time must be after start time");
+  const t = now();
+  const id = input.id ?? newCalendarEventId();
+  const seriesId =
+    input.seriesId?.trim() ||
+    (input.recurrence !== "none" ? `series-${id}` : null);
+  const view: CalendarEventView = {
+    id,
+    seriesId,
+    title,
+    description: input.description.trim(),
+    startAt: input.startAt,
+    endAt: input.endAt,
+    allDay: input.allDay,
+    kind: input.kind,
+    department: input.department?.trim().replace(/^#/, "").toLowerCase() || null,
+    location: input.location?.trim() || null,
+    recurrence: input.recurrence,
+    discordUrl: input.discordUrl?.trim() || null,
+    attendees: input.attendees,
+    sourceIcsUid: input.sourceIcsUid ?? null,
+    createdBy: state.staffWorkspace.staffHandle || "reyth",
+    updatedAt: t,
+  };
+  const idx = calState.events.findIndex((e) => e.id === id);
+  if (idx >= 0) calState.events[idx] = view;
+  else calState.events.push(view);
+  return { ...view };
+}
+
+export async function quickAddCalendarEvent(text: string): Promise<CalendarEventView> {
+  seedMockCalendarDemo();
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error('Enter an event like "Staff sync Thu 7pm #operations"');
+  const d = new Date();
+  let hour = 10;
+  let minute = 0;
+  let durationMins = 60;
+  let department: string | null = null;
+  let recurrence: RecurrenceRule = "none";
+  let kind: CalendarEventKind = "meeting";
+  const locationTokens: string[] = [];
+  let collectingLoc = false;
+  const titleTokens: string[] = [];
+  const weekdays: Record<string, number> = {
+    sun: 0, sunday: 0, mon: 1, monday: 1, tue: 2, tues: 2, tuesday: 2,
+    wed: 3, wednesday: 3, thu: 4, thur: 4, thurs: 4, thursday: 4,
+    fri: 5, friday: 5, sat: 6, saturday: 6,
+  };
+  for (const tok of trimmed.split(/\s+/)) {
+    const low = tok.toLowerCase();
+    if (tok.startsWith("#")) {
+      collectingLoc = false;
+      department = tok.slice(1).toLowerCase();
+      continue;
+    }
+    if (tok.startsWith("@")) {
+      collectingLoc = true;
+      if (tok.length > 1) locationTokens.push(tok.slice(1));
+      continue;
+    }
+    if (low === "weekly" || low === "biweekly" || low === "monthly") {
+      collectingLoc = false;
+      recurrence = low;
+      continue;
+    }
+    if (low === "tomorrow" || low === "tmrw") {
+      collectingLoc = false;
+      d.setDate(d.getDate() + 1);
+      continue;
+    }
+    if (low === "today") {
+      collectingLoc = false;
+      continue;
+    }
+    const cleanDay = low.replace(/,$/, "");
+    if (cleanDay in weekdays) {
+      collectingLoc = false;
+      const target = weekdays[cleanDay]!;
+      let delta = (target - d.getDay() + 7) % 7;
+      if (delta === 0) delta = 7;
+      d.setDate(d.getDate() + delta);
+      continue;
+    }
+    const timeMatch = /^(\d{1,2})(?::(\d{2}))?(am|pm)$/i.exec(low);
+    if (timeMatch) {
+      collectingLoc = false;
+      let h = Number(timeMatch[1]);
+      const m = Number(timeMatch[2] ?? "0");
+      const mer = timeMatch[3]!.toLowerCase();
+      if (mer === "pm" && h !== 12) h += 12;
+      if (mer === "am" && h === 12) h = 0;
+      hour = h;
+      minute = m;
+      continue;
+    }
+    const durMatch = /^(\d+)(h|m)$/i.exec(low);
+    if (durMatch) {
+      collectingLoc = false;
+      const val = Number(durMatch[1]);
+      durationMins = durMatch[2]!.toLowerCase() === "h" ? val * 60 : val;
+      continue;
+    }
+    if (low.includes("deadline")) kind = "deadline";
+    else if (low.includes("milestone")) kind = "milestone";
+    if (collectingLoc) locationTokens.push(tok);
+    else titleTokens.push(tok);
+  }
+  d.setHours(hour, minute, 0, 0);
+  const startAt = d.getTime();
+  return saveCalendarEvent({
+    id: null,
+    title: titleTokens.join(" ") || "Staff Event",
+    description: "",
+    startAt,
+    endAt: startAt + durationMins * MINUTE,
+    allDay: false,
+    kind,
+    department,
+    location: locationTokens.join(" ") || null,
+    recurrence,
+    discordUrl: null,
+    attendees: [],
+  });
+}
+
+export async function deleteCalendarEvent(eventId: CalendarEventId): Promise<void> {
+  seedMockCalendarDemo();
+  calState.events = calState.events.filter((e) => e.id !== eventId);
+  calState.meetingDocs.delete(eventId);
+}
+
+export async function getMeetingDoc(eventId: CalendarEventId): Promise<MeetingDocView> {
+  seedMockCalendarDemo();
+  const ev = calState.events.find((e) => e.id === eventId);
+  if (!ev) throw new Error("Calendar event not found");
+  const existing = calState.meetingDocs.get(eventId) ?? {
+    eventId,
+    seriesId: ev.seriesId,
+    agenda: [],
+    notesMarkdown: "",
+    notesEditorHandle: null,
+    notesEditorName: null,
+    rev: 1,
+    updatedAt: now(),
+    actionItems: [],
+    carryoverItems: [],
+  };
+  const actionItems = calState.actionItems.filter((a) => a.sourceEventId === eventId);
+  const carryoverItems = ev.seriesId
+    ? calState.actionItems.filter(
+        (a) =>
+          a.sourceSeriesId === ev.seriesId &&
+          a.status === "open" &&
+          a.sourceEventId !== eventId,
+      )
+    : [];
+  return {
+    ...existing,
+    seriesId: ev.seriesId,
+    agenda: existing.agenda.map((a) => ({ ...a })),
+    actionItems,
+    carryoverItems,
+  };
+}
+
+export async function updateMeetingDoc(input: UpdateMeetingDocInput): Promise<MeetingDocView> {
+  const doc = await getMeetingDoc(input.eventId);
+  const actorHandle = state.staffWorkspace.staffHandle || "reyth";
+  const actorName = state.staffWorkspace.staffName || "Reyth";
+  if (input.action.kind === "updateAgenda") {
+    doc.agenda = input.action.agenda;
+  } else if (input.action.kind === "claimNotesLock") {
+    doc.notesEditorHandle = actorHandle;
+    doc.notesEditorName = actorName;
+  } else if (input.action.kind === "saveNotes") {
+    doc.notesMarkdown = input.action.notesMarkdown;
+    if (input.action.releaseLock) {
+      doc.notesEditorHandle = null;
+      doc.notesEditorName = null;
+    } else {
+      doc.notesEditorHandle = actorHandle;
+      doc.notesEditorName = actorName;
+    }
+  } else if (input.action.kind === "releaseNotesLock") {
+    doc.notesEditorHandle = null;
+    doc.notesEditorName = null;
+  }
+  doc.rev += 1;
+  doc.updatedAt = now();
+  calState.meetingDocs.set(input.eventId, doc);
+  return getMeetingDoc(input.eventId);
+}
+
+export async function promoteToActionItem(
+  input: PromoteActionItemInput,
+): Promise<ActionItemView> {
+  seedMockCalendarDemo();
+  const ev = calState.events.find((e) => e.id === input.eventId);
+  if (!ev) throw new Error("Calendar event not found");
+  const t = now();
+  const item: ActionItemView = {
+    id: newActionItemId(),
+    title: input.title.trim(),
+    department: input.department ?? ev.department,
+    milestone: "PMS 2027",
+    assigneeHandle: input.assigneeHandle?.trim().replace(/^@/, "") || null,
+    status: "open",
+    dueAt: input.dueAt,
+    location: ev.location,
+    costNote: null,
+    sourceEventId: ev.id,
+    sourceSeriesId: ev.seriesId,
+    sourceThreadId: null,
+    createdBy: state.staffWorkspace.staffHandle || "reyth",
+    createdAt: t,
+    updatedAt: t,
+  };
+  calState.actionItems.push(item);
+  if (input.agendaItemId) {
+    const doc = await getMeetingDoc(input.eventId);
+    const bullet = doc.agenda.find((a) => a.id === input.agendaItemId);
+    if (bullet) {
+      bullet.promotedActionId = item.id;
+      calState.meetingDocs.set(input.eventId, doc);
+    }
+  }
+  return item;
+}
+
+export async function toggleActionItem(
+  actionItemId: ActionItemId,
+  status: ActionItemStatus,
+): Promise<ActionItemView> {
+  seedMockCalendarDemo();
+  const item = calState.actionItems.find((a) => a.id === actionItemId);
+  if (!item) throw new Error("Action item not found");
+  item.status = status;
+  item.updatedAt = now();
+  return { ...item };
+}
+
+export async function listActionItems(): Promise<ActionItemView[]> {
+  seedMockCalendarDemo();
+  return calState.actionItems.slice();
+}
+
+export async function rsvpCalendarInvite(input: RsvpInviteInput): Promise<CalendarInviteView> {
+  seedMockCalendarDemo();
+  const key = `${input.messageId}:${input.uid}`;
+  const inv = calState.invites.get(key);
+  if (!inv) throw new Error("Calendar invite not found");
+  inv.rsvpStatus = input.status;
+  return { ...inv };
+}
+
+export async function addInviteToPigmentCalendar(
+  input: AddInviteToCalendarInput,
+): Promise<CalendarEventView> {
+  seedMockCalendarDemo();
+  const key = `${input.messageId}:${input.uid}`;
+  const inv = calState.invites.get(key);
+  if (!inv) throw new Error("Calendar invite not found");
+  const ev = await saveCalendarEvent({
+    id: inv.addedEventId,
+    title: inv.summary,
+    description: inv.description,
+    startAt: inv.startAt,
+    endAt: inv.endAt,
+    allDay: inv.allDay,
+    kind: "meeting",
+    department: input.department,
+    location: inv.location,
+    recurrence: "none",
+    discordUrl: null,
+    attendees: inv.organizerEmail ? [inv.organizerEmail] : [],
+    sourceIcsUid: inv.uid,
+  });
+  inv.addedEventId = ev.id;
+  return ev;
+}
+
+export async function listIcsOverlays(): Promise<IcsOverlayView[]> {
+  seedMockCalendarDemo();
+  return calState.overlays.slice();
+}
+
+export async function saveIcsOverlay(input: SaveIcsOverlayInput): Promise<IcsOverlayView> {
+  seedMockCalendarDemo();
+  const existing = input.id ? calState.overlays.find((o) => o.id === input.id) : undefined;
+  if (existing) {
+    existing.name = input.name.trim();
+    existing.url = input.url.trim();
+    existing.color = input.color;
+    existing.enabled = input.enabled;
+    return { ...existing };
+  }
+  const created: IcsOverlayView = {
+    id: newIcsOverlayId(),
+    name: input.name.trim(),
+    url: input.url.trim(),
+    color: input.color || "violet",
+    enabled: input.enabled,
+    lastFetchedAt: null,
+    lastError: null,
+    eventCount: 0,
+  };
+  calState.overlays.push(created);
+  return { ...created };
+}
+
+export async function deleteIcsOverlay(overlayId: IcsOverlayId): Promise<void> {
+  calState.overlays = calState.overlays.filter((o) => o.id !== overlayId);
+  calState.overlayBlocks = calState.overlayBlocks.filter((b) => b.overlayId !== overlayId);
+}
+
+export async function refreshIcsOverlay(overlayId: IcsOverlayId): Promise<IcsOverlayView> {
+  seedMockCalendarDemo();
+  const ov = calState.overlays.find((o) => o.id === overlayId);
+  if (!ov) throw new Error("Overlay not found");
+  const base = startOfTodayLocal();
+  calState.overlayBlocks = calState.overlayBlocks.filter((b) => b.overlayId !== overlayId);
+  calState.overlayBlocks.push({
+    overlayId: ov.id,
+    overlayName: ov.name,
+    overlayColor: ov.color,
+    uid: `refreshed-${ov.id}`,
+    summary: `Busy (${ov.name})`,
+    startAt: base + DAY + 13 * HOUR,
+    endAt: base + DAY + 14 * HOUR,
+    allDay: false,
+  });
+  ov.lastFetchedAt = now();
+  ov.lastError = null;
+  ov.eventCount = 1;
+  return { ...ov };
+}
+
+export async function listOverlayBusyBlocks(
+  query: CalendarRangeQuery,
+): Promise<OverlayBusyBlock[]> {
+  seedMockCalendarDemo();
+  const enabledIds = new Set(calState.overlays.filter((o) => o.enabled).map((o) => o.id));
+  return calState.overlayBlocks.filter(
+    (b) => enabledIds.has(b.overlayId) && b.endAt >= query.rangeStart && b.startAt <= query.rangeEnd,
+  );
+}
+
+export async function findAvailabilitySlots(
+  query: AvailabilityQuery,
+): Promise<AvailabilitySlot[]> {
+  seedMockCalendarDemo();
+  const occs = await listCalendarEvents({
+    rangeStart: query.rangeStart,
+    rangeEnd: query.rangeEnd,
+  });
+  const blocks = await listOverlayBusyBlocks({
+    rangeStart: query.rangeStart,
+    rangeEnd: query.rangeEnd,
+  });
+  const busy: Array<[number, number]> = [
+    ...occs.map((o): [number, number] => [o.occurrenceStart, o.occurrenceEnd]),
+    ...blocks.map((b): [number, number] => [b.startAt, b.endAt]),
+  ].sort((a, b) => a[0] - b[0]);
+
+  const slotMs = Math.max(15, query.slotMinutes) * MINUTE;
+  const slots: AvailabilitySlot[] = [];
+  const day = new Date(query.rangeStart);
+  day.setHours(0, 0, 0, 0);
+  for (let i = 0; i < 7 && slots.length < 18; i += 1) {
+    const dayStart = new Date(day.getTime());
+    dayStart.setHours(query.workdayStartHour, 0, 0, 0);
+    const dayEnd = new Date(day.getTime());
+    dayEnd.setHours(query.workdayEndHour, 0, 0, 0);
+    let cursor = Math.max(dayStart.getTime(), query.rangeStart);
+    while (cursor + slotMs <= dayEnd.getTime() && cursor <= query.rangeEnd && slots.length < 18) {
+      const end = cursor + slotMs;
+      const hit = busy.find(([bs, be]) => bs < end && be > cursor);
+      if (hit) {
+        cursor = Math.max(hit[1], cursor + 15 * MINUTE);
+      } else {
+        const sDate = new Date(cursor);
+        const eDate = new Date(end);
+        const dayLabel = sDate.toLocaleDateString(undefined, {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        });
+        const sTime = sDate.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+        const eTime = eDate.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+        slots.push({ startAt: cursor, endAt: end, label: `${dayLabel} · ${sTime} – ${eTime}` });
+        cursor = end;
+      }
+    }
+    day.setDate(day.getDate() + 1);
+  }
+  return slots;
+}
+
+export async function getDiscordWebhookStatus(): Promise<DiscordWebhookStatus> {
+  return { configured: calState.discordWebhookConfigured };
+}
+
+export async function setDiscordWebhook(url: string | null): Promise<DiscordWebhookStatus> {
+  const cleaned = url?.trim() ?? "";
+  if (!cleaned) {
+    calState.discordWebhookConfigured = false;
+    return { configured: false };
+  }
+  if (!/^https:\/\/(ptb\.|canary\.)?discord(app)?\.com\/api\/webhooks\//i.test(cleaned)) {
+    throw new Error("Discord webhook URL must start with https://discord.com/api/webhooks/");
+  }
+  calState.discordWebhookConfigured = true;
+  return { configured: true };
+}
+
+export async function formatMeetingRecap(eventId: CalendarEventId): Promise<string> {
+  const ev = calState.events.find((e) => e.id === eventId);
+  if (!ev) throw new Error("Calendar event not found");
+  const doc = await getMeetingDoc(eventId);
+  const when = new Date(ev.startAt).toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const lines = [`**Meeting Recap: ${ev.title}**`];
+  const meta = [when];
+  if (ev.department) meta.push(`#${ev.department}`);
+  if (ev.location) meta.push(`📍 ${ev.location}`);
+  lines.push(`_${meta.join(" · ")}_`);
+  if (doc.notesMarkdown.trim()) {
+    lines.push("", "**Notes**", doc.notesMarkdown.trim());
+  }
+  if (doc.agenda.length > 0) {
+    lines.push("", "**Agenda**");
+    for (const a of doc.agenda) lines.push(`- [${a.checked ? "x" : " "}] ${a.text}`);
+  }
+  const allActions = [...doc.actionItems, ...doc.carryoverItems];
+  if (allActions.length > 0) {
+    lines.push("", "**Action Items**");
+    for (const item of allActions) {
+      const owner = item.assigneeHandle ? ` (@${item.assigneeHandle})` : "";
+      lines.push(`- ${item.status === "done" ? "✅" : "⬜"} ${item.title}${owner}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+export async function postMeetingRecapToDiscord(
+  eventId: CalendarEventId,
+  customMarkdown: string | null,
+): Promise<void> {
+  if (!calState.discordWebhookConfigured) {
+    throw new Error("Configure a Discord webhook URL first.");
+  }
+  if (!customMarkdown?.trim()) {
+    await formatMeetingRecap(eventId);
+  }
 }

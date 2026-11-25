@@ -19,8 +19,12 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::calendar::{ActionItemView, CalendarEventView, MeetingDocView};
 use crate::error::CoreError;
-use crate::ids::{ContactId, PinnedLinkId, SharedTemplateId, SharedThreadId, UnixMs};
+use crate::ids::{
+    ActionItemId, CalendarEventId, ContactId, PinnedLinkId, SharedTemplateId, SharedThreadId,
+    UnixMs,
+};
 use crate::staff::{
     HandoffStatus, PinnedLinkView, SharedCommentView, SharedDraftView, SharedTemplateView,
     SharedThreadView, ShowContactView, StaffMemberView,
@@ -39,6 +43,12 @@ pub struct StaffSyncSnapshot {
     pub contacts: Vec<ShowContactView>,
     #[serde(default)]
     pub pinned_links: Vec<PinnedLinkView>,
+    #[serde(default)]
+    pub calendar_events: Vec<CalendarEventView>,
+    #[serde(default)]
+    pub meeting_docs: Vec<MeetingDocView>,
+    #[serde(default)]
+    pub action_items: Vec<ActionItemView>,
     pub server_time: Option<UnixMs>,
 }
 
@@ -53,6 +63,9 @@ pub enum StaffSyncEvent {
     ThreadUpdated { shared_thread_id: SharedThreadId },
     CommentAdded { shared_thread_id: SharedThreadId },
     DraftUpdated { shared_thread_id: SharedThreadId },
+    CalendarUpdated { event_id: CalendarEventId },
+    MeetingDocUpdated { event_id: CalendarEventId },
+    ActionItemUpdated { action_item_id: ActionItemId },
     DirectoryUpdated,
     ResourcesUpdated,
     Heartbeat,
@@ -203,6 +216,29 @@ impl StaffSyncClient {
     pub(crate) async fn delete_pinned_link(&self, id: PinnedLinkId) -> Result<(), CoreError> {
         let url = format!("{}/v1/pinned-links/{id}", self.base_url);
         self.delete_url(&url).await
+    }
+
+    pub(crate) async fn push_calendar_event(
+        &self,
+        event: &CalendarEventView,
+    ) -> Result<(), CoreError> {
+        let url = format!("{}/v1/calendar/events/{}", self.base_url, event.id);
+        self.put_json(&url, event).await
+    }
+
+    pub(crate) async fn delete_calendar_event(&self, id: CalendarEventId) -> Result<(), CoreError> {
+        let url = format!("{}/v1/calendar/events/{id}", self.base_url);
+        self.delete_url(&url).await
+    }
+
+    pub(crate) async fn push_meeting_doc(&self, doc: &MeetingDocView) -> Result<(), CoreError> {
+        let url = format!("{}/v1/calendar/events/{}/doc", self.base_url, doc.event_id);
+        self.put_json(&url, doc).await
+    }
+
+    pub(crate) async fn push_action_item(&self, item: &ActionItemView) -> Result<(), CoreError> {
+        let url = format!("{}/v1/action-items/{}", self.base_url, item.id);
+        self.put_json(&url, item).await
     }
 
     async fn post_json<T: Serialize>(&self, url: &str, body: &T) -> Result<(), CoreError> {

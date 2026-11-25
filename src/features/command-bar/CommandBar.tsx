@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   Archive,
+  CalendarDays,
   Clock,
   Contact,
   ExternalLink,
@@ -152,6 +153,7 @@ export function CommandBar({ app }: { app: MailApp }) {
       { id: "go-archive", label: "Go to Archive", icon: Archive, run: () => app.selectView({ kind: "archive" }) },
       { id: "go-trash", label: "Go to Trash", icon: Trash2, run: () => app.selectView({ kind: "trash" }) },
       { id: "go-shared", label: "Go to Shared with Me (Pigment Staff)", icon: Users, run: app.openSharedSection },
+      { id: "go-calendar", label: "Go to Pigment Shared Calendar & Meetings", icon: CalendarDays, run: app.openCalendarSection },
       { id: "open-contacts", label: "Open Shared Show Contacts", icon: Contact, run: app.openContacts },
       { id: "open-links", label: "Manage Pinned Staff Links", icon: Link2, run: app.openPinnedLinks },
     ];

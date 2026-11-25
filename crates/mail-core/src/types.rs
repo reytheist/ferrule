@@ -369,6 +369,8 @@ pub struct MessageView {
     pub privacy: PrivacyReport,
     pub attachments: Vec<AttachmentMeta>,
     pub unsubscribe: Option<UnsubscribeInfo>,
+    #[serde(default)]
+    pub invites: Vec<crate::calendar::CalendarInviteView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

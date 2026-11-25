@@ -72,6 +72,9 @@ define_id!(CommentId);
 define_id!(SharedTemplateId);
 define_id!(ContactId);
 define_id!(PinnedLinkId);
+define_id!(CalendarEventId);
+define_id!(ActionItemId);
+define_id!(IcsOverlayId);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

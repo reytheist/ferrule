@@ -1,9 +1,12 @@
 import type {
   AccountId,
+  ActionItemId,
   AttachmentId,
+  CalendarEventId,
   CommentId,
   ContactId,
   DraftId,
+  IcsOverlayId,
   IdentityId,
   JobId,
   LabelId,
@@ -42,6 +45,9 @@ const isCommentId = (v: string): v is CommentId => v.startsWith("cmt_");
 const isSharedTemplateId = (v: string): v is SharedTemplateId => v.startsWith("stp_");
 const isContactId = (v: string): v is ContactId => v.startsWith("cnt_");
 const isPinnedLinkId = (v: string): v is PinnedLinkId => v.startsWith("lnk_");
+const isCalendarEventId = (v: string): v is CalendarEventId => v.startsWith("cev_");
+const isActionItemId = (v: string): v is ActionItemId => v.startsWith("act_");
+const isIcsOverlayId = (v: string): v is IcsOverlayId => v.startsWith("ics_");
 
 export const newAccountId = (): AccountId => makeId("acc", isAccountId);
 export const newIdentityId = (): IdentityId => makeId("idn", isIdentityId);
@@ -58,3 +64,6 @@ export const newCommentId = (): CommentId => makeId("cmt", isCommentId);
 export const newSharedTemplateId = (): SharedTemplateId => makeId("stp", isSharedTemplateId);
 export const newContactId = (): ContactId => makeId("cnt", isContactId);
 export const newPinnedLinkId = (): PinnedLinkId => makeId("lnk", isPinnedLinkId);
+export const newCalendarEventId = (): CalendarEventId => makeId("cev", isCalendarEventId);
+export const newActionItemId = (): ActionItemId => makeId("act", isActionItemId);
+export const newIcsOverlayId = (): IcsOverlayId => makeId("ics", isIcsOverlayId);

@@ -2,10 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   actOnThreads,
   addAccount as addAccountCommand,
+  addInviteToPigmentCalendar as addInviteToPigmentCalendarCommand,
   addSharedComment as addSharedCommentCommand,
   cancelSend,
   connectStaffWorkspace as connectStaffWorkspaceCommand,
   createDraft,
+  deleteCalendarEvent as deleteCalendarEventCommand,
+  deleteIcsOverlay as deleteIcsOverlayCommand,
   deletePinnedLink as deletePinnedLinkCommand,
   deleteSharedTemplate as deleteSharedTemplateCommand,
   deleteShowContact as deleteShowContactCommand,
@@ -13,10 +16,16 @@ import {
   disconnectStaffWorkspace as disconnectStaffWorkspaceCommand,
   dismissFollowUp,
   findSharedThreadForLocal,
+  formatMeetingRecap as formatMeetingRecapCommand,
+  getDiscordWebhookStatus,
+  getMeetingDoc as getMeetingDocCommand,
   getSettings,
   getStaffWorkspace,
   listAccounts,
+  listCalendarEvents,
+  listIcsOverlays,
   listJobs,
+  listOverlayBusyBlocks,
   listPinnedLinks,
   listSharedTemplates,
   listSharedThreads,
@@ -29,8 +38,15 @@ import {
   openExternalUrl,
   openSharedThread as openSharedThreadCommand,
   openThread as openThreadCommand,
+  postMeetingRecapToDiscord as postMeetingRecapToDiscordCommand,
+  promoteToActionItem as promoteToActionItemCommand,
+  quickAddCalendarEvent as quickAddCalendarEventCommand,
   reauthOAuthAccount as reauthOAuthAccountCommand,
+  refreshIcsOverlay as refreshIcsOverlayCommand,
   removeAccount as removeAccountCommand,
+  rsvpCalendarInvite as rsvpCalendarInviteCommand,
+  saveCalendarEvent as saveCalendarEventCommand,
+  saveIcsOverlay as saveIcsOverlayCommand,
   savePinnedLink as savePinnedLinkCommand,
   saveSharedTemplate as saveSharedTemplateCommand,
   saveShowContact as saveShowContactCommand,
@@ -38,14 +54,17 @@ import {
   savedOAuthClients as savedOAuthClientsCommand,
   seedDemoIfEmpty,
   sendDraft,
+  setDiscordWebhook as setDiscordWebhookCommand,
   setFollowUp,
   shareThread as shareThreadCommand,
   snoozeThread as snoozeThreadCommand,
   syncAccount,
   syncStaffWorkspace as syncStaffWorkspaceCommand,
   tickScheduler,
+  toggleActionItem as toggleActionItemCommand,
   unsnoozeThread,
   updateAccount as updateAccountCommand,
+  updateMeetingDoc as updateMeetingDocCommand,
   updateSettings as updateSettingsCommand,
   updateSharedDraft as updateSharedDraftCommand,
   updateSharedHandoff as updateSharedHandoffCommand,
@@ -53,22 +72,36 @@ import {
 import type {
   AccountId,
   AccountView,
+  ActionItemId,
+  ActionItemStatus,
+  AddInviteToCalendarInput,
   AddSharedCommentInput,
   AppSettings,
+  CalendarEventId,
+  CalendarEventView,
+  CalendarOccurrence,
   ConnectStaffWorkspaceInput,
   ContactId,
   CreateDraftInput,
+  IcsOverlayId,
+  IcsOverlayView,
   InboxCategory,
   JobId,
   JobView,
   MailboxCounts,
   MailboxView,
+  MeetingDocView,
   MessageId,
   NewAccountInput,
   OAuthSignInInput,
+  OverlayBusyBlock,
   PinnedLinkId,
   PinnedLinkView,
+  PromoteActionItemInput,
   RemoteContent,
+  RsvpInviteInput,
+  SaveCalendarEventInput,
+  SaveIcsOverlayInput,
   SavePinnedLinkInput,
   SaveSharedTemplateInput,
   SaveShowContactInput,
@@ -93,6 +126,7 @@ import type {
   UnixMs,
   UpdateAccountInput,
   UpdateHandoffInput,
+  UpdateMeetingDocInput,
   UpdateSharedDraftInput,
 } from "../../types/mail";
 import { formatDue } from "../ui/format";
@@ -101,7 +135,7 @@ export type Theme = "dark" | "light";
 export type Layout = "split" | "classic";
 export type Stage = "list" | "thread";
 export type PopoverMode = "snooze" | "followUp" | "sendLater";
-export type ActiveSection = "mail" | "shared";
+export type ActiveSection = "mail" | "shared" | "calendar";
 
 const EMPTY_STAFF_WORKSPACE: StaffWorkspaceView = {
   connected: false,
@@ -231,6 +265,12 @@ export interface MailApp {
   pinnedLinks: PinnedLinkView[];
   selectedSharedId: SharedThreadId | null;
   activeSharedThread: SharedThreadView | null;
+  calendarOccurrences: CalendarOccurrence[];
+  icsOverlays: IcsOverlayView[];
+  overlayBusyBlocks: OverlayBusyBlock[];
+  selectedCalendarEvent: CalendarEventView | null;
+  activeMeetingDoc: MeetingDocView | null;
+  discordWebhookConfigured: boolean;
 
   toggleTheme(): void;
   toggleLayout(): void;
@@ -304,6 +344,23 @@ export interface MailApp {
   persistPinnedLink(input: SavePinnedLinkInput): Promise<void>;
   removePinnedLink(id: PinnedLinkId): Promise<void>;
   launchPinnedLink(url: string): Promise<void>;
+  openCalendarSection(): void;
+  loadCalendarRange(rangeStart: UnixMs, rangeEnd: UnixMs): Promise<void>;
+  selectCalendarEvent(event: CalendarEventView): Promise<void>;
+  persistCalendarEvent(input: SaveCalendarEventInput): Promise<CalendarEventView>;
+  quickAddEvent(text: string): Promise<CalendarEventView>;
+  removeCalendarEvent(id: CalendarEventId): Promise<void>;
+  mutateMeetingDoc(input: UpdateMeetingDocInput): Promise<void>;
+  promoteAgendaToAction(input: PromoteActionItemInput): Promise<void>;
+  setActionItemStatus(id: ActionItemId, status: ActionItemStatus): Promise<void>;
+  rsvpInvite(input: RsvpInviteInput): Promise<void>;
+  addInviteToCalendar(input: AddInviteToCalendarInput): Promise<void>;
+  persistIcsOverlay(input: SaveIcsOverlayInput): Promise<IcsOverlayView>;
+  removeIcsOverlay(id: IcsOverlayId): Promise<void>;
+  syncIcsOverlay(id: IcsOverlayId): Promise<void>;
+  saveDiscordWebhook(url: string | null): Promise<void>;
+  copyDiscordRecap(eventId: CalendarEventId): Promise<void>;
+  postDiscordRecap(eventId: CalendarEventId): Promise<void>;
 }
 
 export function useMailApp(): MailApp {
@@ -352,6 +409,14 @@ export function useMailApp(): MailApp {
   const [pinnedLinks, setPinnedLinks] = useState<PinnedLinkView[]>([]);
   const [selectedSharedId, setSelectedSharedId] = useState<SharedThreadId | null>(null);
   const [activeSharedThread, setActiveSharedThread] = useState<SharedThreadView | null>(null);
+  const [calendarOccurrences, setCalendarOccurrences] = useState<CalendarOccurrence[]>([]);
+  const [icsOverlays, setIcsOverlays] = useState<IcsOverlayView[]>([]);
+  const [overlayBusyBlocks, setOverlayBusyBlocks] = useState<OverlayBusyBlock[]>([]);
+  const [selectedCalendarEvent, setSelectedCalendarEvent] = useState<CalendarEventView | null>(
+    null,
+  );
+  const [activeMeetingDoc, setActiveMeetingDoc] = useState<MeetingDocView | null>(null);
+  const [discordWebhookConfigured, setDiscordWebhookConfigured] = useState(false);
 
   const toastSeq = useRef(0);
   const insertSeq = useRef(0);
@@ -388,20 +453,31 @@ export function useMailApp(): MailApp {
   }, []);
 
   const reloadStaff = useCallback(async () => {
-    const [ws, dir, shared, sharedTpls, contacts, links] = await Promise.all([
-      getStaffWorkspace(),
-      listStaffDirectory(),
-      listSharedThreads(),
-      listSharedTemplates(),
-      listShowContacts(),
-      listPinnedLinks(),
-    ]);
+    const nowMs = Date.now();
+    const [ws, dir, shared, sharedTpls, contacts, links, overlays, webhook, upcoming] =
+      await Promise.all([
+        getStaffWorkspace(),
+        listStaffDirectory(),
+        listSharedThreads(),
+        listSharedTemplates(),
+        listShowContacts(),
+        listPinnedLinks(),
+        listIcsOverlays(),
+        getDiscordWebhookStatus(),
+        listCalendarEvents({
+          rangeStart: nowMs - 7 * 86_400_000,
+          rangeEnd: nowMs + 30 * 86_400_000,
+        }),
+      ]);
     setStaffWorkspace(ws);
     setStaffDirectory(dir);
     setSharedThreads(shared);
     setSharedTemplates(sharedTpls);
     setShowContacts(contacts);
     setPinnedLinks(links);
+    setIcsOverlays(overlays);
+    setDiscordWebhookConfigured(webhook.configured);
+    setCalendarOccurrences(upcoming);
   }, []);
 
   const reloadMeta = useCallback(async () => {
@@ -1251,7 +1327,8 @@ export function useMailApp(): MailApp {
       shareModalOpen ||
       contactsOpen ||
       pinnedLinksOpen ||
-      popover !== null
+      popover !== null ||
+      activeSection === "calendar"
     ) {
       return;
     }
@@ -1303,6 +1380,217 @@ export function useMailApp(): MailApp {
     return () => window.removeEventListener("keydown", listener);
   }, []);
 
+  function openCalendarSection(): void {
+    setActiveSection("calendar");
+    setSelectedId(null);
+    setThread(null);
+    setSelectedSharedId(null);
+    setActiveSharedThread(null);
+    void reloadStaff().catch(() => undefined);
+  }
+
+  const loadCalendarRange = useCallback(async (rangeStart: UnixMs, rangeEnd: UnixMs) => {
+    try {
+      const [occs, blocks, overlays] = await Promise.all([
+        listCalendarEvents({ rangeStart, rangeEnd }),
+        listOverlayBusyBlocks({ rangeStart, rangeEnd }),
+        listIcsOverlays(),
+      ]);
+      setCalendarOccurrences(occs);
+      setOverlayBusyBlocks(blocks);
+      setIcsOverlays(overlays);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }, [showToast]);
+
+  async function selectCalendarEvent(event: CalendarEventView): Promise<void> {
+    setSelectedCalendarEvent(event);
+    try {
+      const doc = await getMeetingDocCommand(event.id);
+      setActiveMeetingDoc(doc);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function persistCalendarEvent(input: SaveCalendarEventInput): Promise<CalendarEventView> {
+    const saved = await saveCalendarEventCommand(input);
+    setSelectedCalendarEvent(saved);
+    showToast(input.id ? "Calendar event updated" : "Calendar event created");
+    return saved;
+  }
+
+  async function quickAddEvent(text: string): Promise<CalendarEventView> {
+    try {
+      const created = await quickAddCalendarEventCommand(text);
+      showToast(`Added "${created.title}" to Pigment Calendar`);
+      return created;
+    } catch (err) {
+      showToast(friendlyError(err));
+      throw err;
+    }
+  }
+
+  async function removeCalendarEvent(id: CalendarEventId): Promise<void> {
+    try {
+      await deleteCalendarEventCommand(id);
+      if (selectedCalendarEvent?.id === id) {
+        setSelectedCalendarEvent(null);
+        setActiveMeetingDoc(null);
+      }
+      showToast("Calendar event deleted");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function mutateMeetingDoc(input: UpdateMeetingDocInput): Promise<void> {
+    try {
+      const updated = await updateMeetingDocCommand(input);
+      setActiveMeetingDoc(updated);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function promoteAgendaToAction(input: PromoteActionItemInput): Promise<void> {
+    try {
+      const item = await promoteToActionItemCommand(input);
+      const refreshed = await getMeetingDocCommand(input.eventId);
+      setActiveMeetingDoc(refreshed);
+      showToast(`Promoted to Action Item: ${item.title}`);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function setActionItemStatus(id: ActionItemId, status: ActionItemStatus): Promise<void> {
+    try {
+      await toggleActionItemCommand(id, status);
+      if (selectedCalendarEvent) {
+        const refreshed = await getMeetingDocCommand(selectedCalendarEvent.id);
+        setActiveMeetingDoc(refreshed);
+      }
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function rsvpInvite(input: RsvpInviteInput): Promise<void> {
+    try {
+      const updated = await rsvpCalendarInviteCommand(input);
+      setThread((prev) =>
+        prev
+          ? {
+              ...prev,
+              messages: prev.messages.map((m) =>
+                m.id === input.messageId
+                  ? {
+                      ...m,
+                      invites: (m.invites ?? []).map((inv) =>
+                        inv.uid === input.uid ? updated : inv,
+                      ),
+                    }
+                  : m,
+              ),
+            }
+          : prev,
+      );
+      showToast(`RSVP updated: ${input.status}`);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function addInviteToCalendar(input: AddInviteToCalendarInput): Promise<void> {
+    try {
+      const ev = await addInviteToPigmentCalendarCommand(input);
+      setThread((prev) =>
+        prev
+          ? {
+              ...prev,
+              messages: prev.messages.map((m) =>
+                m.id === input.messageId
+                  ? {
+                      ...m,
+                      invites: (m.invites ?? []).map((inv) =>
+                        inv.uid === input.uid ? { ...inv, addedEventId: ev.id } : inv,
+                      ),
+                    }
+                  : m,
+              ),
+            }
+          : prev,
+      );
+      showToast(`Added "${ev.title}" to Pigment Calendar`);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function persistIcsOverlay(input: SaveIcsOverlayInput): Promise<IcsOverlayView> {
+    const saved = await saveIcsOverlayCommand(input);
+    const next = await listIcsOverlays();
+    setIcsOverlays(next);
+    return saved;
+  }
+
+  async function removeIcsOverlay(id: IcsOverlayId): Promise<void> {
+    try {
+      await deleteIcsOverlayCommand(id);
+      const next = await listIcsOverlays();
+      setIcsOverlays(next);
+      showToast("Personal .ics overlay removed");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function syncIcsOverlay(id: IcsOverlayId): Promise<void> {
+    try {
+      await refreshIcsOverlayCommand(id);
+      const next = await listIcsOverlays();
+      setIcsOverlays(next);
+      showToast("Personal .ics overlay refreshed");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function saveDiscordWebhook(url: string | null): Promise<void> {
+    const status = await setDiscordWebhookCommand(url);
+    setDiscordWebhookConfigured(status.configured);
+    showToast(
+      status.configured
+        ? "Discord webhook saved to OS keychain"
+        : "Discord webhook cleared from OS keychain",
+    );
+  }
+
+  async function copyDiscordRecap(eventId: CalendarEventId): Promise<void> {
+    try {
+      const md = await formatMeetingRecapCommand(eventId);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(md);
+        showToast("Discord recap copied to clipboard");
+      } else {
+        showToast("Recap formatted (clipboard unavailable in this browser)");
+      }
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function postDiscordRecap(eventId: CalendarEventId): Promise<void> {
+    try {
+      await postMeetingRecapToDiscordCommand(eventId, null);
+      showToast("Meeting recap posted to Discord");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
   return {
     booting,
     error,
@@ -1345,6 +1633,12 @@ export function useMailApp(): MailApp {
     pinnedLinks,
     selectedSharedId,
     activeSharedThread,
+    calendarOccurrences,
+    icsOverlays,
+    overlayBusyBlocks,
+    selectedCalendarEvent,
+    activeMeetingDoc,
+    discordWebhookConfigured,
     toggleTheme: () => setTheme((prev) => (prev === "dark" ? "light" : "dark")),
     toggleLayout: () => setLayout((prev) => (prev === "split" ? "classic" : "split")),
     backToList,
@@ -1417,5 +1711,22 @@ export function useMailApp(): MailApp {
     persistPinnedLink,
     removePinnedLink,
     launchPinnedLink,
+    openCalendarSection,
+    loadCalendarRange,
+    selectCalendarEvent,
+    persistCalendarEvent,
+    quickAddEvent,
+    removeCalendarEvent,
+    mutateMeetingDoc,
+    promoteAgendaToAction,
+    setActionItemStatus,
+    rsvpInvite,
+    addInviteToCalendar,
+    persistIcsOverlay,
+    removeIcsOverlay,
+    syncIcsOverlay,
+    saveDiscordWebhook,
+    copyDiscordRecap,
+    postDiscordRecap,
   };
 }
