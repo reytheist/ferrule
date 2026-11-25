@@ -35,7 +35,7 @@
   align-items: center;
   gap: 7px;
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: calc(13px * var(--chrome-font-scale));
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--app-ink);
@@ -68,7 +68,7 @@
   border: 1px solid var(--app-border);
   background: var(--app-surface);
   color: var(--app-muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   padding: 0 8px;
   display: flex;
   align-items: center;
@@ -99,7 +99,7 @@
 
 .kbd {
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   padding: 1px 5px;
   border-radius: 4px;
   border: 1px solid var(--app-border);
@@ -122,7 +122,7 @@
   align-items: center;
   gap: 6px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   color: var(--app-muted);
   white-space: nowrap;
 }
@@ -175,7 +175,7 @@
   border: none;
   background: var(--app-accent);
   color: var(--app-accent-fg);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   font-weight: 600;
   padding: 5px 11px;
   border-radius: var(--app-radius);
@@ -200,7 +200,7 @@
   border: 1px solid var(--app-border);
   background: transparent;
   color: var(--app-ink-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   font-weight: 600;
   padding: 4px 9px;
   border-radius: 6px;
@@ -246,7 +246,7 @@
   background: var(--app-surface);
   color: var(--app-ink-2);
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   font-weight: 600;
   padding: 3px 9px;
   border-radius: 99px;
@@ -271,7 +271,7 @@
 
 .space-chip .sp-cnt {
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   opacity: 0.75;
 }
 
@@ -360,7 +360,7 @@
 
 .sidebar-section {
   font-family: var(--font-display);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -377,7 +377,7 @@
   border: none;
   background: transparent;
   color: var(--app-ink-2);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   font-weight: 500;
   padding: 5px 7px;
   border-radius: 6px;
@@ -417,7 +417,7 @@
 
 .nav-count {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   color: var(--app-muted);
 }
 
@@ -435,7 +435,7 @@
 }
 
 .agent-slot {
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   color: var(--app-muted);
   padding: 5px 7px;
   border-radius: 6px;
@@ -479,7 +479,7 @@
   border: none;
   background: transparent;
   color: var(--app-muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   font-weight: 500;
   padding: 5px 7px 6px;
   cursor: pointer;
@@ -498,13 +498,13 @@
 
 .tab-badge {
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   opacity: 0.72;
 }
 
 .list-title {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
   font-weight: 600;
   color: var(--app-ink-2);
   letter-spacing: -0.01em;
@@ -557,7 +557,7 @@
 }
 
 .thread-sender {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   font-weight: 500;
   color: var(--app-ink-2);
   overflow: hidden;
@@ -574,7 +574,7 @@
 
 .thread-count {
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   color: var(--app-muted);
   padding: 0 4px;
   border-radius: 3px;
@@ -583,13 +583,13 @@
 
 .thread-time {
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   color: var(--app-muted);
   flex-shrink: 0;
 }
 
 .thread-subject {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   font-weight: 500;
   color: var(--app-ink);
   overflow: hidden;
@@ -602,7 +602,7 @@
 }
 
 .thread-snippet {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--chrome-font-scale));
   color: var(--app-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -618,7 +618,7 @@
 }
 
 .badge {
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   font-weight: 600;
   padding: 1px 5px;
   border-radius: 4px;
@@ -700,7 +700,7 @@
 .empty-state {
   padding: 32px 16px;
   text-align: center;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   color: var(--app-muted);
   display: flex;
   flex-direction: column;
@@ -716,7 +716,7 @@
 
 .empty-state strong {
   font-family: var(--font-display);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--chrome-font-scale));
   color: var(--app-ink-2);
   font-weight: 600;
 }
@@ -762,7 +762,7 @@
   border: 1px solid var(--app-border);
   background: var(--app-surface-2);
   color: var(--app-ink-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--chrome-font-scale));
   font-weight: 500;
   padding: 3px 7px;
   border-radius: 5px;
@@ -793,7 +793,7 @@
 
 .t-btn .k {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--chrome-font-scale));
   opacity: 0.65;
 }
 
@@ -815,7 +815,7 @@
 
 .read-subject {
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: calc(15px * var(--reader-font-scale));
   font-weight: 700;
   color: var(--app-ink);
   line-height: 1.3;
@@ -840,7 +840,7 @@
   border-radius: 6px;
   background: var(--app-shield-bg);
   color: var(--app-shield);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--chrome-font-scale));
   font-weight: 500;
 }
 
@@ -865,7 +865,7 @@
   border: 1px solid currentColor;
   background: transparent;
   color: inherit;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   font-weight: 600;
   padding: 1px 7px;
   border-radius: 4px;
@@ -888,7 +888,7 @@
   border-radius: var(--app-radius);
   background: var(--app-surface-2);
   border: 1px solid var(--app-border-soft);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--reader-font-scale));
   color: var(--app-muted);
   cursor: pointer;
   text-align: left;
@@ -917,7 +917,7 @@
 
 .collapsed-msg .cm-time {
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--reader-font-scale));
   flex-shrink: 0;
 }
 
@@ -947,7 +947,7 @@
   border-radius: 50%;
   background: var(--app-accent-soft);
   color: var(--app-accent);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   font-weight: 700;
   display: grid;
   place-items: center;
@@ -955,20 +955,20 @@
 }
 
 .msg-from {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--reader-font-scale));
   font-weight: 600;
   color: var(--app-ink);
 }
 
 .msg-to {
-  font-size: 10px;
+  font-size: calc(10px * var(--reader-font-scale));
   color: var(--app-muted);
 }
 
 .msg-time {
   margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--reader-font-scale));
   color: var(--app-muted);
   white-space: nowrap;
 }
@@ -992,7 +992,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   font-weight: 500;
   color: var(--app-ink-2);
   background: var(--app-surface);
@@ -1008,7 +1008,7 @@
 
 .attachment-chip .size {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--chrome-font-scale));
   color: var(--app-muted);
 }
 
@@ -1028,7 +1028,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   color: var(--app-muted);
   gap: 8px;
 }
@@ -1044,7 +1044,7 @@
   box-shadow: 0 0 0 1px var(--acct-color, transparent);
   color: var(--app-ink);
   font-weight: 600;
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1072,7 +1072,7 @@
   background: transparent;
   border: none;
   color: var(--app-ink-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
@@ -1113,7 +1113,7 @@
   border: none;
   background: transparent;
   color: var(--app-ink-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   text-align: left;
   padding: 6px 8px;
   border-radius: 6px;
@@ -1152,7 +1152,7 @@
   border: 1px solid var(--app-border);
   background: var(--app-surface);
   color: var(--app-ink);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--reader-font-scale));
   line-height: 1.5;
   padding: 7px 9px;
   outline: none;
@@ -1179,7 +1179,7 @@
   border: none;
   background: var(--app-accent);
   color: var(--app-accent-fg);
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   font-weight: 600;
   padding: 7px 11px;
   cursor: pointer;
@@ -1213,7 +1213,7 @@
   justify-content: center;
   gap: 8px;
   color: var(--app-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
 }
 
 .read-placeholder svg {
@@ -1224,13 +1224,13 @@
 
 .read-placeholder strong {
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: calc(13px * var(--chrome-font-scale));
   color: var(--app-ink-2);
 }
 
 .read-placeholder .hint {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
 }
 
 /* ── Modals ────────────────────────────────────────────────────────────── */
@@ -1275,7 +1275,7 @@
 .modal-head h2 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 14px;
+  font-size: calc(14px * var(--chrome-font-scale));
   font-weight: 700;
   letter-spacing: -0.01em;
 }
@@ -1314,7 +1314,7 @@
 
 .field label {
   font-family: var(--font-display);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1328,7 +1328,7 @@
   background: var(--app-surface-2);
   color: var(--app-ink);
   border-radius: 6px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--chrome-font-scale));
   padding: 7px 9px;
   outline: none;
   width: 100%;
@@ -1351,13 +1351,13 @@
 }
 
 .hint-text {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--chrome-font-scale));
   color: var(--app-muted);
   line-height: 1.5;
 }
 
 .error-text {
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   color: var(--app-followup);
 }
 
@@ -1366,7 +1366,7 @@
   border: 1px solid var(--app-border);
   background: var(--app-surface-2);
   color: var(--app-ink-2);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   font-weight: 600;
   padding: 6px 12px;
   border-radius: 7px;
@@ -1448,13 +1448,13 @@
 
 .provider-card .pc-name {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
   font-weight: 600;
   color: var(--app-ink);
 }
 
 .provider-card .pc-desc {
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   color: var(--app-muted);
   line-height: 1.45;
 }
@@ -1481,7 +1481,7 @@
   align-items: center;
   gap: 4px;
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   font-weight: 600;
   padding: 2px 6px;
   border-radius: 99px;
@@ -1504,7 +1504,7 @@
 
 .sp-staff-tag {
   font-family: var(--font-mono);
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--chrome-font-scale));
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1536,7 +1536,7 @@
 
 .settings-section-title {
   font-family: var(--font-display);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -1561,7 +1561,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
   font-weight: 600;
   color: var(--app-ink);
 }
@@ -1614,7 +1614,7 @@
   align-items: center;
   gap: 6px;
   font-family: var(--font-display);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   font-weight: 600;
   color: var(--app-ink);
 }
@@ -1625,7 +1625,7 @@
 
 .dev-status-card code {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   padding: 0 3px;
   border-radius: 3px;
   background: var(--app-surface);
@@ -1656,7 +1656,7 @@
 }
 
 .space-list-name {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   font-weight: 600;
   color: var(--app-ink);
   overflow: hidden;
@@ -1666,7 +1666,7 @@
 
 .space-list-email {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   color: var(--app-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1699,7 +1699,7 @@
   align-items: center;
   gap: 6px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   color: var(--app-muted);
 }
 
@@ -1723,7 +1723,7 @@
   align-items: center;
   gap: 8px;
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: calc(13px * var(--chrome-font-scale));
   font-weight: 600;
   color: var(--app-ink);
 }
@@ -1736,7 +1736,7 @@
   border-radius: var(--app-radius);
   border: 1px solid var(--acct-color, var(--app-border));
   background: var(--app-surface-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
 }
 
 .connected-pill .cp-email {
@@ -1753,7 +1753,7 @@
   align-items: center;
   gap: 4px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   color: var(--app-shield);
   white-space: nowrap;
 }
@@ -1785,7 +1785,7 @@
 
 .server-summary-label {
   font-family: var(--font-display);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1793,7 +1793,7 @@
 }
 
 .server-summary-edited {
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   font-weight: 600;
   padding: 1px 5px;
   border-radius: 4px;
@@ -1806,7 +1806,7 @@
   align-items: baseline;
   gap: 6px;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--chrome-font-scale));
   color: var(--app-ink-2);
 }
 
@@ -1843,7 +1843,7 @@
 
 .btn.compact {
   padding: 4px 9px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--chrome-font-scale));
   border-radius: 6px;
 }
 
@@ -1896,7 +1896,7 @@
   border-bottom: 1px solid var(--app-border);
   background: transparent;
   color: var(--app-ink);
-  font-size: 13px;
+  font-size: calc(13px * var(--chrome-font-scale));
   padding: 12px 14px;
   outline: none;
 }
@@ -1915,7 +1915,7 @@
 
 .cmd-group-label {
   font-family: var(--font-display);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -1928,7 +1928,7 @@
   border: none;
   background: transparent;
   color: var(--app-ink-2);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   padding: 7px 9px;
   border-radius: 6px;
   cursor: pointer;
@@ -1960,14 +1960,14 @@
 
 .cmd-item .ci-sub {
   color: var(--app-muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   white-space: nowrap;
 }
 
 .cmd-empty {
   padding: 18px 12px;
   text-align: center;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   color: var(--app-muted);
 }
 
@@ -1989,7 +1989,7 @@
 
 .sched-title {
   font-family: var(--font-display);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -2002,7 +2002,7 @@
   border: none;
   background: transparent;
   color: var(--app-ink-2);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   padding: 7px 9px;
   border-radius: 6px;
   cursor: pointer;
@@ -2021,7 +2021,7 @@
 
 .sched-opt .when {
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   color: var(--app-muted);
 }
 
@@ -2034,7 +2034,7 @@
 }
 
 .sched-custom .input {
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   padding: 5px 7px;
 }
 
@@ -2050,7 +2050,7 @@
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
   padding: 8px 14px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   display: flex;
   align-items: center;
   gap: 12px;
@@ -2078,7 +2078,7 @@
   background: transparent;
   color: var(--toast-action);
   font-weight: 700;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   cursor: pointer;
   padding: 0;
 }
@@ -2128,7 +2128,7 @@
 }
 
 .tpl-row .tr-name {
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
   font-weight: 600;
   color: var(--app-ink);
   overflow: hidden;
@@ -2137,7 +2137,7 @@
 }
 
 .tpl-row .tr-preview {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--chrome-font-scale));
   color: var(--app-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2160,17 +2160,17 @@
   background: var(--app-bg);
   color: var(--app-muted);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
 }
 
 .boot-screen .brand-mark {
-  font-size: 16px;
+  font-size: calc(16px * var(--chrome-font-scale));
 }
 
 .boot-screen .brand-mark .logo-dot {
   width: 22px;
   height: 22px;
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
 }
 
 .boot-screen.error {
@@ -2187,7 +2187,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
 }
 
 .sync-banner-head {
@@ -2247,7 +2247,7 @@
   border: none;
   background: transparent;
   color: var(--app-muted);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -2303,7 +2303,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   font-weight: 600;
   color: var(--app-ink);
 }
@@ -2321,25 +2321,25 @@
 
 .contact-card-name {
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--chrome-font-scale));
   color: var(--app-ink);
 }
 
 .contact-card-sub {
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   color: var(--app-ink-2);
 }
 
 .contact-card-emails {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   color: var(--app-muted);
   word-break: break-all;
 }
 
 .contact-card-notes {
   margin: 0;
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   line-height: 1.45;
   color: var(--app-ink-2);
   background: var(--app-surface-2);
@@ -2348,7 +2348,7 @@
 }
 
 .contact-cat-pill {
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -2381,7 +2381,7 @@
 }
 
 .handoff-pill {
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   font-weight: 600;
   text-transform: capitalize;
   padding: 1px 6px;
@@ -2415,13 +2415,13 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   color: var(--app-muted);
 }
 
 .compact-select,
 .compact-input {
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   padding: 4px 7px;
   min-height: 26px;
 }
@@ -2430,7 +2430,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   font-weight: 600;
   padding: 1px 6px;
   border-radius: 99px;
@@ -2458,14 +2458,14 @@
 
 .collab-draft-area {
   min-height: 82px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
 }
 
 .collab-draft-preview {
   margin: 0;
   white-space: pre-wrap;
   font-family: var(--font-body);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   line-height: 1.45;
   color: var(--app-ink-2);
   background: var(--app-surface-2);
@@ -2515,7 +2515,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   color: var(--app-muted);
 }
 
@@ -2528,7 +2528,7 @@
 }
 
 .collab-comment-body {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   line-height: 1.45;
   color: var(--app-ink-2);
   word-break: break-word;
@@ -2550,7 +2550,7 @@
   border: 1px solid var(--app-border);
   background: var(--app-surface-2);
   color: var(--app-ink-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   padding: 1px 6px;
   border-radius: 99px;
   cursor: pointer;
@@ -2588,7 +2588,7 @@
   border-radius: 8px;
   background: var(--app-snooze-bg);
   color: var(--app-snooze);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
 }
 
 .staff-guardrail-box svg {
@@ -2621,7 +2621,7 @@
   border: 1px solid var(--app-border);
   background: var(--app-surface-2);
   color: var(--app-ink-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   padding: 4px 8px;
   border-radius: 6px;
   cursor: pointer;
@@ -2633,7 +2633,7 @@
 .staff-pick-chip .handle {
   color: var(--app-muted);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
 }
 
 .staff-pick-chip.on {
@@ -2644,7 +2644,7 @@
 
 .snippet-group-label {
   display: block;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -2694,7 +2694,7 @@
   border: 1px solid var(--app-border);
   background: var(--app-surface-2);
   color: var(--app-ink-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--chrome-font-scale));
   padding: 2px 8px;
   border-radius: 99px;
   cursor: pointer;
@@ -2724,7 +2724,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   text-align: left;
   cursor: pointer;
 }
@@ -2762,7 +2762,7 @@
 
 .staff-dir-chip {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   padding: 2px 6px;
   border-radius: 4px;
   background: var(--app-surface);
@@ -2823,7 +2823,7 @@
 .calendar-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 14px;
+  font-size: calc(14px * var(--chrome-font-scale));
   font-weight: 600;
   color: var(--app-ink);
 }
@@ -2847,7 +2847,7 @@
   border: none;
   background: transparent;
   color: var(--app-muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   font-weight: 600;
   padding: 4px 9px;
   border-radius: 5px;
@@ -2873,7 +2873,7 @@
   border: none;
   background: transparent;
   color: var(--app-ink);
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
   outline: none;
 }
 
@@ -2896,7 +2896,7 @@
   background: var(--app-surface-2);
   color: var(--app-muted);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   padding: 2px 7px;
   border-radius: 99px;
   cursor: pointer;
@@ -2911,7 +2911,7 @@
 .cal-kbd-hint {
   margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   color: var(--app-muted);
 }
 
@@ -2962,14 +2962,14 @@
 
 .cal-day-weekday {
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   text-transform: uppercase;
   color: var(--app-muted);
 }
 
 .cal-day-num {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
   font-weight: 600;
   color: var(--app-ink);
 }
@@ -3020,12 +3020,12 @@
   align-items: center;
   gap: 4px;
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   color: var(--app-muted);
 }
 
 .cal-event-title {
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   font-weight: 600;
   color: var(--app-ink);
   line-height: 1.3;
@@ -3037,7 +3037,7 @@
   gap: 5px;
   flex-wrap: wrap;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--chrome-font-scale));
   color: var(--app-muted);
 }
 
@@ -3061,7 +3061,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   color: var(--app-muted);
 }
 
@@ -3074,7 +3074,7 @@
 
 .cal-overlay-tag {
   font-family: var(--font-mono);
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--chrome-font-scale));
   padding: 1px 4px;
   border-radius: 4px;
   background: var(--app-surface);
@@ -3119,7 +3119,7 @@
 .meeting-doc-title-row h3 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 14px;
+  font-size: calc(14px * var(--chrome-font-scale));
   font-weight: 600;
   color: var(--app-ink);
 }
@@ -3134,7 +3134,7 @@
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   color: var(--app-muted);
 }
 
@@ -3146,7 +3146,7 @@
 
 .meeting-doc-desc {
   margin: 0;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   color: var(--app-ink-2);
   line-height: 1.45;
 }
@@ -3185,7 +3185,7 @@
   align-items: center;
   gap: 5px;
   font-family: var(--font-display);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -3211,7 +3211,7 @@
   border: none;
   background: transparent;
   color: var(--app-ink);
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
   text-align: left;
   display: flex;
   align-items: center;
@@ -3246,14 +3246,14 @@
   background: var(--app-surface-2);
   color: var(--app-ink-2);
   font-family: var(--font-sans);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   line-height: 1.5;
   white-space: pre-wrap;
 }
 
 .meeting-notes-editor {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
 }
 
 .meeting-doc-foot {
@@ -3290,7 +3290,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
 }
 
 .ics-invite-actions {
@@ -3325,7 +3325,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
 }
 
 .avail-slot-item {
@@ -3335,7 +3335,7 @@
   color: var(--app-ink);
   border-radius: 7px;
   padding: 7px 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -3393,7 +3393,7 @@
 
 .actions-title-group h1 {
   margin: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--chrome-font-scale));
   font-weight: 700;
   color: var(--app-ink);
   line-height: 1.2;
@@ -3444,7 +3444,7 @@
   border: none;
   background: transparent;
   color: var(--app-muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   font-weight: 600;
   padding: 4px 9px;
   cursor: pointer;
@@ -3474,12 +3474,12 @@
   padding: 48px 20px;
   color: var(--app-muted);
   text-align: center;
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
 }
 
 .actions-empty strong {
   color: var(--app-ink);
-  font-size: 13px;
+  font-size: calc(13px * var(--chrome-font-scale));
 }
 
 .action-row {
@@ -3544,14 +3544,14 @@
 }
 
 .action-row-title {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--chrome-font-scale));
   font-weight: 600;
   color: var(--app-ink);
 }
 
 .dept-chip {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   font-weight: 600;
   padding: 1px 6px;
   border-radius: 99px;
@@ -3560,7 +3560,7 @@
 }
 
 .milestone-chip {
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   font-weight: 600;
   padding: 1px 6px;
   border-radius: 99px;
@@ -3574,13 +3574,13 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   color: var(--app-muted);
 }
 
 .assignee-chip {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--chrome-font-scale));
   color: var(--app-ink-2);
 }
 
@@ -3602,7 +3602,7 @@
 .action-meta-item.cost {
   color: var(--app-shield);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--chrome-font-scale));
 }
 
 .action-row-links {
@@ -3619,7 +3619,7 @@
   color: var(--app-ink-2);
   border-radius: 6px;
   padding: 3px 7px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--chrome-font-scale));
   font-weight: 600;
   display: inline-flex;
   align-items: center;
@@ -3644,7 +3644,7 @@
   border-radius: 6px;
   background: var(--app-accent-soft);
   color: var(--app-accent);
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   font-weight: 600;
 }
 
@@ -3652,7 +3652,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   color: var(--app-ink-2);
   cursor: pointer;
 }
@@ -3666,7 +3666,7 @@
   border-radius: 7px;
   background: var(--app-surface-2);
   color: var(--app-ink);
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
   cursor: pointer;
 }
 
@@ -3682,7 +3682,7 @@
   border-radius: 7px;
   background: var(--app-snooze-bg);
   color: var(--app-snooze);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
 }
 
 .workbook-alert.error {
@@ -3713,14 +3713,14 @@
 }
 
 .wb-stat-num {
-  font-size: 16px;
+  font-size: calc(16px * var(--chrome-font-scale));
   font-weight: 700;
   color: var(--app-ink);
   font-family: var(--font-mono);
 }
 
 .wb-stat-label {
-  font-size: 10px;
+  font-size: calc(10px * var(--chrome-font-scale));
   color: var(--app-muted);
 }
 
@@ -3739,7 +3739,7 @@
   gap: 7px;
   padding: 6px 9px;
   border-bottom: 1px solid var(--app-border-soft);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
 }
 
 .wb-preview-row:last-child {
@@ -3747,7 +3747,7 @@
 }
 
 .wb-badge {
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--chrome-font-scale));
   font-weight: 700;
   text-transform: uppercase;
   padding: 1px 6px;
@@ -3785,7 +3785,7 @@
 
 .wb-row-detail {
   margin-left: auto;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--chrome-font-scale));
   color: var(--app-muted);
   white-space: nowrap;
 }
@@ -3819,7 +3819,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
   color: var(--app-muted);
 }
 
@@ -3860,19 +3860,19 @@
 .onboarding-hero h1 {
   margin: 0 0 6px;
   font-family: var(--font-display);
-  font-size: 22px;
+  font-size: calc(22px * var(--chrome-font-scale));
   font-weight: 600;
   letter-spacing: -0.02em;
   color: var(--app-ink);
 }
 
 .onboarding-hero.compact h1 {
-  font-size: 18px;
+  font-size: calc(18px * var(--chrome-font-scale));
 }
 
 .onboarding-hero p {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--chrome-font-scale));
   line-height: 1.55;
   color: var(--app-ink-2);
 }
@@ -3884,7 +3884,7 @@
 }
 
 .onboarding-label {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -3927,12 +3927,12 @@
 }
 
 .onboarding-choice-text strong {
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--chrome-font-scale));
   font-weight: 600;
 }
 
 .onboarding-choice-text span {
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
   color: var(--app-ink-2);
   line-height: 1.4;
 }
@@ -4025,14 +4025,14 @@
 .empty-workspace-card h2 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 19px;
+  font-size: calc(19px * var(--chrome-font-scale));
   font-weight: 600;
   color: var(--app-ink);
 }
 
 .empty-workspace-card p {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--chrome-font-scale));
   line-height: 1.55;
   color: var(--app-ink-2);
 }
@@ -4053,7 +4053,7 @@
   border: none;
   background: transparent;
   color: var(--app-accent);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--chrome-font-scale));
   font-weight: 500;
   cursor: pointer;
   padding: 4px 8px;
@@ -4124,7 +4124,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: calc(11px * var(--chrome-font-scale));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -4134,14 +4134,14 @@
 .tour-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 15.5px;
+  font-size: calc(15.5px * var(--chrome-font-scale));
   font-weight: 600;
   color: var(--app-ink);
 }
 
 .tour-body {
   margin: 0;
-  font-size: 12.8px;
+  font-size: calc(12.8px * var(--chrome-font-scale));
   line-height: 1.55;
   color: var(--app-ink-2);
 }
@@ -4177,7 +4177,7 @@
   border: none;
   background: transparent;
   color: var(--app-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--chrome-font-scale));
   cursor: pointer;
   padding: 4px 2px;
 }
@@ -4190,4 +4190,42 @@
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* ── Segmented control (text size) ─────────────────────────────────────── */
+
+.segmented-control {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border);
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.seg-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--app-ink-2);
+  font-size: calc(11px * var(--chrome-font-scale));
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.seg-btn:hover {
+  color: var(--app-ink);
+  background: var(--app-hover);
+}
+
+.seg-btn.active {
+  background: var(--app-accent-soft);
+  border-color: var(--app-accent);
+  color: var(--app-ink);
+  font-weight: 600;
 }

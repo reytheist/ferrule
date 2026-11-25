@@ -145,6 +145,7 @@ import { formatDue } from "../ui/format";
 
 export type Theme = "dark" | "light";
 export type Layout = "split" | "classic";
+export type TextSize = "small" | "medium" | "large";
 export type Stage = "list" | "thread";
 export type PopoverMode = "snooze" | "followUp" | "sendLater";
 export type ActiveSection = "mail" | "shared" | "calendar" | "actions";
@@ -188,6 +189,8 @@ interface ToastOptions {
 
 const THEME_KEY = "ferrule.theme";
 const LAYOUT_KEY = "ferrule.layout";
+const CHROME_SIZE_KEY = "ferrule.chromeTextSize";
+const READER_SIZE_KEY = "ferrule.readerTextSize";
 const DEFAULT_UNDO_MS = 5000;
 
 function readStringField(obj: object, key: string): string | null {
@@ -239,6 +242,16 @@ function loadLayout(): Layout {
   }
 }
 
+function loadTextSize(key: string): TextSize {
+  try {
+    const stored = window.localStorage.getItem(key);
+    if (stored === "medium" || stored === "large") return stored;
+    return "small";
+  } catch {
+    return "small";
+  }
+}
+
 function centerAnchor(): Anchor {
   return {
     x: Math.max(12, window.innerWidth / 2 - 118),
@@ -262,6 +275,8 @@ export interface MailApp {
   thread: ThreadView | null;
   theme: Theme;
   layout: Layout;
+  chromeTextSize: TextSize;
+  readerTextSize: TextSize;
   stage: Stage;
   toast: ToastData | null;
   commandOpen: boolean;
@@ -306,6 +321,9 @@ export interface MailApp {
   setTheme(next: Theme): void;
   toggleLayout(): void;
   setLayout(next: Layout): void;
+  setChromeTextSize(next: TextSize): void;
+  setReaderTextSize(next: TextSize): void;
+  cycleReaderTextSize(): void;
   openOnboarding(): void;
   completeOnboarding(): Promise<void>;
   startTour(): void;
@@ -439,6 +457,12 @@ export function useMailApp(): MailApp {
   const [remoteContent, setRemoteContent] = useState<RemoteContent>("blockAll");
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [layout, setLayout] = useState<Layout>(loadLayout);
+  const [chromeTextSize, setChromeTextSize] = useState<TextSize>(() =>
+    loadTextSize(CHROME_SIZE_KEY),
+  );
+  const [readerTextSize, setReaderTextSize] = useState<TextSize>(() =>
+    loadTextSize(READER_SIZE_KEY),
+  );
   const [stage, setStage] = useState<Stage>("list");
   const [toast, setToast] = useState<ToastData | null>(null);
   const [commandOpen, setCommandOpen] = useState(false);
@@ -580,6 +604,24 @@ export function useMailApp(): MailApp {
       // Ignore storage failures in restricted previews.
     }
   }, [layout]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CHROME_SIZE_KEY, chromeTextSize);
+    } catch {
+      // Ignore storage failures in restricted previews.
+    }
+    document.documentElement.dataset.chromeSize = chromeTextSize;
+  }, [chromeTextSize]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(READER_SIZE_KEY, readerTextSize);
+    } catch {
+      // Ignore storage failures in restricted previews.
+    }
+    document.documentElement.dataset.readerSize = readerTextSize;
+  }, [readerTextSize]);
 
   // Keep refs fresh so popover callbacks read current reply state.
   useEffect(() => {
@@ -1935,6 +1977,8 @@ export function useMailApp(): MailApp {
     thread,
     theme,
     layout,
+    chromeTextSize,
+    readerTextSize,
     stage,
     toast,
     commandOpen,
@@ -1978,6 +2022,12 @@ export function useMailApp(): MailApp {
     setTheme,
     toggleLayout: () => setLayout((prev) => (prev === "split" ? "classic" : "split")),
     setLayout,
+    setChromeTextSize,
+    setReaderTextSize,
+    cycleReaderTextSize: () =>
+      setReaderTextSize((prev) =>
+        prev === "small" ? "medium" : prev === "medium" ? "large" : "small",
+      ),
     openOnboarding,
     completeOnboarding,
     startTour,

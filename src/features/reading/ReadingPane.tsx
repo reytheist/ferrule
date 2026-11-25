@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   Star,
   Trash2,
+  Type,
   Users,
 } from "lucide-react";
 import type { CalendarInviteView, MessageView, RsvpStatus, ThreadView } from "../../types/mail";
@@ -27,6 +28,7 @@ import { spaceClass } from "../spaces/SpaceSwitcher";
 import { StaffCollabSidebar } from "../staff/StaffCollabSidebar";
 import { anchorBelow } from "../ui/anchor";
 import { formatFull, initialsOf } from "../ui/format";
+import { applyReaderTextSize } from "./readerTextSize";
 
 function formatSize(bytes: number): string {
   if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
@@ -185,7 +187,7 @@ function MessageBubble({ app, message }: { app: MailApp; message: MessageView })
       <iframe
         className="msg-frame"
         sandbox=""
-        srcDoc={message.bodySrcdoc}
+        srcDoc={applyReaderTextSize(message.bodySrcdoc, app.readerTextSize)}
         title={`Message from ${senderOf(message)}`}
       />
       {message.attachments.length > 0 && (
@@ -440,6 +442,18 @@ export function ReadingPane({ app }: { app: MailApp }) {
           >
             <Image />
             {imagesAllowed ? "Images on" : "Images blocked"}
+          </button>
+          <button
+            className={`t-btn${app.readerTextSize !== "small" ? " on" : ""}`}
+            onClick={app.cycleReaderTextSize}
+            title={`Reader text size: ${app.readerTextSize} (click to cycle Small / Medium / Large)`}
+          >
+            <Type />
+            {app.readerTextSize === "small"
+              ? "Text: S"
+              : app.readerTextSize === "medium"
+                ? "Text: M"
+                : "Text: L"}
           </button>
           <button
             className="t-btn"

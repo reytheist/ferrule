@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import type { SharedMessageSnapshot } from "../../types/mail";
 import type { MailApp } from "../shell/useMailApp";
+import { applyReaderTextSize } from "../reading/readerTextSize";
 import { formatFull, formatThreadTime, initialsOf } from "../ui/format";
 import { StaffCollabSidebar } from "./StaffCollabSidebar";
 
@@ -202,7 +203,7 @@ export function SharedThreadReadingPane({ app }: { app: MailApp }) {
                 <iframe
                   className="msg-frame"
                   sandbox=""
-                  srcDoc={message.bodySrcdoc}
+                  srcDoc={applyReaderTextSize(message.bodySrcdoc, app.readerTextSize)}
                   title={`Shared message from ${snapshotSender(message)}`}
                 />
               </div>

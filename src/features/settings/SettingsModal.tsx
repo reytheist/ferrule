@@ -12,7 +12,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import type { MailApp } from "../shell/useMailApp";
+import type { MailApp, TextSize } from "../shell/useMailApp";
 import { spaceClass } from "../spaces/SpaceSwitcher";
 
 export function SettingsModal({ app }: { app: MailApp }) {
@@ -248,6 +248,46 @@ export function SettingsModal({ app }: { app: MailApp }) {
               <button type="button" className="btn compact" onClick={app.toggleLayout}>
                 {app.layout === "split" ? "Split view" : "Classic view"}
               </button>
+            </div>
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <span className="settings-row-label">Interface text size</span>
+                <span className="hint-text">
+                  Scales sidebar, thread list, toolbar, and dialog labels independently of email text.
+                </span>
+              </div>
+              <div className="segmented-control" role="group" aria-label="Interface text size">
+                {(["small", "medium", "large"] as TextSize[]).map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    className={`seg-btn${app.chromeTextSize === size ? " active" : ""}`}
+                    onClick={() => app.setChromeTextSize(size)}
+                  >
+                    {size === "small" ? "Small" : size === "medium" ? "Medium" : "Large"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <span className="settings-row-label">Reader text size</span>
+                <span className="hint-text">
+                  Scales message body, subject, headers, and reply box independently of the interface.
+                </span>
+              </div>
+              <div className="segmented-control" role="group" aria-label="Reader text size">
+                {(["small", "medium", "large"] as TextSize[]).map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    className={`seg-btn${app.readerTextSize === size ? " active" : ""}`}
+                    onClick={() => app.setReaderTextSize(size)}
+                  >
+                    {size === "small" ? "Small" : size === "medium" ? "Medium" : "Large"}
+                  </button>
+                ))}
+              </div>
             </div>
           </section>
 

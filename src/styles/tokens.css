@@ -9,6 +9,9 @@
   --font-body: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 
+  --chrome-font-scale: 1;
+  --reader-font-scale: 1;
+
   --app-bg: #0f1118;
   --app-rail: #0b0d13;
   --app-surface: #161923;
@@ -116,9 +119,22 @@ body,
   padding: 0;
 }
 
+html[data-chrome-size="medium"] {
+  --chrome-font-scale: 1.12;
+}
+html[data-chrome-size="large"] {
+  --chrome-font-scale: 1.24;
+}
+html[data-reader-size="medium"] {
+  --reader-font-scale: 1.14;
+}
+html[data-reader-size="large"] {
+  --reader-font-scale: 1.28;
+}
+
 body {
   font-family: var(--font-body);
-  font-size: 13px;
+  font-size: calc(13px * var(--chrome-font-scale));
   background: var(--app-bg);
   color: var(--app-ink);
   -webkit-font-smoothing: antialiased;

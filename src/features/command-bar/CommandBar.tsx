@@ -26,6 +26,7 @@ import {
   Star,
   Sun,
   Trash2,
+  Type,
   Users,
 } from "lucide-react";
 import { listThreads } from "../../ipc/core";
@@ -111,6 +112,42 @@ export function CommandBar({ app }: { app: MailApp }) {
         id: "layout",
         label: app.layout === "split" ? "Switch to classic layout" : "Switch to split layout",
         run: app.toggleLayout,
+      },
+      {
+        id: "chrome-size-small",
+        label: "Interface text size: Small",
+        icon: Type,
+        run: () => app.setChromeTextSize("small"),
+      },
+      {
+        id: "chrome-size-medium",
+        label: "Interface text size: Medium",
+        icon: Type,
+        run: () => app.setChromeTextSize("medium"),
+      },
+      {
+        id: "chrome-size-large",
+        label: "Interface text size: Large",
+        icon: Type,
+        run: () => app.setChromeTextSize("large"),
+      },
+      {
+        id: "reader-size-small",
+        label: "Reader text size: Small",
+        icon: Type,
+        run: () => app.setReaderTextSize("small"),
+      },
+      {
+        id: "reader-size-medium",
+        label: "Reader text size: Medium",
+        icon: Type,
+        run: () => app.setReaderTextSize("medium"),
+      },
+      {
+        id: "reader-size-large",
+        label: "Reader text size: Large",
+        icon: Type,
+        run: () => app.setReaderTextSize("large"),
       },
       { id: "add-account", label: "Add account", icon: Plus, run: app.openAddAccount },
       { id: "settings", label: "Open Settings", hint: "Ctrl ,", icon: Settings, run: app.openSettings },
