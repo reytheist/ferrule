@@ -40,5 +40,6 @@ pub enum CoreEvent {
     Attention {
         alert: Alert,
     },
+    StaffChanged,
     Resync,
 }

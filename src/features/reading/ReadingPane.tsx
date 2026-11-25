@@ -8,12 +8,15 @@ import {
   Image,
   Lock,
   Paperclip,
+  Share2,
   ShieldCheck,
   Star,
+  Users,
 } from "lucide-react";
 import type { MessageView, ThreadView } from "../../types/mail";
 import type { MailApp } from "../shell/useMailApp";
 import { spaceClass } from "../spaces/SpaceSwitcher";
+import { StaffCollabSidebar } from "../staff/StaffCollabSidebar";
 import { anchorBelow } from "../ui/anchor";
 import { formatFull, initialsOf } from "../ui/format";
 
@@ -142,22 +145,52 @@ function ReplyDock({ app, thread }: { app: MailApp; thread: ThreadView }) {
           )}
           {menuOpen && (
             <div className="snippet-menu">
-              {app.templates.length === 0 ? (
+              {app.templates.length === 0 && app.sharedTemplates.length === 0 ? (
                 <span className="cmd-empty">No snippets yet — create one in Templates.</span>
               ) : (
-                app.templates.map((template) => (
-                  <button
-                    key={template.id}
-                    className="snippet-item"
-                    onClick={() => {
-                      app.insertTemplate(template);
-                      setMenuOpen(false);
-                    }}
-                  >
-                    <span className="name">{template.name}</span>
-                    {template.shortcut && <span className="kbd">{template.shortcut}</span>}
-                  </button>
-                ))
+                <>
+                  {app.sharedTemplates.length > 0 && (
+                    <>
+                      <span className="snippet-group-label">Shared Staff Templates</span>
+                      {app.sharedTemplates.map((template) => (
+                        <button
+                          key={template.id}
+                          className="snippet-item shared"
+                          onClick={() => {
+                            app.insertTextSnippet(template.bodyText);
+                            setMenuOpen(false);
+                          }}
+                        >
+                          <span className="name">
+                            <span className="staff-tpl-dot" />
+                            {template.name}
+                          </span>
+                          <span className="kbd">{template.shortcut ?? template.category}</span>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {app.templates.length > 0 && (
+                    <>
+                      {app.sharedTemplates.length > 0 && (
+                        <span className="snippet-group-label">Personal Snippets</span>
+                      )}
+                      {app.templates.map((template) => (
+                        <button
+                          key={template.id}
+                          className="snippet-item"
+                          onClick={() => {
+                            app.insertTemplate(template);
+                            setMenuOpen(false);
+                          }}
+                        >
+                          <span className="name">{template.name}</span>
+                          {template.shortcut && <span className="kbd">{template.shortcut}</span>}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -219,6 +252,17 @@ export function ReadingPane({ app }: { app: MailApp }) {
   const earlier = thread.messages.slice(0, -1);
   const current = thread.messages[thread.messages.length - 1];
   const imagesAllowed = app.remoteContent !== "blockAll";
+  const account = app.accounts.find((a) => a.id === thread.accountId);
+  const isStaffSpace = account?.spaceKind === "pigmentStaff";
+  const shared =
+    app.activeSharedThread && app.activeSharedThread.sourceThreadId === thread.id
+      ? app.activeSharedThread
+      : null;
+  const participantEmails = Array.from(
+    new Set(
+      thread.messages.flatMap((m) => [m.fromEmail, ...m.to, ...m.cc]).filter(Boolean),
+    ),
+  );
 
   return (
     <main className="read-col">
@@ -267,39 +311,71 @@ export function ReadingPane({ app }: { app: MailApp }) {
             <Image />
             {imagesAllowed ? "Images on" : "Images blocked"}
           </button>
+          <button
+            className={`t-btn${shared ? " on" : ""}`}
+            disabled={!isStaffSpace}
+            onClick={app.openShareModal}
+            title={
+              isStaffSpace
+                ? shared
+                  ? "Thread shared with Pigment Staff — click to update sharing"
+                  : "Share sanitized snapshot with Pigment Staff"
+                : "Staff Sharing is disabled for Personal spaces"
+            }
+          >
+            {shared ? <Users /> : <Share2 />}
+            {shared ? "Shared" : "Share with Staff"}
+          </button>
         </div>
 
-        <div className="read-scroll">
-          <div className="read-header">
-            <div className="read-subject">{thread.subject}</div>
-            <div className="thread-meta-row">
-              <span className={`badge badge-acct ${spaceClass(thread.accountColor)}`}>
-                <span className="acct-dot" />
-                {thread.accountLabel} · {thread.accountEmail}
-              </span>
-              {thread.snoozedUntil !== null && (
-                <span className="badge badge-snooze">Snoozed</span>
-              )}
-              {thread.followUpDue !== null && (
-                <span className="badge badge-followup">Follow-up due</span>
-              )}
+        <div className="read-split-body">
+          <div className="read-scroll">
+            <div className="read-header">
+              <div className="read-subject">{thread.subject}</div>
+              <div className="thread-meta-row">
+                <span className={`badge badge-acct ${spaceClass(thread.accountColor)}`}>
+                  <span className="acct-dot" />
+                  {thread.accountLabel} · {thread.accountEmail}
+                </span>
+                {shared && (
+                  <span className="badge badge-staff">
+                    <Users style={{ width: 9, height: 9 }} />
+                    Shared · {shared.status}
+                  </span>
+                )}
+                {thread.snoozedUntil !== null && (
+                  <span className="badge badge-snooze">Snoozed</span>
+                )}
+                {thread.followUpDue !== null && (
+                  <span className="badge badge-followup">Follow-up due</span>
+                )}
+              </div>
+              <PrivacyRibbon app={app} thread={thread} />
             </div>
-            <PrivacyRibbon app={app} thread={thread} />
+
+            {earlier.map((message) =>
+              app.expanded.has(message.id) ? (
+                <MessageBubble key={message.id} message={message} />
+              ) : (
+                <CollapsedMessage
+                  key={message.id}
+                  message={message}
+                  onToggle={() => app.toggleExpand(message.id)}
+                />
+              ),
+            )}
+
+            {current && <MessageBubble message={current} />}
           </div>
 
-          {earlier.map((message) =>
-            app.expanded.has(message.id) ? (
-              <MessageBubble key={message.id} message={message} />
-            ) : (
-              <CollapsedMessage
-                key={message.id}
-                message={message}
-                onToggle={() => app.toggleExpand(message.id)}
-              />
-            ),
-          )}
-
-          {current && <MessageBubble message={current} />}
+          <StaffCollabSidebar
+            app={app}
+            shared={shared}
+            participantEmails={participantEmails}
+            senderName={current?.fromName ?? null}
+            senderEmail={current?.fromEmail ?? null}
+            canLoadApprovedToReply={true}
+          />
         </div>
 
         <ReplyDock app={app} thread={thread} />

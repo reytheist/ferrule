@@ -2,36 +2,61 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   actOnThreads,
   addAccount as addAccountCommand,
+  addSharedComment as addSharedCommentCommand,
   cancelSend,
+  connectStaffWorkspace as connectStaffWorkspaceCommand,
   createDraft,
+  deletePinnedLink as deletePinnedLinkCommand,
+  deleteSharedTemplate as deleteSharedTemplateCommand,
+  deleteShowContact as deleteShowContactCommand,
   deleteTemplate,
+  disconnectStaffWorkspace as disconnectStaffWorkspaceCommand,
   dismissFollowUp,
+  findSharedThreadForLocal,
   getSettings,
+  getStaffWorkspace,
   listAccounts,
   listJobs,
+  listPinnedLinks,
+  listSharedTemplates,
+  listSharedThreads,
+  listShowContacts,
+  listStaffDirectory,
   listTemplates,
   listThreads,
   mailboxCounts,
   oauthSignInAccount as oauthSignInAccountCommand,
+  openExternalUrl,
+  openSharedThread as openSharedThreadCommand,
   openThread as openThreadCommand,
   reauthOAuthAccount as reauthOAuthAccountCommand,
   removeAccount as removeAccountCommand,
+  savePinnedLink as savePinnedLinkCommand,
+  saveSharedTemplate as saveSharedTemplateCommand,
+  saveShowContact as saveShowContactCommand,
   saveTemplate as saveTemplateCommand,
   savedOAuthClients as savedOAuthClientsCommand,
   seedDemoIfEmpty,
   sendDraft,
   setFollowUp,
+  shareThread as shareThreadCommand,
   snoozeThread as snoozeThreadCommand,
   syncAccount,
+  syncStaffWorkspace as syncStaffWorkspaceCommand,
   tickScheduler,
   unsnoozeThread,
   updateAccount as updateAccountCommand,
   updateSettings as updateSettingsCommand,
+  updateSharedDraft as updateSharedDraftCommand,
+  updateSharedHandoff as updateSharedHandoffCommand,
 } from "../../ipc/core";
 import type {
   AccountId,
   AccountView,
+  AddSharedCommentInput,
   AppSettings,
+  ConnectStaffWorkspaceInput,
+  ContactId,
   CreateDraftInput,
   InboxCategory,
   JobId,
@@ -41,11 +66,25 @@ import type {
   MessageId,
   NewAccountInput,
   OAuthSignInInput,
+  PinnedLinkId,
+  PinnedLinkView,
   RemoteContent,
+  SavePinnedLinkInput,
+  SaveSharedTemplateInput,
+  SaveShowContactInput,
   SaveTemplateInput,
   SavedOAuthClients,
   Scope,
   SendMode,
+  ShareThreadInput,
+  SharedTemplateId,
+  SharedTemplateView,
+  SharedThreadId,
+  SharedThreadSummary,
+  SharedThreadView,
+  ShowContactView,
+  StaffMemberView,
+  StaffWorkspaceView,
   TemplateId,
   TemplateView,
   ThreadId,
@@ -53,6 +92,8 @@ import type {
   ThreadView,
   UnixMs,
   UpdateAccountInput,
+  UpdateHandoffInput,
+  UpdateSharedDraftInput,
 } from "../../types/mail";
 import { formatDue } from "../ui/format";
 
@@ -60,6 +101,20 @@ export type Theme = "dark" | "light";
 export type Layout = "split" | "classic";
 export type Stage = "list" | "thread";
 export type PopoverMode = "snooze" | "followUp" | "sendLater";
+export type ActiveSection = "mail" | "shared";
+
+const EMPTY_STAFF_WORKSPACE: StaffWorkspaceView = {
+  connected: false,
+  serverUrl: "",
+  staffName: "",
+  staffHandle: "",
+  staffEmail: "",
+  staffRole: "",
+  connectedAt: null,
+  lastSyncAt: null,
+  status: "disconnected",
+  lastError: null,
+};
 
 export interface Anchor {
   x: number;
@@ -157,6 +212,9 @@ export interface MailApp {
   addAccountOpen: boolean;
   templatesOpen: boolean;
   settingsOpen: boolean;
+  shareModalOpen: boolean;
+  contactsOpen: boolean;
+  pinnedLinksOpen: boolean;
   popover: PopoverState | null;
   replyText: string;
   replyNonce: number;
@@ -164,6 +222,15 @@ export interface MailApp {
   remoteContent: RemoteContent;
   syncing: boolean;
   composeInsert: { nonce: number; body: string } | null;
+  activeSection: ActiveSection;
+  staffWorkspace: StaffWorkspaceView;
+  staffDirectory: StaffMemberView[];
+  sharedThreads: SharedThreadSummary[];
+  sharedTemplates: SharedTemplateView[];
+  showContacts: ShowContactView[];
+  pinnedLinks: PinnedLinkView[];
+  selectedSharedId: SharedThreadId | null;
+  activeSharedThread: SharedThreadView | null;
 
   toggleTheme(): void;
   toggleLayout(): void;
@@ -213,6 +280,30 @@ export interface MailApp {
   updateAccount(input: UpdateAccountInput): Promise<AccountView>;
   reauthAccount(id: AccountId): Promise<void>;
   removeAccount(id: AccountId): Promise<void>;
+  openSharedSection(): void;
+  openSharedThread(id: SharedThreadId): Promise<void>;
+  openShareModal(): void;
+  closeShareModal(): void;
+  openContacts(): void;
+  closeContacts(): void;
+  openPinnedLinks(): void;
+  closePinnedLinks(): void;
+  connectStaffWorkspace(input: ConnectStaffWorkspaceInput): Promise<StaffWorkspaceView>;
+  disconnectStaffWorkspace(): Promise<void>;
+  syncStaffWorkspace(): Promise<void>;
+  shareThread(input: ShareThreadInput): Promise<SharedThreadView>;
+  updateHandoff(input: UpdateHandoffInput): Promise<void>;
+  postSharedComment(input: AddSharedCommentInput): Promise<void>;
+  mutateSharedDraft(input: UpdateSharedDraftInput): Promise<void>;
+  loadApprovedDraftToReply(bodyText: string): void;
+  insertTextSnippet(bodyText: string): void;
+  persistSharedTemplate(input: SaveSharedTemplateInput): Promise<void>;
+  removeSharedTemplate(id: SharedTemplateId): Promise<void>;
+  persistShowContact(input: SaveShowContactInput): Promise<void>;
+  removeShowContact(id: ContactId): Promise<void>;
+  persistPinnedLink(input: SavePinnedLinkInput): Promise<void>;
+  removePinnedLink(id: PinnedLinkId): Promise<void>;
+  launchPinnedLink(url: string): Promise<void>;
 }
 
 export function useMailApp(): MailApp {
@@ -243,12 +334,24 @@ export function useMailApp(): MailApp {
   const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [contactsOpen, setContactsOpen] = useState(false);
+  const [pinnedLinksOpen, setPinnedLinksOpen] = useState(false);
   const [popover, setPopover] = useState<PopoverState | null>(null);
   const [replyText, setReplyText] = useState("");
   const [replyNonce, setReplyNonce] = useState(0);
   const [expanded, setExpanded] = useState<ReadonlySet<MessageId>>(() => new Set());
   const [syncing, setSyncing] = useState(false);
   const [composeInsert, setComposeInsert] = useState<{ nonce: number; body: string } | null>(null);
+  const [activeSection, setActiveSection] = useState<ActiveSection>("mail");
+  const [staffWorkspace, setStaffWorkspace] = useState<StaffWorkspaceView>(EMPTY_STAFF_WORKSPACE);
+  const [staffDirectory, setStaffDirectory] = useState<StaffMemberView[]>([]);
+  const [sharedThreads, setSharedThreads] = useState<SharedThreadSummary[]>([]);
+  const [sharedTemplates, setSharedTemplates] = useState<SharedTemplateView[]>([]);
+  const [showContacts, setShowContacts] = useState<ShowContactView[]>([]);
+  const [pinnedLinks, setPinnedLinks] = useState<PinnedLinkView[]>([]);
+  const [selectedSharedId, setSelectedSharedId] = useState<SharedThreadId | null>(null);
+  const [activeSharedThread, setActiveSharedThread] = useState<SharedThreadView | null>(null);
 
   const toastSeq = useRef(0);
   const insertSeq = useRef(0);
@@ -284,6 +387,23 @@ export function useMailApp(): MailApp {
     setThreads(page.items);
   }, []);
 
+  const reloadStaff = useCallback(async () => {
+    const [ws, dir, shared, sharedTpls, contacts, links] = await Promise.all([
+      getStaffWorkspace(),
+      listStaffDirectory(),
+      listSharedThreads(),
+      listSharedTemplates(),
+      listShowContacts(),
+      listPinnedLinks(),
+    ]);
+    setStaffWorkspace(ws);
+    setStaffDirectory(dir);
+    setSharedThreads(shared);
+    setSharedTemplates(sharedTpls);
+    setShowContacts(contacts);
+    setPinnedLinks(links);
+  }, []);
+
   const reloadMeta = useCallback(async () => {
     const [nextAccounts, nextJobs, nextTemplates, nextClients, nextSettings] = await Promise.all([
       listAccounts(),
@@ -298,7 +418,8 @@ export function useMailApp(): MailApp {
     setSavedOAuthClients(nextClients);
     setSettings(nextSettings);
     jobsSignature.current = nextJobs.map((j) => `${j.id}:${j.state}`).join("|");
-  }, []);
+    await reloadStaff();
+  }, [reloadStaff]);
 
   // Theme persistence + accent wiring.
   useEffect(() => {
@@ -362,6 +483,11 @@ export function useMailApp(): MailApp {
       .then((next) => {
         if (cancelled || requestTheme !== themeRef.current) return;
         setThread(next);
+        void findSharedThreadForLocal(next.id)
+          .then((shared) => {
+            if (!cancelled) setActiveSharedThread(shared);
+          })
+          .catch(() => undefined);
         void reload(scope, view).catch(() => undefined);
         void reloadMeta().catch(() => undefined);
       })
@@ -407,15 +533,48 @@ export function useMailApp(): MailApp {
   }
 
   function selectSpace(id: AccountId | null): void {
+    setActiveSection("mail");
+    setSelectedSharedId(null);
+    setActiveSharedThread(null);
     setScopeAccount(id);
   }
 
   function selectView(next: MailboxView): void {
+    setActiveSection("mail");
+    setSelectedSharedId(null);
+    setActiveSharedThread(null);
     setView(next);
   }
 
   function selectCategory(category: InboxCategory): void {
+    setActiveSection("mail");
+    setSelectedSharedId(null);
+    setActiveSharedThread(null);
     setView({ kind: "inbox", category });
+  }
+
+  function openSharedSection(): void {
+    setActiveSection("shared");
+    setSelectedId(null);
+    setThread(null);
+    setSelectedSharedId(null);
+    setActiveSharedThread(null);
+    if (layout === "classic") setStage("list");
+    void reloadStaff().catch(() => undefined);
+  }
+
+  async function openSharedThread(id: SharedThreadId): Promise<void> {
+    try {
+      setActiveSection("shared");
+      setSelectedId(null);
+      setThread(null);
+      setSelectedSharedId(id);
+      const detail = await openSharedThreadCommand(id);
+      setActiveSharedThread(detail);
+      if (layout === "classic") setStage("thread");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
   }
 
   function clearSelection(): void {
@@ -700,6 +859,18 @@ export function useMailApp(): MailApp {
       closeSettings();
       return;
     }
+    if (shareModalOpen) {
+      setShareModalOpen(false);
+      return;
+    }
+    if (contactsOpen) {
+      setContactsOpen(false);
+      return;
+    }
+    if (pinnedLinksOpen) {
+      setPinnedLinksOpen(false);
+      return;
+    }
     if (templatesOpen) closeTemplates();
   }
 
@@ -716,18 +887,28 @@ export function useMailApp(): MailApp {
     });
   }
 
-  function insertTemplate(template: TemplateView): void {
+  function insertTextSnippet(bodyText: string): void {
     if (composeOpen) {
       insertSeq.current += 1;
-      setComposeInsert({ nonce: insertSeq.current, body: template.bodyText });
+      setComposeInsert({ nonce: insertSeq.current, body: bodyText });
       return;
     }
     if (selectedId !== null) {
-      setReplyText((prev) => (prev ? `${prev}\n\n${template.bodyText}` : template.bodyText));
+      setReplyText((prev) => (prev ? `${prev}\n\n${bodyText}` : bodyText));
       setReplyNonce((n) => n + 1);
       return;
     }
     showToast("Open a thread or start a compose to insert a snippet");
+  }
+
+  function insertTemplate(template: TemplateView): void {
+    insertTextSnippet(template.bodyText);
+  }
+
+  function loadApprovedDraftToReply(bodyText: string): void {
+    setReplyText(bodyText);
+    setReplyNonce((n) => n + 1);
+    showToast("Loaded approved draft into reply dock");
   }
 
   function clearComposeInsert(): void {
@@ -853,6 +1034,178 @@ export function useMailApp(): MailApp {
     }
   }
 
+  // ── Phase B: Staff Sync & Collaboration actions ──────────────────────────
+
+  async function connectStaffWorkspace(
+    input: ConnectStaffWorkspaceInput,
+  ): Promise<StaffWorkspaceView> {
+    try {
+      const ws = await connectStaffWorkspaceCommand(input);
+      await reloadStaff();
+      showToast(`Connected to Pigment Staff Sync as @${ws.staffHandle}`);
+      return ws;
+    } catch (err) {
+      const msg = friendlyError(err);
+      showToast(msg, { durationMs: 7000 });
+      throw new Error(msg);
+    }
+  }
+
+  async function disconnectStaffWorkspace(): Promise<void> {
+    try {
+      await disconnectStaffWorkspaceCommand();
+      await reloadStaff();
+      showToast("Disconnected from Staff Sync");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function syncStaffWorkspace(): Promise<void> {
+    try {
+      const ws = await syncStaffWorkspaceCommand();
+      await reloadStaff();
+      if (activeSharedThread) {
+        const refreshed = await openSharedThreadCommand(activeSharedThread.id).catch(() => null);
+        if (refreshed) setActiveSharedThread(refreshed);
+      }
+      showToast(
+        ws.status === "connected"
+          ? "Staff workspace synced"
+          : ws.lastError ?? "Staff Sync offline — working from local cache",
+      );
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function shareThread(input: ShareThreadInput): Promise<SharedThreadView> {
+    try {
+      const shared = await shareThreadCommand(input);
+      setActiveSharedThread(shared);
+      await reloadStaff();
+      showToast(
+        input.visibility === "allStaff"
+          ? "Shared thread with All Staff"
+          : `Shared thread with ${shared.invitedHandles.map((h) => `@${h}`).join(", ")}`,
+      );
+      return shared;
+    } catch (err) {
+      const msg = friendlyError(err);
+      showToast(msg, { durationMs: 7000 });
+      throw new Error(msg);
+    }
+  }
+
+  async function updateHandoff(input: UpdateHandoffInput): Promise<void> {
+    try {
+      const updated = await updateSharedHandoffCommand(input);
+      setActiveSharedThread(updated);
+      await reloadStaff();
+      showToast(
+        updated.assigneeHandle
+          ? `Handed off to @${updated.assigneeHandle} (${updated.status})`
+          : `Updated status to ${updated.status}`,
+      );
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function postSharedComment(input: AddSharedCommentInput): Promise<void> {
+    try {
+      await addSharedCommentCommand(input);
+      const refreshed = await openSharedThreadCommand(input.sharedThreadId);
+      setActiveSharedThread(refreshed);
+      await reloadStaff();
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function mutateSharedDraft(input: UpdateSharedDraftInput): Promise<void> {
+    try {
+      await updateSharedDraftCommand(input);
+      const refreshed = await openSharedThreadCommand(input.sharedThreadId);
+      setActiveSharedThread(refreshed);
+      await reloadStaff();
+      if (input.action.kind === "requestReview") {
+        showToast("Review requested and teammates notified");
+      } else if (input.action.kind === "approve") {
+        showToast("Reply draft approved — ready for mailbox owner to send");
+      } else if (input.action.kind === "takeOver") {
+        showToast("You took over the reply draft lock");
+      }
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function persistSharedTemplate(input: SaveSharedTemplateInput): Promise<void> {
+    try {
+      await saveSharedTemplateCommand(input);
+      await reloadStaff();
+      showToast("Saved shared staff template");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function removeSharedTemplate(id: SharedTemplateId): Promise<void> {
+    try {
+      await deleteSharedTemplateCommand(id);
+      await reloadStaff();
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function persistShowContact(input: SaveShowContactInput): Promise<void> {
+    try {
+      await saveShowContactCommand(input);
+      await reloadStaff();
+      showToast("Saved show contact");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function removeShowContact(id: ContactId): Promise<void> {
+    try {
+      await deleteShowContactCommand(id);
+      await reloadStaff();
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function persistPinnedLink(input: SavePinnedLinkInput): Promise<void> {
+    try {
+      await savePinnedLinkCommand(input);
+      await reloadStaff();
+      showToast("Saved pinned staff link");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function removePinnedLink(id: PinnedLinkId): Promise<void> {
+    try {
+      await deletePinnedLinkCommand(id);
+      await reloadStaff();
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function launchPinnedLink(url: string): Promise<void> {
+    try {
+      await openExternalUrl(url);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
   function moveSelection(delta: number): void {
     if (threads.length === 0) return;
     const index = selectedId ? threads.findIndex((t) => t.id === selectedId) : -1;
@@ -895,6 +1248,9 @@ export function useMailApp(): MailApp {
       addAccountOpen ||
       templatesOpen ||
       settingsOpen ||
+      shareModalOpen ||
+      contactsOpen ||
+      pinnedLinksOpen ||
       popover !== null
     ) {
       return;
@@ -970,6 +1326,9 @@ export function useMailApp(): MailApp {
     addAccountOpen,
     templatesOpen,
     settingsOpen,
+    shareModalOpen,
+    contactsOpen,
+    pinnedLinksOpen,
     popover,
     replyText,
     replyNonce,
@@ -977,6 +1336,15 @@ export function useMailApp(): MailApp {
     remoteContent,
     syncing,
     composeInsert,
+    activeSection,
+    staffWorkspace,
+    staffDirectory,
+    sharedThreads,
+    sharedTemplates,
+    showContacts,
+    pinnedLinks,
+    selectedSharedId,
+    activeSharedThread,
     toggleTheme: () => setTheme((prev) => (prev === "dark" ? "light" : "dark")),
     toggleLayout: () => setLayout((prev) => (prev === "split" ? "classic" : "split")),
     backToList,
@@ -1025,5 +1393,29 @@ export function useMailApp(): MailApp {
     updateAccount,
     reauthAccount,
     removeAccount,
+    openSharedSection,
+    openSharedThread,
+    openShareModal: () => setShareModalOpen(true),
+    closeShareModal: () => setShareModalOpen(false),
+    openContacts: () => setContactsOpen(true),
+    closeContacts: () => setContactsOpen(false),
+    openPinnedLinks: () => setPinnedLinksOpen(true),
+    closePinnedLinks: () => setPinnedLinksOpen(false),
+    connectStaffWorkspace,
+    disconnectStaffWorkspace,
+    syncStaffWorkspace,
+    shareThread,
+    updateHandoff,
+    postSharedComment,
+    mutateSharedDraft,
+    loadApprovedDraftToReply,
+    insertTextSnippet,
+    persistSharedTemplate,
+    removeSharedTemplate,
+    persistShowContact,
+    removeShowContact,
+    persistPinnedLink,
+    removePinnedLink,
+    launchPinnedLink,
   };
 }

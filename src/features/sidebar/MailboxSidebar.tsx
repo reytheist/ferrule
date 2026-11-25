@@ -1,14 +1,18 @@
 import {
   Archive,
   CalendarClock,
+  Contact,
+  ExternalLink,
   FileText,
   Flag,
   Inbox,
+  Link2,
   Send,
   Sparkles,
   Star,
   Trash2,
   Clock,
+  Users,
 } from "lucide-react";
 import type { ComponentType } from "react";
 import type { MailboxView } from "../../types/mail";
@@ -96,7 +100,7 @@ export function MailboxSidebar({ app }: { app: MailApp }) {
       {ENTRIES.map((entry) => {
         const Icon = entry.icon;
         const count = entry.count(app);
-        const active = sameView(app.view, entry.view);
+        const active = app.activeSection === "mail" && sameView(app.view, entry.view);
         return (
           <button
             key={entry.key}
@@ -111,12 +115,58 @@ export function MailboxSidebar({ app }: { app: MailApp }) {
         );
       })}
 
+      <div className="sidebar-section">Pigment Staff</div>
+      <button
+        className={`nav-item${app.activeSection === "shared" ? " active" : ""}`}
+        onClick={app.openSharedSection}
+        title="Shared with Me"
+      >
+        <Users />
+        <span className="nav-label">Shared with Me</span>
+        <span className="nav-count">{app.sharedThreads.length}</span>
+      </button>
+      <button className="nav-item" onClick={app.openContacts} title="Shared Show Contacts">
+        <Contact />
+        <span className="nav-label">Show Contacts</span>
+        <span className="nav-count">{app.showContacts.length}</span>
+      </button>
+
       <div className="sidebar-section">Library</div>
       <button className="nav-item" onClick={app.openTemplates} title="Templates">
         <FileText />
         <span className="nav-label">Templates</span>
-        <span className="nav-count">{app.templates.length}</span>
+        <span className="nav-count">{app.templates.length + app.sharedTemplates.length}</span>
       </button>
+
+      <div className="sidebar-section sidebar-section-row">
+        <span>Pinned Links</span>
+        <button
+          type="button"
+          className="sidebar-mini-btn"
+          onClick={app.openPinnedLinks}
+          title="Manage Pinned Staff Links"
+        >
+          Edit
+        </button>
+      </div>
+      {app.pinnedLinks.length === 0 ? (
+        <button className="nav-item" onClick={app.openPinnedLinks} title="Add pinned link">
+          <Link2 />
+          <span className="nav-label">Pin a staff link…</span>
+        </button>
+      ) : (
+        app.pinnedLinks.slice(0, 6).map((link) => (
+          <button
+            key={link.id}
+            className="nav-item pinned-link-item"
+            onClick={() => void app.launchPinnedLink(link.url)}
+            title={link.description ? `${link.title} — ${link.description}` : link.url}
+          >
+            <ExternalLink />
+            <span className="nav-label">{link.title}</span>
+          </button>
+        ))
+      )}
 
       {app.settings.developerToolsEnabled && (
         <div className="sidebar-footer">

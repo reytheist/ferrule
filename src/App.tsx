@@ -6,6 +6,13 @@ import { SettingsModal } from "./features/settings/SettingsModal";
 import { MailboxSidebar } from "./features/sidebar/MailboxSidebar";
 import { SpaceSwitcher } from "./features/spaces/SpaceSwitcher";
 import { useMailApp } from "./features/shell/useMailApp";
+import { ContactsModal } from "./features/staff/ContactsModal";
+import { PinnedLinksModal } from "./features/staff/PinnedLinksModal";
+import {
+  SharedThreadReadingPane,
+  SharedThreadsList,
+} from "./features/staff/SharedThreadsList";
+import { ShareThreadModal } from "./features/staff/ShareThreadModal";
 import { ThreadList } from "./features/threads/ThreadList";
 import { Topbar } from "./features/topbar/Topbar";
 import { TemplatesModal } from "./features/templates/TemplatesModal";
@@ -45,8 +52,17 @@ export function App() {
       <SpaceSwitcher app={app} />
       <div className="workspace">
         <MailboxSidebar app={app} />
-        <ThreadList app={app} />
-        <ReadingPane app={app} />
+        {app.activeSection === "shared" ? (
+          <>
+            <SharedThreadsList app={app} />
+            <SharedThreadReadingPane app={app} />
+          </>
+        ) : (
+          <>
+            <ThreadList app={app} />
+            <ReadingPane app={app} />
+          </>
+        )}
       </div>
 
       {app.commandOpen && <CommandBar app={app} />}
@@ -54,6 +70,9 @@ export function App() {
       {app.addAccountOpen && <AddAccountModal app={app} />}
       {app.templatesOpen && <TemplatesModal app={app} />}
       {app.settingsOpen && <SettingsModal app={app} />}
+      {app.shareModalOpen && <ShareThreadModal app={app} />}
+      {app.contactsOpen && <ContactsModal app={app} />}
+      {app.pinnedLinksOpen && <PinnedLinksModal app={app} />}
       <SchedulePopover app={app} />
       <UndoToast app={app} />
     </div>

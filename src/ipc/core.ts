@@ -8,7 +8,10 @@ import type {
   AccountId,
   AccountView,
   ActionOutcome,
+  AddSharedCommentInput,
   AppSettings,
+  ConnectStaffWorkspaceInput,
+  ContactId,
   CreateDraftInput,
   DraftId,
   DraftView,
@@ -18,12 +21,28 @@ import type {
   MailAction,
   NewAccountInput,
   OAuthSignInInput,
+  PinnedLinkId,
+  PinnedLinkView,
   RemoteContent,
+  SavePinnedLinkInput,
+  SaveSharedTemplateInput,
+  SaveShowContactInput,
   SaveTemplateInput,
   SavedOAuthClients,
   Scope,
   SendMode,
   SendReceipt,
+  ShareThreadInput,
+  SharedCommentView,
+  SharedDraftView,
+  SharedTemplateId,
+  SharedTemplateView,
+  SharedThreadId,
+  SharedThreadSummary,
+  SharedThreadView,
+  ShowContactView,
+  StaffMemberView,
+  StaffWorkspaceView,
   TemplateId,
   TemplateView,
   ThreadId,
@@ -32,6 +51,8 @@ import type {
   ThreadView,
   UndoOutcome,
   UpdateAccountInput,
+  UpdateHandoffInput,
+  UpdateSharedDraftInput,
 } from "../types/mail";
 
 export function isTauriRuntime(): boolean {
@@ -184,4 +205,140 @@ export async function deleteTemplate(templateId: TemplateId): Promise<void> {
 export async function tickScheduler(): Promise<void> {
   if (!isTauriRuntime()) return mock.tickScheduler();
   return invoke<void>("tick_scheduler");
+}
+
+// ── Phase B: Staff Sync & Email Collaboration ───────────────────────────────
+
+export async function getStaffWorkspace(): Promise<StaffWorkspaceView> {
+  if (!isTauriRuntime()) return mock.getStaffWorkspace();
+  return invoke<StaffWorkspaceView>("get_staff_workspace");
+}
+
+export async function connectStaffWorkspace(
+  input: ConnectStaffWorkspaceInput,
+): Promise<StaffWorkspaceView> {
+  if (!isTauriRuntime()) return mock.connectStaffWorkspace(input);
+  return invoke<StaffWorkspaceView>("connect_staff_workspace", { input });
+}
+
+export async function disconnectStaffWorkspace(): Promise<void> {
+  if (!isTauriRuntime()) return mock.disconnectStaffWorkspace();
+  return invoke<void>("disconnect_staff_workspace");
+}
+
+export async function syncStaffWorkspace(): Promise<StaffWorkspaceView> {
+  if (!isTauriRuntime()) return mock.syncStaffWorkspace();
+  return invoke<StaffWorkspaceView>("sync_staff_workspace");
+}
+
+export async function listStaffDirectory(): Promise<StaffMemberView[]> {
+  if (!isTauriRuntime()) return mock.listStaffDirectory();
+  return invoke<StaffMemberView[]>("list_staff_directory");
+}
+
+export async function listSharedThreads(): Promise<SharedThreadSummary[]> {
+  if (!isTauriRuntime()) return mock.listSharedThreads();
+  return invoke<SharedThreadSummary[]>("list_shared_threads");
+}
+
+export async function openSharedThread(
+  sharedThreadId: SharedThreadId,
+): Promise<SharedThreadView> {
+  if (!isTauriRuntime()) return mock.openSharedThread(sharedThreadId);
+  return invoke<SharedThreadView>("open_shared_thread", { sharedThreadId });
+}
+
+export async function findSharedThreadForLocal(
+  threadId: ThreadId,
+): Promise<SharedThreadView | null> {
+  if (!isTauriRuntime()) return mock.findSharedThreadForLocal(threadId);
+  return invoke<SharedThreadView | null>("find_shared_thread_for_local", { threadId });
+}
+
+export async function shareThread(input: ShareThreadInput): Promise<SharedThreadView> {
+  if (!isTauriRuntime()) return mock.shareThread(input);
+  return invoke<SharedThreadView>("share_thread", { input });
+}
+
+export async function updateSharedHandoff(
+  input: UpdateHandoffInput,
+): Promise<SharedThreadView> {
+  if (!isTauriRuntime()) return mock.updateSharedHandoff(input);
+  return invoke<SharedThreadView>("update_shared_handoff", { input });
+}
+
+export async function addSharedComment(
+  input: AddSharedCommentInput,
+): Promise<SharedCommentView> {
+  if (!isTauriRuntime()) return mock.addSharedComment(input);
+  return invoke<SharedCommentView>("add_shared_comment", { input });
+}
+
+export async function updateSharedDraft(
+  input: UpdateSharedDraftInput,
+): Promise<SharedDraftView> {
+  if (!isTauriRuntime()) return mock.updateSharedDraft(input);
+  return invoke<SharedDraftView>("update_shared_draft", { input });
+}
+
+export async function listSharedTemplates(): Promise<SharedTemplateView[]> {
+  if (!isTauriRuntime()) return mock.listSharedTemplates();
+  return invoke<SharedTemplateView[]>("list_shared_templates");
+}
+
+export async function saveSharedTemplate(
+  input: SaveSharedTemplateInput,
+): Promise<SharedTemplateView> {
+  if (!isTauriRuntime()) return mock.saveSharedTemplate(input);
+  return invoke<SharedTemplateView>("save_shared_template", { input });
+}
+
+export async function deleteSharedTemplate(templateId: SharedTemplateId): Promise<void> {
+  if (!isTauriRuntime()) return mock.deleteSharedTemplate(templateId);
+  return invoke<void>("delete_shared_template", { templateId });
+}
+
+export async function listShowContacts(): Promise<ShowContactView[]> {
+  if (!isTauriRuntime()) return mock.listShowContacts();
+  return invoke<ShowContactView[]>("list_show_contacts");
+}
+
+export async function findContactByEmail(email: string): Promise<ShowContactView | null> {
+  if (!isTauriRuntime()) return mock.findContactByEmail(email);
+  return invoke<ShowContactView | null>("find_contact_by_email", { email });
+}
+
+export async function saveShowContact(
+  input: SaveShowContactInput,
+): Promise<ShowContactView> {
+  if (!isTauriRuntime()) return mock.saveShowContact(input);
+  return invoke<ShowContactView>("save_show_contact", { input });
+}
+
+export async function deleteShowContact(contactId: ContactId): Promise<void> {
+  if (!isTauriRuntime()) return mock.deleteShowContact(contactId);
+  return invoke<void>("delete_show_contact", { contactId });
+}
+
+export async function listPinnedLinks(): Promise<PinnedLinkView[]> {
+  if (!isTauriRuntime()) return mock.listPinnedLinks();
+  return invoke<PinnedLinkView[]>("list_pinned_links");
+}
+
+export async function savePinnedLink(input: SavePinnedLinkInput): Promise<PinnedLinkView> {
+  if (!isTauriRuntime()) return mock.savePinnedLink(input);
+  return invoke<PinnedLinkView>("save_pinned_link", { input });
+}
+
+export async function deletePinnedLink(linkId: PinnedLinkId): Promise<void> {
+  if (!isTauriRuntime()) return mock.deletePinnedLink(linkId);
+  return invoke<void>("delete_pinned_link", { linkId });
+}
+
+export async function openExternalUrl(url: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
+  return invoke<void>("open_external_url", { url });
 }

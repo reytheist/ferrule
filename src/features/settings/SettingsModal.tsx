@@ -1,20 +1,66 @@
 import { useState } from "react";
-import { Code2, Moon, Shield, SlidersHorizontal, Sun, Terminal, Users, X } from "lucide-react";
+import {
+  Code2,
+  Moon,
+  RefreshCw,
+  Shield,
+  SlidersHorizontal,
+  Sun,
+  Terminal,
+  Unplug,
+  Users,
+  X,
+} from "lucide-react";
 import type { MailApp } from "../shell/useMailApp";
 import { spaceClass } from "../spaces/SpaceSwitcher";
 
 export function SettingsModal({ app }: { app: MailApp }) {
   const [busy, setBusy] = useState(false);
+  const [serverUrl, setServerUrl] = useState(
+    () => app.staffWorkspace.serverUrl || "local://pigment-demo",
+  );
+  const [token, setToken] = useState("");
+  const [staffName, setStaffName] = useState(() => app.staffWorkspace.staffName || "Reyth");
+  const [staffHandle, setStaffHandle] = useState(() => app.staffWorkspace.staffHandle || "reyth");
+  const [staffEmail, setStaffEmail] = useState(
+    () => app.staffWorkspace.staffEmail || "info@pigmentminiatures.com",
+  );
+  const [staffRole, setStaffRole] = useState(
+    () => app.staffWorkspace.staffRole || "Show Director",
+  );
+  const [staffError, setStaffError] = useState<string | null>(null);
 
   if (!app.settingsOpen) return null;
 
   const devTools = app.settings.developerToolsEnabled;
+  const ws = app.staffWorkspace;
 
   async function toggleDeveloperTools(): Promise<void> {
     if (busy) return;
     setBusy(true);
     try {
       await app.setDeveloperToolsEnabled(!devTools);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function connectWorkspace(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    setStaffError(null);
+    try {
+      await app.connectStaffWorkspace({
+        serverUrl,
+        token: token.trim() || (serverUrl.startsWith("local://") ? "local-demo-token" : ""),
+        staffName,
+        staffHandle,
+        staffEmail,
+        staffRole,
+      });
+      setToken("");
+    } catch (err) {
+      setStaffError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -27,7 +73,7 @@ export function SettingsModal({ app }: { app: MailApp }) {
         if (event.target === event.currentTarget && !busy) app.closeSettings();
       }}
     >
-      <div className="modal" role="dialog" aria-label="Settings">
+      <div className="modal wide" role="dialog" aria-label="Settings">
         <div className="modal-head">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <SlidersHorizontal style={{ width: 15, height: 15, color: "var(--app-accent)" }} />
@@ -44,6 +90,138 @@ export function SettingsModal({ app }: { app: MailApp }) {
         </div>
 
         <div className="modal-body">
+          <section className="settings-section">
+            <div className="settings-section-title">Pigment Staff Sync</div>
+            {ws.connected ? (
+              <div className="staff-ws-card">
+                <div className="staff-ws-head">
+                  <Users style={{ width: 14, height: 14, color: "var(--app-shield)" }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <strong>
+                      {ws.staffName} (@{ws.staffHandle})
+                    </strong>
+                    <div className="hint-text">
+                      {ws.staffRole} · {ws.staffEmail} · {ws.serverUrl}
+                    </div>
+                  </div>
+                  <span className={`space-kind-badge${ws.status === "connected" ? " staff" : ""}`}>
+                    {ws.status}
+                  </span>
+                </div>
+                {ws.lastError && <span className="error-text">{ws.lastError}</span>}
+                {app.staffDirectory.length > 0 && (
+                  <div className="staff-dir-strip">
+                    {app.staffDirectory.map((member) => (
+                      <span
+                        key={member.id}
+                        className="staff-dir-chip"
+                        title={`${member.name} — ${member.role} (${member.email})`}
+                      >
+                        @{member.handle}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="collab-actions">
+                  <button
+                    type="button"
+                    className="btn compact"
+                    disabled={busy}
+                    onClick={() => void app.syncStaffWorkspace()}
+                  >
+                    <RefreshCw />
+                    Sync Now
+                  </button>
+                  <button
+                    type="button"
+                    className="btn compact"
+                    disabled={busy}
+                    onClick={() => void app.disconnectStaffWorkspace()}
+                  >
+                    <Unplug />
+                    Disconnect
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="staff-connect-form">
+                <div className="field-row">
+                  <div className="field">
+                    <label>Staff Sync Server URL</label>
+                    <input
+                      className="input"
+                      placeholder="https://sync.pigmentminiatures.com or local://pigment-demo"
+                      value={serverUrl}
+                      onChange={(event) => setServerUrl(event.target.value)}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Invite / Staff Token (OS Keychain)</label>
+                    <input
+                      className="input"
+                      type="password"
+                      placeholder={
+                        serverUrl.startsWith("local://") ? "Auto-filled for local demo" : "Paste invite token"
+                      }
+                      value={token}
+                      onChange={(event) => setToken(event.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="field-row">
+                  <div className="field">
+                    <label>Your Name</label>
+                    <input
+                      className="input"
+                      value={staffName}
+                      onChange={(event) => setStaffName(event.target.value)}
+                    />
+                  </div>
+                  <div className="field" style={{ maxWidth: 140 }}>
+                    <label>@handle</label>
+                    <input
+                      className="input"
+                      value={staffHandle}
+                      onChange={(event) => setStaffHandle(event.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="field-row">
+                  <div className="field">
+                    <label>Pigment Email</label>
+                    <input
+                      className="input"
+                      value={staffEmail}
+                      onChange={(event) => setStaffEmail(event.target.value)}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Role</label>
+                    <input
+                      className="input"
+                      value={staffRole}
+                      onChange={(event) => setStaffRole(event.target.value)}
+                    />
+                  </div>
+                </div>
+                {staffError && <span className="error-text">{staffError}</span>}
+                <div className="collab-actions">
+                  <button
+                    type="button"
+                    className="btn compact primary"
+                    disabled={busy}
+                    onClick={() => void connectWorkspace()}
+                  >
+                    Connect Staff Sync
+                  </button>
+                  <span className="hint-text">
+                    Token is stored strictly in your OS keychain — never in SQLite or localStorage.
+                  </span>
+                </div>
+              </div>
+            )}
+          </section>
+
           <section className="settings-section">
             <div className="settings-section-title">Appearance &amp; Layout</div>
             <div className="settings-row">

@@ -56,6 +56,7 @@ pub enum CredentialKind {
     Password,
     OAuthRefreshToken,
     OAuthClientSecret,
+    StaffSyncToken,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -180,11 +181,23 @@ pub struct SecretKey {
 }
 
 impl SecretKey {
+    pub fn staff_sync_token() -> Self {
+        let workspace_id = AccountId::derive(
+            uuid::Uuid::NAMESPACE_URL,
+            b"ferrule:staff-sync:workspace-token",
+        );
+        Self {
+            account_id: workspace_id,
+            kind: CredentialKind::StaffSyncToken,
+        }
+    }
+
     pub fn storage_id(&self) -> String {
         let suffix = match self.kind {
             CredentialKind::Password => "password",
             CredentialKind::OAuthRefreshToken => "oauth-refresh",
             CredentialKind::OAuthClientSecret => "oauth-client-secret",
+            CredentialKind::StaffSyncToken => "staff-sync-token",
         };
         format!("ferrule:v1:{}:{suffix}", self.account_id)
     }

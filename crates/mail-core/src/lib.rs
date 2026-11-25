@@ -6,10 +6,14 @@ pub mod host;
 pub mod ids;
 pub mod sanitize;
 pub mod schedule;
+pub mod staff;
 pub mod types;
 
+mod staff_core;
 mod store;
 mod sync;
+
+pub use crate::sync::staff::{parse_sse_frame, StaffSyncEvent, StaffSyncSnapshot};
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -612,7 +616,9 @@ impl MailCore {
         auth: &ProviderAuth,
     ) -> Result<Option<SecretString>, CoreError> {
         match auth.credential_kind() {
-            CredentialKind::Password => self.secret_for(account_id, auth),
+            CredentialKind::Password | CredentialKind::StaffSyncToken => {
+                self.secret_for(account_id, auth)
+            }
             CredentialKind::OAuthRefreshToken | CredentialKind::OAuthClientSecret => {
                 let now = self.now();
                 if let Ok(cache) = self.inner.token_cache.lock() {

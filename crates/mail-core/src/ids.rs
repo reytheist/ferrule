@@ -66,6 +66,12 @@ define_id!(AttachmentId);
 define_id!(DraftId);
 define_id!(JobId);
 define_id!(TemplateId);
+define_id!(StaffMemberId);
+define_id!(SharedThreadId);
+define_id!(CommentId);
+define_id!(SharedTemplateId);
+define_id!(ContactId);
+define_id!(PinnedLinkId);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

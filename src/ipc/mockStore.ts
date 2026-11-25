@@ -5,11 +5,17 @@
 import {
   newAccountId,
   newAttachmentId,
+  newCommentId,
+  newContactId,
   newDraftId,
   newIdentityId,
   newJobId,
   newLabelId,
   newMessageId,
+  newPinnedLinkId,
+  newSharedTemplateId,
+  newSharedThreadId,
+  newStaffMemberId,
   newTemplateId,
   newThreadId,
 } from "../types/ids";
@@ -17,8 +23,11 @@ import type {
   AccountId,
   AccountView,
   ActionOutcome,
+  AddSharedCommentInput,
   AppSettings,
   AttachmentMeta,
+  ConnectStaffWorkspaceInput,
+  ContactId,
   CreateDraftInput,
   DraftId,
   DraftView,
@@ -34,17 +43,33 @@ import type {
   MessageView,
   NewAccountInput,
   OAuthSignInInput,
+  PinnedLinkId,
+  PinnedLinkView,
   PrivacyReport,
   ProviderKind,
   RemoteContent,
   RemoteImagesStatus,
+  SavePinnedLinkInput,
+  SaveSharedTemplateInput,
+  SaveShowContactInput,
   SaveTemplateInput,
   SavedOAuthClients,
   Scope,
   SendMode,
   SendReceipt,
+  ShareThreadInput,
+  SharedCommentView,
+  SharedDraftView,
+  SharedTemplateId,
+  SharedTemplateView,
+  SharedThreadId,
+  SharedThreadSummary,
+  SharedThreadView,
+  ShowContactView,
   SpaceColor,
   SpaceKind,
+  StaffMemberView,
+  StaffWorkspaceView,
   SyncState,
   TemplateId,
   TemplateView,
@@ -59,6 +84,8 @@ import type {
   UnixMs,
   UnsubscribeInfo,
   UpdateAccountInput,
+  UpdateHandoffInput,
+  UpdateSharedDraftInput,
 } from "../types/mail";
 
 const MINUTE = 60_000;
@@ -143,6 +170,27 @@ interface MockState {
   jobs: StoredJob[];
   templates: TemplateView[];
   settings: AppSettings;
+  staffWorkspace: StaffWorkspaceView;
+  staffDirectory: StaffMemberView[];
+  sharedThreads: SharedThreadView[];
+  sharedTemplates: SharedTemplateView[];
+  showContacts: ShowContactView[];
+  pinnedLinks: PinnedLinkView[];
+}
+
+function emptyWorkspace(): StaffWorkspaceView {
+  return {
+    connected: false,
+    serverUrl: "",
+    staffName: "",
+    staffHandle: "",
+    staffEmail: "",
+    staffRole: "",
+    connectedAt: null,
+    lastSyncAt: null,
+    status: "disconnected",
+    lastError: null,
+  };
 }
 
 function emptyState(): MockState {
@@ -153,6 +201,12 @@ function emptyState(): MockState {
     jobs: [],
     templates: [],
     settings: { developerToolsEnabled: false },
+    staffWorkspace: emptyWorkspace(),
+    staffDirectory: [],
+    sharedThreads: [],
+    sharedTemplates: [],
+    showContacts: [],
+    pinnedLinks: [],
   };
 }
 
@@ -1379,4 +1433,704 @@ export async function tickScheduler(): Promise<void> {
     }
   }
   state.jobs = state.jobs.filter((j) => j.state !== "cancelled");
+}
+
+// ── Phase B: Staff Sync & Collaboration mock backend ────────────────────────
+
+function normalizeHandle(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "");
+}
+
+function extractMentions(body: string): string[] {
+  const found = new Set<string>();
+  const re = /(?:^|[^a-zA-Z0-9_.])@([a-zA-Z0-9_-]+)/g;
+  let match = re.exec(body);
+  while (match !== null) {
+    const h = match[1]?.toLowerCase();
+    if (h) found.add(h);
+    match = re.exec(body);
+  }
+  return Array.from(found);
+}
+
+function seedMockStaffDemo(): void {
+  if (state.staffDirectory.length > 0) return;
+  const t = now();
+  state.staffWorkspace = {
+    connected: true,
+    serverUrl: "local://pigment-demo",
+    staffName: "Reyth",
+    staffHandle: "reyth",
+    staffEmail: "info@pigmentminiatures.com",
+    staffRole: "Show Director",
+    connectedAt: t - 3 * DAY,
+    lastSyncAt: t - 2 * MINUTE,
+    status: "connected",
+    lastError: null,
+  };
+  state.staffDirectory = [
+    {
+      id: newStaffMemberId(),
+      name: "Reyth",
+      role: "Show Director",
+      handle: "reyth",
+      email: "info@pigmentminiatures.com",
+      department: "operations",
+      updatedAt: t,
+    },
+    {
+      id: newStaffMemberId(),
+      name: "Maya Chen",
+      role: "Sponsors Lead",
+      handle: "maya",
+      email: "sponsors@pigmentminiatures.com",
+      department: "sponsors",
+      updatedAt: t,
+    },
+    {
+      id: newStaffMemberId(),
+      name: "Devon Brooks",
+      role: "Exhibition Coordinator",
+      handle: "devon",
+      email: "exhibition@pigmentminiatures.com",
+      department: "exhibition",
+      updatedAt: t,
+    },
+    {
+      id: newStaffMemberId(),
+      name: "Tessa Morales",
+      role: "Marketing Lead",
+      handle: "tessa",
+      email: "marketing@pigmentminiatures.com",
+      department: "marketing",
+      updatedAt: t,
+    },
+    {
+      id: newStaffMemberId(),
+      name: "Sam Patel",
+      role: "Volunteer Coordinator",
+      handle: "sam",
+      email: "volunteers@pigmentminiatures.com",
+      department: "volunteers",
+      updatedAt: t,
+    },
+  ];
+  state.sharedTemplates = [
+    {
+      id: newSharedTemplateId(),
+      name: "Sponsor Prospectus Reply",
+      shortcut: "/sponsor",
+      category: "sponsors",
+      subject: "Pigment Miniatures Show 2027 — Sponsorship Prospectus",
+      bodyText:
+        "Hi there,\n\nThank you for your interest in sponsoring Pigment Miniatures Show 2027! I've attached our 2027 Sponsor Prospectus with booth dimensions, Gold/Silver/Bronze tiers, and print deadlines.\n\nWarmly,\nPigment Sponsors Team",
+      updatedBy: "maya",
+      updatedAt: t - DAY,
+    },
+    {
+      id: newSharedTemplateId(),
+      name: "Exhibitor Load-In FAQ",
+      shortcut: "/loadin",
+      category: "exhibitors",
+      subject: "Pigment 2027 — Exhibitor Load-In & Table Details",
+      bodyText:
+        "Hi,\n\nExhibitor load-in opens Friday at 1:00 PM via the East Loading Dock. Each 6ft table includes black draping, two chairs, and two staff badges.\n\nBest,\nPigment Exhibition Team",
+      updatedBy: "devon",
+      updatedAt: t - 2 * DAY,
+    },
+    {
+      id: newSharedTemplateId(),
+      name: "Volunteer Onboarding Welcome",
+      shortcut: "/vol",
+      category: "volunteers",
+      subject: "Welcome to the Pigment 2027 Volunteer Crew!",
+      bodyText:
+        "Hi,\n\nThank you for signing up to help run Pigment 2027! Volunteers who work two 4-hour shifts receive a full weekend badge and staff shirt.\n\nSee you at the show!\nPigment Volunteer Team",
+      updatedBy: "sam",
+      updatedAt: t - 4 * DAY,
+    },
+  ];
+  state.showContacts = [
+    {
+      id: newContactId(),
+      name: "Dana Okafor",
+      emails: ["dana@ferngate.co"],
+      category: "sponsor",
+      organization: "Ferngate Miniatures",
+      tier: "Gold Sponsor",
+      notes: "Returning 2026 sponsor; prefers corner booth near lighting demo tables.",
+      updatedAt: t - DAY,
+    },
+    {
+      id: newContactId(),
+      name: "Marco Bellini",
+      emails: ["marco@vallejo-atelier.example"],
+      category: "instructor",
+      organization: "Bellini Studio",
+      tier: "Keynote Workshop",
+      notes: "Teaching NMM & Skin Tones Saturday 10am–2pm. Needs overhead camera rig.",
+      updatedAt: t - 2 * DAY,
+    },
+    {
+      id: newContactId(),
+      name: "Priya Nair",
+      emails: ["priya@austinconvention.example"],
+      category: "venue",
+      organization: "Cedar Creek Event Center",
+      tier: "Venue Ops Lead",
+      notes: "Main hall A/V, loading dock schedule, and room keycard contact.",
+      updatedAt: t - 3 * DAY,
+    },
+  ];
+  state.pinnedLinks = [
+    {
+      id: newPinnedLinkId(),
+      title: "2027 Operations Workbook",
+      url: "https://docs.google.com/spreadsheets/d/pigment-2027-ops",
+      category: "operations",
+      description: "Master floor plan, vendor map/payment, and room supplies sheets",
+      position: 0,
+      updatedAt: t,
+    },
+    {
+      id: newPinnedLinkId(),
+      title: "Pigment Admin Portal",
+      url: "https://pigmentminiatures.com/admin",
+      category: "admin",
+      description: "Registrations, exhibitor badges, and ticket check-in",
+      position: 1,
+      updatedAt: t,
+    },
+    {
+      id: newPinnedLinkId(),
+      title: "Canva Marketing Assets",
+      url: "https://www.canva.com/folder/pigment-2027-marketing",
+      category: "marketing",
+      description: "Social graphics, badges, and print banners",
+      position: 2,
+      updatedAt: t,
+    },
+    {
+      id: newPinnedLinkId(),
+      title: "Staff Discord",
+      url: "https://discord.com/channels/@me",
+      category: "comms",
+      description: "Live staff chat and weekly planning voice channel",
+      position: 3,
+      updatedAt: t,
+    },
+  ];
+
+  // A thread shared by Maya from sponsors@ so Shared with Me works out of the box.
+  const sharedId = newSharedThreadId();
+  state.sharedThreads = [
+    {
+      id: sharedId,
+      sourceThreadId: null,
+      sourceAccountId: null,
+      ownerEmail: "sponsors@pigmentminiatures.com",
+      ownerName: "Maya Chen",
+      subject: "Gold Sponsor corner booth + lighting drop request",
+      snippet: "Could we reserve Corner Booth A1 again and add a 20A power drop?",
+      participants: ["dana@ferngate.co", "sponsors@pigmentminiatures.com"],
+      messages: [
+        {
+          id: "snap-1",
+          fromName: "Dana Okafor",
+          fromEmail: "dana@ferngate.co",
+          to: ["sponsors@pigmentminiatures.com"],
+          cc: [],
+          date: t - 3 * HOUR,
+          snippet: "Could we reserve Corner Booth A1 again and add a 20A power drop?",
+          bodyText:
+            "Hi Maya,\n\nWe'd love to return as a Gold Sponsor for Pigment 2027! Could we reserve Corner Booth A1 again and add a 20A power drop for our airbrush demo station?\n\nBest,\nDana",
+          bodySrcdoc:
+            "<!doctype html><html><body style='font-family:Inter,sans-serif;font-size:13px;line-height:1.55;margin:0;color:inherit'><p>Hi Maya,</p><p>We'd love to return as a <strong>Gold Sponsor</strong> for Pigment 2027! Could we reserve Corner Booth A1 again and add a 20A power drop for our airbrush demo station?</p><p>Best,<br/>Dana</p></body></html>",
+        },
+      ],
+      visibility: "allStaff",
+      invitedHandles: [],
+      assigneeHandle: "reyth",
+      status: "open",
+      comments: [
+        {
+          id: newCommentId(),
+          sharedThreadId: sharedId,
+          authorHandle: "maya",
+          authorName: "Maya Chen",
+          bodyText:
+            "Hey @reyth and @devon — confirming whether Corner Booth A1 has a 20A drop on the 2027 venue map before I lock in the invoice.",
+          mentions: ["reyth", "devon"],
+          createdAt: t - 2 * HOUR,
+        },
+      ],
+      draft: {
+        sharedThreadId: sharedId,
+        subject: "Re: Gold Sponsor corner booth + lighting drop request",
+        to: ["dana@ferngate.co"],
+        cc: [],
+        bodyText:
+          "Hi Dana,\n\nThrilled to have Ferngate back as a Gold Sponsor! Corner Booth A1 is yours and we've noted the 20A power drop with the venue ops team.\n\nWarmly,\nMaya",
+        editorHandle: null,
+        editorName: null,
+        lockState: "reviewRequested",
+        reviewRequestedBy: "maya",
+        approvedBy: null,
+        approvedAt: null,
+        rev: 2,
+        updatedAt: t - HOUR,
+      },
+      sharedAt: t - 2 * HOUR,
+      updatedAt: t - HOUR,
+    },
+  ];
+}
+
+function summarizeShared(t: SharedThreadView): SharedThreadSummary {
+  return {
+    id: t.id,
+    sourceThreadId: t.sourceThreadId,
+    sourceAccountId: t.sourceAccountId,
+    ownerEmail: t.ownerEmail,
+    ownerName: t.ownerName,
+    subject: t.subject,
+    snippet: t.snippet,
+    participants: t.participants.slice(),
+    messageCount: t.messages.length,
+    visibility: t.visibility,
+    invitedHandles: t.invitedHandles.slice(),
+    assigneeHandle: t.assigneeHandle,
+    status: t.status,
+    commentCount: t.comments.length,
+    draftLockState: t.draft?.lockState ?? "unlocked",
+    draftEditorName: t.draft?.editorName ?? null,
+    sharedAt: t.sharedAt,
+    updatedAt: t.updatedAt,
+  };
+}
+
+export async function getStaffWorkspace(): Promise<StaffWorkspaceView> {
+  seedMockStaffDemo();
+  return { ...state.staffWorkspace };
+}
+
+export async function connectStaffWorkspace(
+  input: ConnectStaffWorkspaceInput,
+): Promise<StaffWorkspaceView> {
+  const url = input.serverUrl.trim();
+  if (!/^(https?:|local:)\/\//i.test(url)) {
+    throw new Error("Server URL must start with https://, http://, or local://");
+  }
+  if (!input.token.trim()) throw new Error("Staff token is required");
+  const handle = normalizeHandle(input.staffHandle);
+  if (!handle) throw new Error("A valid @handle is required");
+  const t = now();
+  state.staffWorkspace = {
+    connected: true,
+    serverUrl: url,
+    staffName: input.staffName.trim() || "Staff Member",
+    staffHandle: handle,
+    staffEmail: input.staffEmail.trim().toLowerCase(),
+    staffRole: input.staffRole.trim() || "Pigment Staff",
+    connectedAt: t,
+    lastSyncAt: t,
+    status: "connected",
+    lastError: null,
+  };
+  if (!state.staffDirectory.some((m) => m.handle === handle)) {
+    state.staffDirectory.push({
+      id: newStaffMemberId(),
+      name: state.staffWorkspace.staffName,
+      role: state.staffWorkspace.staffRole,
+      handle,
+      email: state.staffWorkspace.staffEmail,
+      department: null,
+      updatedAt: t,
+    });
+  }
+  return { ...state.staffWorkspace };
+}
+
+export async function disconnectStaffWorkspace(): Promise<void> {
+  state.staffWorkspace = emptyWorkspace();
+}
+
+export async function syncStaffWorkspace(): Promise<StaffWorkspaceView> {
+  if (!state.staffWorkspace.connected) {
+    throw new Error("Staff Sync workspace is not connected");
+  }
+  state.staffWorkspace = {
+    ...state.staffWorkspace,
+    lastSyncAt: now(),
+    status: "connected",
+    lastError: null,
+  };
+  return { ...state.staffWorkspace };
+}
+
+export async function listStaffDirectory(): Promise<StaffMemberView[]> {
+  seedMockStaffDemo();
+  return state.staffDirectory.slice();
+}
+
+export async function listSharedThreads(): Promise<SharedThreadSummary[]> {
+  seedMockStaffDemo();
+  return state.sharedThreads
+    .slice()
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .map(summarizeShared);
+}
+
+export async function openSharedThread(
+  sharedThreadId: SharedThreadId,
+): Promise<SharedThreadView> {
+  seedMockStaffDemo();
+  const found = state.sharedThreads.find((t) => t.id === sharedThreadId);
+  if (!found) throw new Error("Shared thread not found");
+  return structuredClone(found);
+}
+
+export async function findSharedThreadForLocal(
+  threadId: ThreadId,
+): Promise<SharedThreadView | null> {
+  seedMockStaffDemo();
+  const found = state.sharedThreads.find((t) => t.sourceThreadId === threadId);
+  return found ? structuredClone(found) : null;
+}
+
+export async function shareThread(input: ShareThreadInput): Promise<SharedThreadView> {
+  seedMockStaffDemo();
+  if (!state.staffWorkspace.connected) {
+    throw new Error("Connect to Pigment Staff Sync in Settings first.");
+  }
+  const thread = threadById(input.threadId);
+  if (!thread) throw new Error("Thread not found");
+  const account = accountById(thread.accountId);
+  if (!account) throw new Error("Account not found");
+  if (account.spaceKind !== "pigmentStaff") {
+    throw new Error(
+      "Staff Sharing is disabled for Personal spaces — switch this account to Pigment Staff to share threads.",
+    );
+  }
+  const t = now();
+  const existing = state.sharedThreads.find((s) => s.sourceThreadId === thread.id);
+  const sharedId = existing?.id ?? newSharedThreadId();
+  const participants = Array.from(
+    new Set(thread.messages.flatMap((m) => [m.fromEmail, ...m.to, ...m.cc]).filter(Boolean)),
+  );
+  const invitedHandles =
+    input.visibility === "allStaff"
+      ? []
+      : Array.from(new Set(input.invitedHandles.map(normalizeHandle).filter(Boolean)));
+  if (input.visibility === "specific" && invitedHandles.length === 0) {
+    throw new Error("Select at least one staff member or choose All Staff");
+  }
+  const view: SharedThreadView = {
+    id: sharedId,
+    sourceThreadId: thread.id,
+    sourceAccountId: account.id,
+    ownerEmail: account.email,
+    ownerName: state.staffWorkspace.staffName,
+    subject: thread.subject,
+    snippet: lastMessage(thread)?.snippet ?? "",
+    participants,
+    messages: thread.messages.map((m) => ({
+      id: m.id,
+      fromName: m.fromName,
+      fromEmail: m.fromEmail,
+      to: m.to.slice(),
+      cc: m.cc.slice(),
+      date: m.date,
+      snippet: m.snippet,
+      bodyText: m.bodyText,
+      bodySrcdoc: messageView(m, "blockAll").bodySrcdoc,
+    })),
+    visibility: input.visibility,
+    invitedHandles,
+    assigneeHandle: input.assigneeHandle ? normalizeHandle(input.assigneeHandle) : null,
+    status: existing?.status ?? "open",
+    comments: existing?.comments ?? [],
+    draft: existing?.draft ?? null,
+    sharedAt: existing?.sharedAt ?? t,
+    updatedAt: t,
+  };
+  if (input.initialNote?.trim()) {
+    const body = input.initialNote.trim();
+    view.comments.push({
+      id: newCommentId(),
+      sharedThreadId: sharedId,
+      authorHandle: state.staffWorkspace.staffHandle,
+      authorName: state.staffWorkspace.staffName,
+      bodyText: body,
+      mentions: extractMentions(body),
+      createdAt: t,
+    });
+  }
+  if (existing) {
+    Object.assign(existing, view);
+  } else {
+    state.sharedThreads.unshift(view);
+  }
+  return structuredClone(view);
+}
+
+export async function updateSharedHandoff(
+  input: UpdateHandoffInput,
+): Promise<SharedThreadView> {
+  const found = state.sharedThreads.find((t) => t.id === input.sharedThreadId);
+  if (!found) throw new Error("Shared thread not found");
+  found.assigneeHandle = input.assigneeHandle ? normalizeHandle(input.assigneeHandle) : null;
+  found.status = input.status;
+  found.updatedAt = now();
+  return structuredClone(found);
+}
+
+export async function addSharedComment(
+  input: AddSharedCommentInput,
+): Promise<SharedCommentView> {
+  if (!state.staffWorkspace.connected) {
+    throw new Error("Connect to Pigment Staff Sync first.");
+  }
+  const found = state.sharedThreads.find((t) => t.id === input.sharedThreadId);
+  if (!found) throw new Error("Shared thread not found");
+  const body = input.bodyText.trim();
+  if (!body) throw new Error("Comment cannot be empty");
+  const comment: SharedCommentView = {
+    id: newCommentId(),
+    sharedThreadId: found.id,
+    authorHandle: state.staffWorkspace.staffHandle,
+    authorName: state.staffWorkspace.staffName,
+    bodyText: body,
+    mentions: extractMentions(body),
+    createdAt: now(),
+  };
+  found.comments.push(comment);
+  found.updatedAt = comment.createdAt;
+  return { ...comment };
+}
+
+export async function updateSharedDraft(
+  input: UpdateSharedDraftInput,
+): Promise<SharedDraftView> {
+  if (!state.staffWorkspace.connected) {
+    throw new Error("Connect to Pigment Staff Sync first.");
+  }
+  const found = state.sharedThreads.find((t) => t.id === input.sharedThreadId);
+  if (!found) throw new Error("Shared thread not found");
+  const t = now();
+  const me = state.staffWorkspace.staffHandle;
+  const myName = state.staffWorkspace.staffName;
+  const last = found.messages[found.messages.length - 1];
+  const draft: SharedDraftView = found.draft ?? {
+    sharedThreadId: found.id,
+    subject: /^re:/i.test(found.subject) ? found.subject : `Re: ${found.subject}`,
+    to: last ? [last.fromEmail] : [],
+    cc: [],
+    bodyText: "",
+    editorHandle: null,
+    editorName: null,
+    lockState: "unlocked",
+    reviewRequestedBy: null,
+    approvedBy: null,
+    approvedAt: null,
+    rev: 1,
+    updatedAt: t,
+  };
+
+  const action = input.action;
+  if (action.kind === "claim") {
+    if (draft.lockState === "editing" && draft.editorHandle !== me) {
+      throw new Error(`Draft is currently locked by ${draft.editorName ?? draft.editorHandle}`);
+    }
+    draft.lockState = "editing";
+    draft.editorHandle = me;
+    draft.editorName = myName;
+  } else if (action.kind === "takeOver") {
+    draft.lockState = "editing";
+    draft.editorHandle = me;
+    draft.editorName = myName;
+    draft.approvedBy = null;
+    draft.approvedAt = null;
+  } else if (action.kind === "save") {
+    if (draft.lockState !== "editing" || draft.editorHandle !== me) {
+      throw new Error("Claim or take over the draft lock before saving");
+    }
+    draft.subject = action.subject;
+    draft.to = action.to;
+    draft.cc = action.cc;
+    draft.bodyText = action.bodyText;
+  } else if (action.kind === "requestReview") {
+    draft.lockState = "reviewRequested";
+    draft.editorHandle = null;
+    draft.editorName = null;
+    draft.reviewRequestedBy = me;
+    draft.approvedBy = null;
+    draft.approvedAt = null;
+    const handles = action.reviewerHandles.map(normalizeHandle).filter(Boolean);
+    const ping =
+      handles.length > 0
+        ? `Requested review on the shared reply draft (${handles.map((h) => `@${h}`).join(" ")}).`
+        : "Requested review on the shared reply draft.";
+    const full = action.note?.trim() ? `${ping} ${action.note.trim()}` : ping;
+    found.comments.push({
+      id: newCommentId(),
+      sharedThreadId: found.id,
+      authorHandle: me,
+      authorName: myName,
+      bodyText: full,
+      mentions: extractMentions(full),
+      createdAt: t,
+    });
+  } else if (action.kind === "approve") {
+    draft.lockState = "approved";
+    draft.editorHandle = null;
+    draft.editorName = null;
+    draft.approvedBy = me;
+    draft.approvedAt = t;
+  } else if (action.kind === "release") {
+    draft.lockState = "unlocked";
+    draft.editorHandle = null;
+    draft.editorName = null;
+  }
+  draft.rev += 1;
+  draft.updatedAt = t;
+  found.draft = draft;
+  found.updatedAt = t;
+  return structuredClone(draft);
+}
+
+export async function listSharedTemplates(): Promise<SharedTemplateView[]> {
+  seedMockStaffDemo();
+  return state.sharedTemplates.slice();
+}
+
+export async function saveSharedTemplate(
+  input: SaveSharedTemplateInput,
+): Promise<SharedTemplateView> {
+  seedMockStaffDemo();
+  const t = now();
+  const actor = state.staffWorkspace.connected ? state.staffWorkspace.staffHandle : "staff";
+  const existing = input.id ? state.sharedTemplates.find((s) => s.id === input.id) : undefined;
+  if (existing) {
+    existing.name = input.name.trim();
+    existing.shortcut = input.shortcut?.trim() || null;
+    existing.category = input.category.trim() || "general";
+    existing.subject = input.subject;
+    existing.bodyText = input.bodyText;
+    existing.updatedBy = actor;
+    existing.updatedAt = t;
+    return { ...existing };
+  }
+  const created: SharedTemplateView = {
+    id: newSharedTemplateId(),
+    name: input.name.trim(),
+    shortcut: input.shortcut?.trim() || null,
+    category: input.category.trim() || "general",
+    subject: input.subject,
+    bodyText: input.bodyText,
+    updatedBy: actor,
+    updatedAt: t,
+  };
+  state.sharedTemplates.push(created);
+  return { ...created };
+}
+
+export async function deleteSharedTemplate(templateId: SharedTemplateId): Promise<void> {
+  state.sharedTemplates = state.sharedTemplates.filter((t) => t.id !== templateId);
+}
+
+export async function listShowContacts(): Promise<ShowContactView[]> {
+  seedMockStaffDemo();
+  return state.showContacts.slice();
+}
+
+export async function findContactByEmail(email: string): Promise<ShowContactView | null> {
+  seedMockStaffDemo();
+  const target = email.trim().toLowerCase();
+  const found = state.showContacts.find((c) => c.emails.some((e) => e.toLowerCase() === target));
+  return found ? { ...found, emails: found.emails.slice() } : null;
+}
+
+export async function saveShowContact(
+  input: SaveShowContactInput,
+): Promise<ShowContactView> {
+  seedMockStaffDemo();
+  const t = now();
+  const emails = Array.from(
+    new Set(
+      input.emails
+        .map((e) => e.trim().toLowerCase())
+        .filter((e) => e.includes("@") && e.length >= 3),
+    ),
+  );
+  if (emails.length === 0) throw new Error("At least one valid email address is required");
+  const existing = input.id ? state.showContacts.find((c) => c.id === input.id) : undefined;
+  if (existing) {
+    existing.name = input.name.trim();
+    existing.emails = emails;
+    existing.category = input.category;
+    existing.organization = input.organization?.trim() || null;
+    existing.tier = input.tier?.trim() || null;
+    existing.notes = input.notes.trim();
+    existing.updatedAt = t;
+    return { ...existing, emails: existing.emails.slice() };
+  }
+  const created: ShowContactView = {
+    id: newContactId(),
+    name: input.name.trim(),
+    emails,
+    category: input.category,
+    organization: input.organization?.trim() || null,
+    tier: input.tier?.trim() || null,
+    notes: input.notes.trim(),
+    updatedAt: t,
+  };
+  state.showContacts.push(created);
+  return { ...created, emails: created.emails.slice() };
+}
+
+export async function deleteShowContact(contactId: ContactId): Promise<void> {
+  state.showContacts = state.showContacts.filter((c) => c.id !== contactId);
+}
+
+export async function listPinnedLinks(): Promise<PinnedLinkView[]> {
+  seedMockStaffDemo();
+  return state.pinnedLinks.slice().sort((a, b) => a.position - b.position);
+}
+
+export async function savePinnedLink(input: SavePinnedLinkInput): Promise<PinnedLinkView> {
+  seedMockStaffDemo();
+  const url = input.url.trim();
+  if (!/^(https?:|discord:)\/\//i.test(url)) {
+    throw new Error("URL must start with https://, http://, or discord://");
+  }
+  const t = now();
+  const existing = input.id ? state.pinnedLinks.find((l) => l.id === input.id) : undefined;
+  if (existing) {
+    existing.title = input.title.trim();
+    existing.url = url;
+    existing.category = input.category.trim() || "operations";
+    existing.description = input.description?.trim() || null;
+    existing.updatedAt = t;
+    return { ...existing };
+  }
+  const created: PinnedLinkView = {
+    id: newPinnedLinkId(),
+    title: input.title.trim(),
+    url,
+    category: input.category.trim() || "operations",
+    description: input.description?.trim() || null,
+    position: state.pinnedLinks.length,
+    updatedAt: t,
+  };
+  state.pinnedLinks.push(created);
+  return { ...created };
+}
+
+export async function deletePinnedLink(linkId: PinnedLinkId): Promise<void> {
+  state.pinnedLinks = state.pinnedLinks.filter((l) => l.id !== linkId);
 }

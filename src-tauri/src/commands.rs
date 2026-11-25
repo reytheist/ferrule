@@ -1,5 +1,14 @@
 use mail_core::error::CoreError;
-use mail_core::ids::{AccountId, DraftId, JobId, TemplateId, ThreadId, UnixMs};
+use mail_core::ids::{
+    AccountId, ContactId, DraftId, JobId, PinnedLinkId, SharedTemplateId, SharedThreadId,
+    TemplateId, ThreadId, UnixMs,
+};
+use mail_core::staff::{
+    AddSharedCommentInput, ConnectStaffWorkspaceInput, PinnedLinkView, SavePinnedLinkInput,
+    SaveSharedTemplateInput, SaveShowContactInput, ShareThreadInput, SharedCommentView,
+    SharedDraftView, SharedTemplateView, SharedThreadSummary, SharedThreadView, ShowContactView,
+    StaffMemberView, StaffWorkspaceView, UpdateHandoffInput, UpdateSharedDraftInput,
+};
 use mail_core::types::{
     AccountView, ActionOutcome, AppSettings, CreateDraftInput, DraftView, JobView, MailAction,
     MailboxCounts, NewAccountInput, OAuthSignInInput, RemoteContent, SaveTemplateInput,
@@ -222,4 +231,182 @@ pub async fn update_settings(
 pub async fn tick_scheduler(core: tauri::State<'_, MailCore>) -> Result<(), CoreError> {
     let _ = core.tick_scheduler().await?;
     Ok(())
+}
+
+// ---------------------------------------------------------------- Phase B: Staff Collaboration
+
+#[tauri::command]
+pub async fn get_staff_workspace(
+    core: tauri::State<'_, MailCore>,
+) -> Result<StaffWorkspaceView, CoreError> {
+    core.get_staff_workspace().await
+}
+
+#[tauri::command]
+pub async fn connect_staff_workspace(
+    core: tauri::State<'_, MailCore>,
+    input: ConnectStaffWorkspaceInput,
+) -> Result<StaffWorkspaceView, CoreError> {
+    core.connect_staff_workspace(input).await
+}
+
+#[tauri::command]
+pub async fn disconnect_staff_workspace(
+    core: tauri::State<'_, MailCore>,
+) -> Result<(), CoreError> {
+    core.disconnect_staff_workspace().await
+}
+
+#[tauri::command]
+pub async fn sync_staff_workspace(
+    core: tauri::State<'_, MailCore>,
+) -> Result<StaffWorkspaceView, CoreError> {
+    core.sync_staff_workspace().await
+}
+
+#[tauri::command]
+pub async fn list_staff_directory(
+    core: tauri::State<'_, MailCore>,
+) -> Result<Vec<StaffMemberView>, CoreError> {
+    core.list_staff_directory().await
+}
+
+#[tauri::command]
+pub async fn list_shared_threads(
+    core: tauri::State<'_, MailCore>,
+) -> Result<Vec<SharedThreadSummary>, CoreError> {
+    core.list_shared_threads().await
+}
+
+#[tauri::command]
+pub async fn open_shared_thread(
+    core: tauri::State<'_, MailCore>,
+    shared_thread_id: SharedThreadId,
+) -> Result<SharedThreadView, CoreError> {
+    core.open_shared_thread(shared_thread_id).await
+}
+
+#[tauri::command]
+pub async fn find_shared_thread_for_local(
+    core: tauri::State<'_, MailCore>,
+    thread_id: ThreadId,
+) -> Result<Option<SharedThreadView>, CoreError> {
+    core.find_shared_thread_for_local(thread_id).await
+}
+
+#[tauri::command]
+pub async fn share_thread(
+    core: tauri::State<'_, MailCore>,
+    input: ShareThreadInput,
+) -> Result<SharedThreadView, CoreError> {
+    core.share_thread(input).await
+}
+
+#[tauri::command]
+pub async fn update_shared_handoff(
+    core: tauri::State<'_, MailCore>,
+    input: UpdateHandoffInput,
+) -> Result<SharedThreadView, CoreError> {
+    core.update_shared_handoff(input).await
+}
+
+#[tauri::command]
+pub async fn add_shared_comment(
+    core: tauri::State<'_, MailCore>,
+    input: AddSharedCommentInput,
+) -> Result<SharedCommentView, CoreError> {
+    core.add_shared_comment(input).await
+}
+
+#[tauri::command]
+pub async fn update_shared_draft(
+    core: tauri::State<'_, MailCore>,
+    input: UpdateSharedDraftInput,
+) -> Result<SharedDraftView, CoreError> {
+    core.update_shared_draft(input).await
+}
+
+#[tauri::command]
+pub async fn list_shared_templates(
+    core: tauri::State<'_, MailCore>,
+) -> Result<Vec<SharedTemplateView>, CoreError> {
+    core.list_shared_templates().await
+}
+
+#[tauri::command]
+pub async fn save_shared_template(
+    core: tauri::State<'_, MailCore>,
+    input: SaveSharedTemplateInput,
+) -> Result<SharedTemplateView, CoreError> {
+    core.save_shared_template(input).await
+}
+
+#[tauri::command]
+pub async fn delete_shared_template(
+    core: tauri::State<'_, MailCore>,
+    template_id: SharedTemplateId,
+) -> Result<(), CoreError> {
+    core.delete_shared_template(template_id).await
+}
+
+#[tauri::command]
+pub async fn list_show_contacts(
+    core: tauri::State<'_, MailCore>,
+) -> Result<Vec<ShowContactView>, CoreError> {
+    core.list_show_contacts().await
+}
+
+#[tauri::command]
+pub async fn find_contact_by_email(
+    core: tauri::State<'_, MailCore>,
+    email: String,
+) -> Result<Option<ShowContactView>, CoreError> {
+    core.find_contact_by_email(email).await
+}
+
+#[tauri::command]
+pub async fn save_show_contact(
+    core: tauri::State<'_, MailCore>,
+    input: SaveShowContactInput,
+) -> Result<ShowContactView, CoreError> {
+    core.save_show_contact(input).await
+}
+
+#[tauri::command]
+pub async fn delete_show_contact(
+    core: tauri::State<'_, MailCore>,
+    contact_id: ContactId,
+) -> Result<(), CoreError> {
+    core.delete_show_contact(contact_id).await
+}
+
+#[tauri::command]
+pub async fn list_pinned_links(
+    core: tauri::State<'_, MailCore>,
+) -> Result<Vec<PinnedLinkView>, CoreError> {
+    core.list_pinned_links().await
+}
+
+#[tauri::command]
+pub async fn save_pinned_link(
+    core: tauri::State<'_, MailCore>,
+    input: SavePinnedLinkInput,
+) -> Result<PinnedLinkView, CoreError> {
+    core.save_pinned_link(input).await
+}
+
+#[tauri::command]
+pub async fn delete_pinned_link(
+    core: tauri::State<'_, MailCore>,
+    link_id: PinnedLinkId,
+) -> Result<(), CoreError> {
+    core.delete_pinned_link(link_id).await
+}
+
+#[tauri::command]
+pub fn open_external_url(
+    core: tauri::State<'_, MailCore>,
+    url: String,
+) -> Result<(), CoreError> {
+    core.open_external_url(&url)
 }

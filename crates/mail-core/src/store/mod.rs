@@ -4,6 +4,7 @@ mod accounts;
 mod demo;
 mod drafts;
 mod jobs;
+mod staff;
 mod templates;
 mod threads;
 
@@ -11,6 +12,7 @@ pub(crate) use accounts::*;
 pub(crate) use demo::*;
 pub(crate) use drafts::*;
 pub(crate) use jobs::*;
+pub(crate) use staff::*;
 pub(crate) use templates::*;
 pub(crate) use threads::*;
 
@@ -32,6 +34,7 @@ const MIGRATION_0002_JOB_PAYLOAD: &str =
 /// from personal spaces (which have Staff Sharing disabled by default).
 const MIGRATION_0003_ACCOUNT_SPACE_KIND: &str =
     "ALTER TABLE account ADD COLUMN space_kind TEXT NOT NULL DEFAULT 'personal' CHECK (space_kind IN ('personal', 'pigment_staff'));";
+const MIGRATION_0004_STAFF_COLLAB: &str = include_str!("0002_staff_collab.sql");
 
 pub(crate) struct Store {
     conn: Mutex<Connection>,
@@ -77,6 +80,10 @@ impl Store {
                     reason: format!("run migration 0003: {e}"),
                 })?;
         }
+        conn.execute_batch(MIGRATION_0004_STAFF_COLLAB)
+            .map_err(|e| CoreError::Storage {
+                reason: format!("run migration 0004: {e}"),
+            })?;
         Ok(Self {
             conn: Mutex::new(conn),
         })

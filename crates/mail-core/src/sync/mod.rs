@@ -3,6 +3,7 @@
 pub(crate) mod imap;
 pub(crate) mod oauth;
 pub(crate) mod smtp;
+pub(crate) mod staff;
 
 use regex::Regex;
 

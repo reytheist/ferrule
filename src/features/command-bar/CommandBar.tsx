@@ -3,9 +3,12 @@ import type { ComponentType, KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   Archive,
   Clock,
+  Contact,
+  ExternalLink,
   FileText,
   Flag,
   Inbox,
+  Link2,
   Moon,
   PenLine,
   Plus,
@@ -16,6 +19,7 @@ import {
   Star,
   Sun,
   Trash2,
+  Users,
 } from "lucide-react";
 import { listThreads } from "../../ipc/core";
 import type { Scope, ThreadSummary } from "../../types/mail";
@@ -147,7 +151,28 @@ export function CommandBar({ app }: { app: MailApp }) {
       { id: "go-sent", label: "Go to Sent", icon: Send, run: () => app.selectView({ kind: "sent" }) },
       { id: "go-archive", label: "Go to Archive", icon: Archive, run: () => app.selectView({ kind: "archive" }) },
       { id: "go-trash", label: "Go to Trash", icon: Trash2, run: () => app.selectView({ kind: "trash" }) },
+      { id: "go-shared", label: "Go to Shared with Me (Pigment Staff)", icon: Users, run: app.openSharedSection },
+      { id: "open-contacts", label: "Open Shared Show Contacts", icon: Contact, run: app.openContacts },
+      { id: "open-links", label: "Manage Pinned Staff Links", icon: Link2, run: app.openPinnedLinks },
     ];
+    for (const link of app.pinnedLinks) {
+      items.push({
+        id: `link-${link.id}`,
+        label: `Pinned link: ${link.title}`,
+        hint: link.category,
+        icon: ExternalLink,
+        run: () => void app.launchPinnedLink(link.url),
+      });
+    }
+    for (const template of app.sharedTemplates) {
+      items.push({
+        id: `stpl-${template.id}`,
+        label: `Insert staff template: ${template.name}`,
+        hint: template.shortcut ?? template.category,
+        icon: Users,
+        run: () => app.insertTextSnippet(template.bodyText),
+      });
+    }
     for (const template of app.templates) {
       items.push({
         id: `tpl-${template.id}`,

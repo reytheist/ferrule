@@ -9,6 +9,12 @@ export type AttachmentId = Brand<string, "AttachmentId">;
 export type DraftId = Brand<string, "DraftId">;
 export type JobId = Brand<string, "JobId">;
 export type TemplateId = Brand<string, "TemplateId">;
+export type StaffMemberId = Brand<string, "StaffMemberId">;
+export type SharedThreadId = Brand<string, "SharedThreadId">;
+export type CommentId = Brand<string, "CommentId">;
+export type SharedTemplateId = Brand<string, "SharedTemplateId">;
+export type ContactId = Brand<string, "ContactId">;
+export type PinnedLinkId = Brand<string, "PinnedLinkId">;
 export type UnixMs = number;
 
 export type SpaceColor =
@@ -327,4 +333,223 @@ export interface MailboxCounts {
   primary: number;
   receipts: number;
   newsletters: number;
+}
+
+// ── Phase B: Staff Sync & Email Collaboration ───────────────────────────────
+
+export type StaffSyncStatus = "disconnected" | "connected" | "offline" | "error";
+
+export interface StaffWorkspaceView {
+  connected: boolean;
+  serverUrl: string;
+  staffName: string;
+  staffHandle: string;
+  staffEmail: string;
+  staffRole: string;
+  connectedAt: UnixMs | null;
+  lastSyncAt: UnixMs | null;
+  status: StaffSyncStatus;
+  lastError: string | null;
+}
+
+export interface ConnectStaffWorkspaceInput {
+  serverUrl: string;
+  token: string;
+  staffName: string;
+  staffHandle: string;
+  staffEmail: string;
+  staffRole: string;
+}
+
+export interface StaffMemberView {
+  id: StaffMemberId;
+  name: string;
+  role: string;
+  handle: string;
+  email: string;
+  department: string | null;
+  updatedAt: UnixMs;
+}
+
+export type ShareVisibility = "allStaff" | "specific";
+export type HandoffStatus = "open" | "waiting" | "done";
+export type DraftLockState = "unlocked" | "editing" | "reviewRequested" | "approved";
+
+export interface SharedMessageSnapshot {
+  id: string;
+  fromName: string | null;
+  fromEmail: string;
+  to: string[];
+  cc: string[];
+  date: UnixMs;
+  snippet: string;
+  bodyText: string;
+  bodySrcdoc: string;
+}
+
+export interface SharedCommentView {
+  id: CommentId;
+  sharedThreadId: SharedThreadId;
+  authorHandle: string;
+  authorName: string;
+  bodyText: string;
+  mentions: string[];
+  createdAt: UnixMs;
+}
+
+export interface SharedDraftView {
+  sharedThreadId: SharedThreadId;
+  subject: string;
+  to: string[];
+  cc: string[];
+  bodyText: string;
+  editorHandle: string | null;
+  editorName: string | null;
+  lockState: DraftLockState;
+  reviewRequestedBy: string | null;
+  approvedBy: string | null;
+  approvedAt: UnixMs | null;
+  rev: number;
+  updatedAt: UnixMs;
+}
+
+export interface SharedThreadSummary {
+  id: SharedThreadId;
+  sourceThreadId: ThreadId | null;
+  sourceAccountId: AccountId | null;
+  ownerEmail: string;
+  ownerName: string;
+  subject: string;
+  snippet: string;
+  participants: string[];
+  messageCount: number;
+  visibility: ShareVisibility;
+  invitedHandles: string[];
+  assigneeHandle: string | null;
+  status: HandoffStatus;
+  commentCount: number;
+  draftLockState: DraftLockState;
+  draftEditorName: string | null;
+  sharedAt: UnixMs;
+  updatedAt: UnixMs;
+}
+
+export interface SharedThreadView {
+  id: SharedThreadId;
+  sourceThreadId: ThreadId | null;
+  sourceAccountId: AccountId | null;
+  ownerEmail: string;
+  ownerName: string;
+  subject: string;
+  snippet: string;
+  participants: string[];
+  messages: SharedMessageSnapshot[];
+  visibility: ShareVisibility;
+  invitedHandles: string[];
+  assigneeHandle: string | null;
+  status: HandoffStatus;
+  comments: SharedCommentView[];
+  draft: SharedDraftView | null;
+  sharedAt: UnixMs;
+  updatedAt: UnixMs;
+}
+
+export interface ShareThreadInput {
+  threadId: ThreadId;
+  visibility: ShareVisibility;
+  invitedHandles: string[];
+  assigneeHandle: string | null;
+  initialNote: string | null;
+}
+
+export interface UpdateHandoffInput {
+  sharedThreadId: SharedThreadId;
+  assigneeHandle: string | null;
+  status: HandoffStatus;
+}
+
+export interface AddSharedCommentInput {
+  sharedThreadId: SharedThreadId;
+  bodyText: string;
+}
+
+export type DraftLockAction =
+  | { kind: "claim" }
+  | { kind: "takeOver" }
+  | { kind: "save"; subject: string; to: string[]; cc: string[]; bodyText: string }
+  | { kind: "requestReview"; reviewerHandles: string[]; note: string | null }
+  | { kind: "approve" }
+  | { kind: "release" };
+
+export interface UpdateSharedDraftInput {
+  sharedThreadId: SharedThreadId;
+  action: DraftLockAction;
+}
+
+export interface SharedTemplateView {
+  id: SharedTemplateId;
+  name: string;
+  shortcut: string | null;
+  category: string;
+  subject: string;
+  bodyText: string;
+  updatedBy: string;
+  updatedAt: UnixMs;
+}
+
+export interface SaveSharedTemplateInput {
+  id: SharedTemplateId | null;
+  name: string;
+  shortcut: string | null;
+  category: string;
+  subject: string;
+  bodyText: string;
+}
+
+export type ContactCategory =
+  | "sponsor"
+  | "vendor"
+  | "instructor"
+  | "vip"
+  | "volunteer"
+  | "venue"
+  | "other";
+
+export interface ShowContactView {
+  id: ContactId;
+  name: string;
+  emails: string[];
+  category: ContactCategory;
+  organization: string | null;
+  tier: string | null;
+  notes: string;
+  updatedAt: UnixMs;
+}
+
+export interface SaveShowContactInput {
+  id: ContactId | null;
+  name: string;
+  emails: string[];
+  category: ContactCategory;
+  organization: string | null;
+  tier: string | null;
+  notes: string;
+}
+
+export interface PinnedLinkView {
+  id: PinnedLinkId;
+  title: string;
+  url: string;
+  category: string;
+  description: string | null;
+  position: number;
+  updatedAt: UnixMs;
+}
+
+export interface SavePinnedLinkInput {
+  id: PinnedLinkId | null;
+  title: string;
+  url: string;
+  category: string;
+  description: string | null;
 }
