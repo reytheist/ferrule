@@ -1,7 +1,7 @@
-# Galapaghost — Architecture
+# Ferrule — Architecture
 
 ## Problem
-Galapaghost is a free, shareable, low-memory Windows and Linux desktop email client built on **Tauri v2** (Rust `mail-core` + React/TypeScript **Mosaic** UI). Four constraints shape the architecture:
+Ferrule is a free, shareable, low-memory Windows and Linux desktop email client built on **Tauri v2** (Rust `mail-core` + React/TypeScript **Mosaic** UI). Four constraints shape the architecture:
 
 1. **Low memory.** Keeping timers alive in the system tray must not hold a WebView or full body caches in RAM (`PRAGMA mmap_size=0`, close-to-tray destroys the WebView).
 2. **Crash-safe timers.** Undo Send, Send Later, Snooze, and Follow-up timers survive restarts and crashes without double-sending mail.
@@ -54,7 +54,7 @@ let draft = port.stage_draft(StageAgentDraft {
 ## Module map
 
 ```text
-galapaghost/
+ferrule/
 ├── Cargo.toml                  # workspace: crates/mail-core, src-tauri (+ crates/mail-mcp in Phase 2)
 ├── crates/mail-core/           # ALL domain logic, zero Tauri/WebView dependencies
 │   └── src/

@@ -1,6 +1,6 @@
 <img src="assets/icon.svg" width="64" height="64" alt="">
 
-# Galapaghost
+# Ferrule
 
 A free, shareable, local-first desktop email client for Windows and Linux built with Tauri v2, Rust (`mail-core`), SQLite + FTS5, and React (Mosaic UI).
 

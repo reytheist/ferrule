@@ -81,7 +81,7 @@ interface ToastOptions {
   onUndo?: () => void | Promise<void>;
 }
 
-const THEME_KEY = "galapaghost.theme";
+const THEME_KEY = "ferrule.theme";
 const DEFAULT_UNDO_MS = 5000;
 
 function readStringField(obj: object, key: string): string | null {

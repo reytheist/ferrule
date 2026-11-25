@@ -215,7 +215,7 @@ async fn add_account_requires_password_and_validates_address() {
 async fn secrets_never_touch_sqlite_and_remove_account_cascades() {
     const SECRET: &str = "sup3r-s3cret-app-pass-42";
     let dir = std::env::temp_dir();
-    let db_path: PathBuf = dir.join(format!("galapaghost-secret-test-{}.db", Uuid::now_v7()));
+    let db_path: PathBuf = dir.join(format!("ferrule-secret-test-{}.db", Uuid::now_v7()));
     let clock = Arc::new(ManualClock::new(UnixMs(START)));
     let secrets = Arc::new(MemorySecretStore::default());
     let core = MailCore::open(
@@ -346,7 +346,7 @@ fn os_keychain_roundtrips_secret_and_cleans_up() {
         account_id: AccountId::fresh(),
         kind: CredentialKind::Password,
     };
-    let expected = "galapaghost-keychain-roundtrip-check";
+    let expected = "ferrule-keychain-roundtrip-check";
 
     store
         .put(&key, &SecretString::new(expected))

@@ -56,7 +56,7 @@ pub struct OsKeychain {
 impl Default for OsKeychain {
     fn default() -> Self {
         Self {
-            service: "galapaghost-mail".to_string(),
+            service: "ferrule-mail".to_string(),
         }
     }
 }

@@ -529,7 +529,7 @@ function seedDemo(): void {
     "gmail",
     "azure",
     "studio@gmail.com",
-    ["studio@galapaghost.dev"],
+    ["studio@ferrule.dev"],
     0,
   );
   const personal = makeAccount("Personal Gmail", "gmail", "berry", "rey@gmail.com", [], 1);

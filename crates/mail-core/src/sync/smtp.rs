@@ -52,7 +52,7 @@ pub(crate) struct FreezeInput {
 }
 
 pub(crate) fn freeze_message(input: FreezeInput, now: UnixMs) -> FrozenMessage {
-    let message_id = format!("<{}@galapaghost.local>", uuid::Uuid::now_v7());
+    let message_id = format!("<{}@ferrule.local>", uuid::Uuid::now_v7());
     FrozenMessage {
         from_name: input.from_name,
         from_address: input.from_address,

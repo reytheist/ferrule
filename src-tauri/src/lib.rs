@@ -13,7 +13,7 @@ pub fn run() {
             let db_path = app
                 .path()
                 .app_data_dir()
-                .map(|dir| dir.join("galapaghost.db"))
+                .map(|dir| dir.join("ferrule.db"))
                 .ok();
             let config = CoreConfig {
                 db_path,
@@ -43,7 +43,7 @@ pub fn run() {
             });
 
             // Lightweight system tray icon for quick open/quit.
-            let show_item = MenuItemBuilder::with_id("show", "Show Galapaghost").build(app)?;
+            let show_item = MenuItemBuilder::with_id("show", "Show Ferrule").build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
             let menu = MenuBuilder::new(app)
                 .items(&[&show_item, &quit_item])
@@ -51,7 +51,7 @@ pub fn run() {
 
             let mut tray = TrayIconBuilder::new()
                 .menu(&menu)
-                .tooltip("Galapaghost")
+                .tooltip("Ferrule")
                 .on_menu_event(|app_handle, event| match event.id().as_ref() {
                     "show" => {
                         if let Some(window) = app_handle.get_webview_window("main") {
@@ -101,5 +101,5 @@ pub fn run() {
             commands::tick_scheduler,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Galapaghost");
+        .expect("error while running Ferrule");
 }

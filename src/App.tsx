@@ -19,7 +19,7 @@ export function App() {
       <div className="boot-screen">
         <div className="brand-mark">
           <span className="logo-dot">G</span>
-          <span>Galapaghost</span>
+          <span>Ferrule</span>
         </div>
         <span>Booting mail core…</span>
       </div>
@@ -31,7 +31,7 @@ export function App() {
       <div className="boot-screen error">
         <div className="brand-mark">
           <span className="logo-dot">G</span>
-          <span>Galapaghost</span>
+          <span>Ferrule</span>
         </div>
         <span>Mail core failed to start: {app.error}</span>
       </div>

@@ -507,7 +507,7 @@ impl MailCore {
         if client_id.is_empty() {
             return None;
         }
-        let derived = AccountId::derive(uuid::Uuid::NAMESPACE_URL, format!("galapaghost:oauth-client:{client_id}").as_bytes());
+        let derived = AccountId::derive(uuid::Uuid::NAMESPACE_URL, format!("ferrule:oauth-client:{client_id}").as_bytes());
         Some(SecretKey {
             account_id: derived,
             kind: CredentialKind::OAuthClientSecret,

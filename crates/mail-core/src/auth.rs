@@ -186,7 +186,7 @@ impl SecretKey {
             CredentialKind::OAuthRefreshToken => "oauth-refresh",
             CredentialKind::OAuthClientSecret => "oauth-client-secret",
         };
-        format!("galapaghost:v1:{}:{suffix}", self.account_id)
+        format!("ferrule:v1:{}:{suffix}", self.account_id)
     }
 }
 

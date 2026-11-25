@@ -33,9 +33,9 @@ interface ProviderOption {
   description: string;
 }
 
-const GOOGLE_CLIENT_KEY = "galapaghost.googleClientId";
-const OUTLOOK_CLIENT_KEY = "galapaghost.outlookClientId";
-const OUTLOOK_TENANT_KEY = "galapaghost.outlookTenant";
+const GOOGLE_CLIENT_KEY = "ferrule.googleClientId";
+const OUTLOOK_CLIENT_KEY = "ferrule.outlookClientId";
+const OUTLOOK_TENANT_KEY = "ferrule.outlookTenant";
 
 function readPref(key: string, fallback = ""): string {
   try {
@@ -589,7 +589,7 @@ export function AddAccountModal({ app }: { app: MailApp }) {
               <span className="hint-text">
                 {error
                   ? "Fix the issue below or try choosing a different account."
-                  : "Approve access in your browser. Galapaghost will automatically fill in your space name and assign a unique color."}
+                  : "Approve access in your browser. Ferrule will automatically fill in your space name and assign a unique color."}
               </span>
               {error && <span className="error-text">{error}</span>}
               <div style={{ display: "flex", gap: 8, marginTop: 4 }}>

@@ -255,7 +255,7 @@ pub(crate) fn parse_callback_request(
 
 fn callback_html(ok: bool, detail: &str) -> String {
     let (title, accent) = if ok {
-        ("Signed in to Galapaghost", "#34C4A4")
+        ("Signed in to Ferrule", "#34C4A4")
     } else {
         ("Sign-in did not finish", "#F16A7A")
     };
@@ -348,7 +348,7 @@ pub(crate) async fn run_browser_pkce_flow_for_endpoints(
                         "200 OK",
                         &callback_html(
                             true,
-                            "You can close this browser tab and return to Galapaghost.",
+                            "You can close this browser tab and return to Ferrule.",
                         ),
                     )
                     .await;

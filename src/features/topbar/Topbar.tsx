@@ -34,7 +34,7 @@ export function Topbar({ app }: { app: MailApp }) {
     <header className="topbar">
       <div className="brand-mark">
         <span className="logo-dot">G</span>
-        <span>Galapaghost</span>
+        <span>Ferrule</span>
       </div>
 
       <button className="search-trigger" onClick={app.openCommand} title="Search mail, labels, or commands">

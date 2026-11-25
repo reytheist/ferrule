@@ -113,7 +113,7 @@ pub(crate) fn parse_raw(
         .filter(|id| !id.is_empty())
         .unwrap_or_else(|| {
             let uuid = uuid::Uuid::new_v5(&PARSE_NAMESPACE, raw);
-            format!("<{uuid}@galapaghost.local>")
+            format!("<{uuid}@ferrule.local>")
         });
 
     let in_reply_to = raw_header(raw, "In-Reply-To").and_then(|v| first_id(&v));
