@@ -3,6 +3,7 @@
 // stateful mock store so the UI stays fully interactive in Vite.
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import * as mock from "./mockStore";
 import type {
   AccountId,
@@ -30,6 +31,8 @@ import type {
   IcsOverlayId,
   IcsOverlayView,
   ImportWorkbookInput,
+  InstallUpdateInput,
+  InstallUpdateOutcome,
   JobId,
   JobView,
   MailboxCounts,
@@ -73,6 +76,8 @@ import type {
   ThreadView,
   UndoOutcome,
   UpdateAccountInput,
+  UpdateCheckResult,
+  UpdateDownloadProgress,
   UpdateHandoffInput,
   UpdateMeetingDocInput,
   UpdateSharedDraftInput,
@@ -524,4 +529,28 @@ export async function postMeetingRecapToDiscord(
 ): Promise<void> {
   if (!isTauriRuntime()) return mock.postMeetingRecapToDiscord(eventId, customMarkdown);
   return invoke<void>("post_meeting_recap_to_discord", { eventId, customMarkdown });
+}
+
+// ── In-App Updates ──────────────────────────────────────────────────────────
+
+export async function checkForUpdates(): Promise<UpdateCheckResult> {
+  if (!isTauriRuntime()) return mock.checkForUpdates();
+  return invoke<UpdateCheckResult>("check_for_updates");
+}
+
+export async function downloadAndInstallUpdate(
+  input: InstallUpdateInput,
+): Promise<InstallUpdateOutcome> {
+  if (!isTauriRuntime()) return mock.downloadAndInstallUpdate(input);
+  return invoke<InstallUpdateOutcome>("download_and_install_update", { input });
+}
+
+export async function onUpdateDownloadProgress(
+  handler: (progress: UpdateDownloadProgress) => void,
+): Promise<() => void> {
+  if (!isTauriRuntime()) return mock.onUpdateDownloadProgress(handler);
+  const unlisten = await listen<UpdateDownloadProgress>("app://update-progress", (event) => {
+    handler(event.payload);
+  });
+  return unlisten;
 }

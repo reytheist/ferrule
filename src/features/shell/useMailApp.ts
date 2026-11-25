@@ -141,6 +141,7 @@ import type {
   WorkbookImportTarget,
 } from "../../types/mail";
 import type { ActionItemDraftSeed } from "../actions/ActionItemModal";
+import { useAppUpdater, type AppUpdater } from "../updates/useAppUpdater";
 import { formatDue } from "../ui/format";
 
 export type Theme = "dark" | "light";
@@ -296,6 +297,7 @@ export interface MailApp {
   expanded: ReadonlySet<MessageId>;
   remoteContent: RemoteContent;
   syncing: boolean;
+  updater: AppUpdater;
   composeInsert: { nonce: number; body: string } | null;
   activeSection: ActiveSection;
   staffWorkspace: StaffWorkspaceView;
@@ -528,6 +530,7 @@ export function useMailApp(): MailApp {
   }, []);
 
   const dismissToast = useCallback(() => setToast(null), []);
+  const updater = useAppUpdater(showToast);
 
   const reload = useCallback(async (targetScope: Scope, targetView: MailboxView) => {
     const [nextCounts, page] = await Promise.all([
@@ -1998,6 +2001,7 @@ export function useMailApp(): MailApp {
     expanded,
     remoteContent,
     syncing,
+    updater,
     composeInsert,
     activeSection,
     staffWorkspace,

@@ -1,6 +1,7 @@
 import { Moon, PenLine, Plus, RefreshCw, Search, Settings, Sun } from "lucide-react";
 import type { MailApp } from "../shell/useMailApp";
 import { FerruleGlyph } from "../ui/FerruleGlyph";
+import { UpdateButton } from "../updates/UpdateButton";
 
 const IS_MAC = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
 
@@ -65,6 +66,7 @@ export function Topbar({ app }: { app: MailApp }) {
           <RefreshCw />
           Sync Now
         </button>
+        <UpdateButton updater={app.updater} />
         <button
           className="icon-btn"
           onClick={app.toggleTheme}

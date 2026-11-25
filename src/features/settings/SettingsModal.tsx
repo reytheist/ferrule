@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import type { MailApp, TextSize } from "../shell/useMailApp";
+import type { UpdateDevPreset } from "../updates/useAppUpdater";
 import { spaceClass } from "../spaces/SpaceSwitcher";
 
 export function SettingsModal({ app }: { app: MailApp }) {
@@ -366,6 +367,51 @@ export function SettingsModal({ app }: { app: MailApp }) {
           </section>
 
           <section className="settings-section">
+            <div className="settings-section-title">Updates</div>
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <span className="settings-row-label">
+                  Ferrule v{app.updater.currentVersion}
+                </span>
+                <span className="hint-text">
+                  {app.updater.state.kind === "available"
+                    ? `Version v${app.updater.state.release.version} is ready to download and install.`
+                    : app.updater.state.kind === "downloading"
+                      ? `Downloading v${app.updater.state.release.version}${
+                          app.updater.state.progress?.percent != null
+                            ? ` (${app.updater.state.progress.percent}%)`
+                            : "…"
+                        }`
+                      : app.updater.state.kind === "checking"
+                        ? "Checking GitHub Releases for a newer version…"
+                        : app.updater.state.kind === "launched"
+                          ? app.updater.state.message
+                          : app.updater.state.kind === "error"
+                            ? app.updater.state.message
+                            : "Checks GitHub Releases automatically on startup and every 4 hours."}
+                </span>
+              </div>
+              <button
+                type="button"
+                className={`btn compact${app.updater.state.kind === "available" ? " primary" : ""}`}
+                disabled={
+                  app.updater.state.kind === "checking" || app.updater.state.kind === "downloading"
+                }
+                onClick={() => void app.updater.handlePrimaryAction()}
+              >
+                <RefreshCw />
+                {app.updater.state.kind === "available"
+                  ? `Upgrade to v${app.updater.state.release.version}`
+                  : app.updater.state.kind === "downloading"
+                    ? "Downloading…"
+                    : app.updater.state.kind === "checking"
+                      ? "Checking…"
+                      : "Check for Updates"}
+              </button>
+            </div>
+          </section>
+
+          <section className="settings-section">
             <div className="settings-section-title">Developer Tools</div>
             <div className="settings-row">
               <div className="settings-row-info">
@@ -403,6 +449,23 @@ export function SettingsModal({ app }: { app: MailApp }) {
                   <code>stage_draft</code> only. Agent drafts always land in{" "}
                   <code>PendingApproval</code> and cannot be sent without explicit human approval.
                 </span>
+                <div className="update-dev-preview">
+                  <span className="hint-text">Preview topbar update indicator state:</span>
+                  <div className="segmented-control" role="group" aria-label="Preview update state">
+                    {(
+                      ["idle", "checking", "available", "downloading", "error"] as UpdateDevPreset[]
+                    ).map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        className={`seg-btn${app.updater.state.kind === preset ? " active" : ""}`}
+                        onClick={() => app.updater.simulateState(preset)}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
           </section>

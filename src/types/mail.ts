@@ -815,3 +815,46 @@ export interface PromoteActionItemInput {
 export interface DiscordWebhookStatus {
   configured: boolean;
 }
+
+// ── In-App Updates ──────────────────────────────────────────────────────────
+
+export interface UpdateReleaseAsset {
+  name: string;
+  downloadUrl: string;
+  sizeBytes: number | null;
+}
+
+export interface UpdateReleaseInfo {
+  version: string;
+  tagName: string;
+  name: string;
+  notes: string;
+  releaseUrl: string;
+  publishedAt: string | null;
+  asset: UpdateReleaseAsset | null;
+}
+
+export interface UpdateCheckResult {
+  currentVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  release: UpdateReleaseInfo | null;
+}
+
+export interface InstallUpdateInput {
+  version: string;
+  releaseUrl: string;
+  assetUrl: string | null;
+  assetName: string | null;
+}
+
+export type InstallUpdateOutcome =
+  | { kind: "installerLaunched"; filePath: string }
+  | { kind: "openedReleasePage"; url: string };
+
+export interface UpdateDownloadProgress {
+  version: string;
+  downloadedBytes: number;
+  totalBytes: number | null;
+  percent: number | null;
+}

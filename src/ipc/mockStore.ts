@@ -53,6 +53,8 @@ import type {
   IdentityView,
   ImportWorkbookInput,
   InboxCategory,
+  InstallUpdateInput,
+  InstallUpdateOutcome,
   JobId,
   JobView,
   LabelBadge,
@@ -112,6 +114,8 @@ import type {
   UnixMs,
   UnsubscribeInfo,
   UpdateAccountInput,
+  UpdateCheckResult,
+  UpdateDownloadProgress,
   UpdateHandoffInput,
   UpdateMeetingDocInput,
   UpdateSharedDraftInput,
@@ -3426,4 +3430,90 @@ export async function importOperationsWorkbook(
     }
   }
   return report;
+}
+
+// ── In-App Updates (browser preview / dev mock) ─────────────────────────────
+
+const MOCK_CURRENT_VERSION = "0.2.1";
+const MOCK_LATEST_VERSION = "0.3.0";
+const mockProgressListeners = new Set<(progress: UpdateDownloadProgress) => void>();
+
+function readMockUpdateMode(): "available" | "upToDate" | "error" {
+  if (typeof window === "undefined") return "available";
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get("updateMock");
+  if (raw === "upToDate" || raw === "error" || raw === "available") return raw;
+  return "available";
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+export async function checkForUpdates(): Promise<UpdateCheckResult> {
+  await delay(420);
+  const mode = readMockUpdateMode();
+  if (mode === "error") {
+    throw { kind: "network", reason: "Simulated update check network failure", retryable: true };
+  }
+  if (mode === "upToDate") {
+    return {
+      currentVersion: MOCK_CURRENT_VERSION,
+      latestVersion: MOCK_CURRENT_VERSION,
+      updateAvailable: false,
+      release: null,
+    };
+  }
+  return {
+    currentVersion: MOCK_CURRENT_VERSION,
+    latestVersion: MOCK_LATEST_VERSION,
+    updateAvailable: true,
+    release: {
+      version: MOCK_LATEST_VERSION,
+      tagName: `v${MOCK_LATEST_VERSION}`,
+      name: `Ferrule v${MOCK_LATEST_VERSION}`,
+      notes: "Includes faster mailbox sync and one-click in-app upgrades.",
+      releaseUrl: `https://github.com/reytheist/ferrule/releases/tag/v${MOCK_LATEST_VERSION}`,
+      publishedAt: new Date().toISOString(),
+      asset: {
+        name: `Ferrule_${MOCK_LATEST_VERSION}_x64-setup.exe`,
+        downloadUrl: `https://github.com/reytheist/ferrule/releases/download/v${MOCK_LATEST_VERSION}/Ferrule_${MOCK_LATEST_VERSION}_x64-setup.exe`,
+        sizeBytes: 12_400_000,
+      },
+    },
+  };
+}
+
+export async function downloadAndInstallUpdate(
+  input: InstallUpdateInput,
+): Promise<InstallUpdateOutcome> {
+  const totalBytes = 12_400_000;
+  const steps = [0, 18, 42, 68, 89, 100];
+  for (const pct of steps) {
+    const progress: UpdateDownloadProgress = {
+      version: input.version,
+      downloadedBytes: Math.round((totalBytes * pct) / 100),
+      totalBytes,
+      percent: pct,
+    };
+    for (const listener of mockProgressListeners) {
+      listener(progress);
+    }
+    await delay(220);
+  }
+  return {
+    kind: "installerLaunched",
+    filePath: `/tmp/ferrule-updates/${input.assetName ?? `Ferrule_${input.version}_x64-setup.exe`}`,
+  };
+}
+
+export async function onUpdateDownloadProgress(
+  handler: (progress: UpdateDownloadProgress) => void,
+): Promise<() => void> {
+  mockProgressListeners.add(handler);
+  return () => {
+    mockProgressListeners.delete(handler);
+  };
 }
