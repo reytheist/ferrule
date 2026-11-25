@@ -128,3 +128,28 @@ fly deploy
 
 - **Zero-downtime token rotation**: Add the new token alongside the old token in `STAFF_SYNC_TOKENS="old-token,new-token"`, restart the server, update staff clients in **Settings -> Pigment Staff Sync**, then remove `old-token` and restart again. If a client's token is rejected (`401`), Ferrule preserves all queued offline edits in `staff_outbox` and surfaces an error badge until reconnected.
 - **SQLite backups**: Because SQLite runs in WAL mode, take consistent snapshots using `sqlite3 /data/staff-sync.db ".backup '/backups/staff-sync.db'"` rather than copying the file while live writes occur.
+
+## First-Rollout Checklist
+
+Run this end-to-end checklist once before inviting the full Pigment staff team:
+
+1. **Mint the production staff token**:
+   - Generate a 32-byte random token (`openssl rand -hex 32`) and save it in your password manager.
+   - Never commit the token to git or paste it into public channels.
+2. **Deploy `staff-sync-server` with TLS**:
+   - Set `STAFF_SYNC_TOKENS` and mount a persistent volume for `STAFF_SYNC_DB` (see Docker + Caddy or Fly.io above).
+   - Confirm `curl -fsS https://sync.pigmentminiatures.com/health` returns `{"status":"ok"}`.
+   - Confirm unauthenticated `GET /v1/snapshot` returns HTTP `401`, and authenticated `GET /v1/snapshot` with `Authorization: Bearer <token>` returns HTTP `200` with JSON.
+   - Confirm `curl -N -H "Authorization: Bearer <token>" https://sync.pigmentminiatures.com/v1/events` stays open with `Content-Type: text/event-stream` (verifying your reverse proxy does not buffer SSE).
+3. **Verify live Pigment IONOS login in Ferrule Desktop**:
+   - Install the packaged Ferrule build from `release-artifacts/v<version>/`.
+   - Add a Pigment role mailbox via **Add Account -> Pigment Staff (IONOS)** and confirm inbox sync and a test outbound email succeed.
+   - Confirm the **From** address stays locked to the Pigment space and that credentials are stored in the OS keychain.
+4. **Verify live Staff Sync SSE across two clients (or two profiles)**:
+   - Open **Settings -> Pigment Staff Sync**, connect to `https://sync.pigmentminiatures.com` with the production token, and confirm the connection badge shows online.
+   - Share a test thread from a Pigment space, add an internal comment or handoff status change, and confirm the second client receives the update in real time over SSE without manually refreshing.
+5. **Verify offline outbox flush**:
+   - Temporarily disconnect Wi-Fi (or stop `staff-sync-server`), post an internal comment or toggle an action item, and confirm the UI displays `Offline (1 pending)`.
+   - Reconnect the network (or restart `staff-sync-server`) and confirm the pending counter flushes automatically to `0` and the edit appears on the second client.
+6. **Verify SQLite persistence**:
+   - Restart `staff-sync-server` and confirm `/v1/snapshot` still contains your test shared thread, comments, and action items.

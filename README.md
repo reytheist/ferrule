@@ -28,11 +28,16 @@ pnpm dev
 # Companion Staff Sync server (optional, for multi-user live sync)
 STAFF_SYNC_TOKENS="dev-token" cargo run -p staff-sync-server --bin staff-sync-server
 
-# Verification
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-pnpm typecheck && pnpm lint && pnpm build
+# Verification (local-only; no GitHub Actions CI)
+pnpm verify
+
+# Local release packaging (runs pnpm verify, builds staff-sync-server + desktop installers,
+# and stages versioned artifacts + SHA256SUMS.txt into release-artifacts/v<version>/)
+./scripts/release.ps1   # Windows (PowerShell)
+./scripts/release.sh    # macOS / Linux (Bash)
 ```
+
+Upload the staged files from `release-artifacts/v<version>/` manually to a GitHub Release or share them directly with Pigment staff.
 
 ## Docs
 

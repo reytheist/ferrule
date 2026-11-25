@@ -1,6 +1,7 @@
 node_modules/
 dist/
 target/
+release-artifacts/
 *.db
 *.db-wal
 *.db-shm
