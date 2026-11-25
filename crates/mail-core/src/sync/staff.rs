@@ -206,6 +206,16 @@ impl StaffOutboxOp {
     }
 }
 
+/// Result of probing `GET /v1/events` on a Staff Sync server.
+#[derive(Debug)]
+pub(crate) enum StaffEventStream {
+    /// Server supports live Server-Sent Events (`200 text/event-stream`).
+    Sse(reqwest::Response),
+    /// Server signalled poll-only mode (HTTP `204`, `405`, or `501`), such as
+    /// Vercel serverless API routes that avoid long-lived idle connections.
+    PollOnly,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct StaffSyncClient {
     base_url: String,
@@ -309,7 +319,11 @@ impl StaffSyncClient {
 
     /// Open a long-lived Server-Sent Events (`text/event-stream`) connection without
     /// applying the short request timeout used for unary JSON calls.
-    pub(crate) async fn open_event_stream(&self) -> Result<reqwest::Response, StaffHttpError> {
+    ///
+    /// If the server responds with HTTP `204`, `405`, or `501`, returns
+    /// [`StaffEventStream::PollOnly`] so the background loop falls back to
+    /// lightweight incremental polling (`GET /v1/snapshot?since=...`).
+    pub(crate) async fn open_event_stream(&self) -> Result<StaffEventStream, StaffHttpError> {
         let sse_client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .build()
@@ -322,8 +336,17 @@ impl StaffSyncClient {
             .send()
             .await
             .map_err(|e| StaffHttpError::Retryable(format!("Staff Sync SSE unreachable: {e}")))?;
-        check_status(resp.status(), false)?;
-        Ok(resp)
+        let status = resp.status();
+        if matches!(
+            status,
+            reqwest::StatusCode::NO_CONTENT
+                | reqwest::StatusCode::NOT_IMPLEMENTED
+                | reqwest::StatusCode::METHOD_NOT_ALLOWED
+        ) {
+            return Ok(StaffEventStream::PollOnly);
+        }
+        check_status(status, false)?;
+        Ok(StaffEventStream::Sse(resp))
     }
 
     pub(crate) async fn push_shared_thread(
@@ -541,4 +564,31 @@ pub fn parse_sse_frame(frame: &str) -> Option<StaffSyncEvent> {
     }
     let payload = data_lines.join("\n");
     serde_json::from_str::<StaffSyncEvent>(&payload).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn open_event_stream_returns_poll_only_on_204() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = tokio::spawn(async move {
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 512];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock
+                    .write_all(b"HTTP/1.1 204 No Content\r\nX-Ferrule-Sync-Mode: poll\r\nContent-Length: 0\r\n\r\n")
+                    .await;
+            }
+        });
+
+        let client = StaffSyncClient::new(&format!("http://{addr}"), "test-token").expect("client");
+        let stream = client.open_event_stream().await.expect("probe");
+        assert!(matches!(stream, StaffEventStream::PollOnly));
+        let _ = server.await;
+    }
 }

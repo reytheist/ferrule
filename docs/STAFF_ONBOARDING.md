@@ -4,7 +4,7 @@ Get set up with Ferrule in about 5 minutes. Ferrule runs locally on your compute
 
 ## 1. Install Ferrule
 
-Download the latest release installer for your platform:
+Sign in with your Pigment staff account at **https://pigmentshow.us/ferrule** to download the latest release installer for your platform:
 
 - **Windows**: Run the `.msi` or `.exe` installer and launch **Ferrule** from the Start menu.
 - **macOS**: Open the `.dmg`, drag **Ferrule** into Applications, and launch it.
@@ -25,8 +25,8 @@ Download the latest release installer for your platform:
 
 Staff Sync lets the team collaborate on shared threads, reply drafts, show contacts, templates, the shared calendar, and action items without sharing IMAP logins.
 
-1. Ask the Show Director for two values:
-   - **Staff Sync Server URL** (for example `https://sync.pigmentminiatures.com`)
+1. Ask the Show Director for two values (the server URL is also shown on **https://pigmentshow.us/ferrule**):
+   - **Staff Sync Server URL** (`https://pigmentshow.us/api/ferrule`, or your self-hosted sync URL)
    - **Invite / Staff Token**
 2. Open **Settings -> Pigment Staff Sync**.
 3. Paste the **Staff Sync Server URL** and **Invite / Staff Token**.

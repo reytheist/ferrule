@@ -22,8 +22,8 @@ use crate::staff::{
 };
 use crate::store;
 use crate::sync::staff::{
-    parse_sse_frame, StaffHttpError, StaffOutboxOp, StaffSyncClient, StaffSyncEvent,
-    StaffSyncSnapshot,
+    parse_sse_frame, StaffEventStream, StaffHttpError, StaffOutboxOp, StaffSyncClient,
+    StaffSyncEvent, StaffSyncSnapshot,
 };
 use crate::types::{RemoteContent, SpaceKind};
 use crate::{MailCore, MailCoreInner};
@@ -1209,6 +1209,7 @@ impl MailCore {
 async fn run_staff_sse_loop(weak: Weak<MailCoreInner>) {
     let mut backoff_ms = 200u64;
     const SSE_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
+    const POLL_INTERVAL: Duration = Duration::from_secs(20);
 
     loop {
         let client = {
@@ -1233,9 +1234,28 @@ async fn run_staff_sse_loop(weak: Weak<MailCoreInner>) {
         };
 
         let mut resp = match client.open_event_stream().await {
-            Ok(resp) => {
+            Ok(StaffEventStream::Sse(resp)) => {
                 backoff_ms = 200;
                 resp
+            }
+            Ok(StaffEventStream::PollOnly) => {
+                loop {
+                    let Some(inner) = weak.upgrade() else {
+                        return;
+                    };
+                    let core = MailCore { inner };
+                    let Ok(ws) = core.inner.store.with_conn(store::get_staff_workspace) else {
+                        return;
+                    };
+                    if !ws.connected || ws.server_url.starts_with("local://") {
+                        return;
+                    }
+                    if core.sync_staff_workspace().await.is_ok() {
+                        core.emit(CoreEvent::StaffChanged);
+                        core.emit(CoreEvent::CalendarChanged);
+                    }
+                    tokio::time::sleep(POLL_INTERVAL).await;
+                }
             }
             Err(StaffHttpError::AuthRejected(msg)) => {
                 if let Some(inner) = weak.upgrade() {

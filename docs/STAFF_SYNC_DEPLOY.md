@@ -1,6 +1,9 @@
 # Deploying `staff-sync-server`
 
-`crates/staff-sync-server` is a lightweight, standalone HTTP + SSE + SQLite companion server for Ferrule's Pigment Staff Sync. It has zero external database or SaaS dependencies and runs comfortably in 64-128 MB RAM.
+Pigment Staff Sync can run in two modes:
+
+1. **Pigment Vercel + Postgres (recommended for Pigment Staff)**: Hosted directly inside the `pigment2027` Next.js/Vercel app at `https://pigmentshow.us/api/ferrule` using `pigment2027`'s Neon PostgreSQL database (`FERRULE_STAFF_SYNC_TOKENS` env var). Its `/v1/events` endpoint returns `204 No Content` so Ferrule Desktop automatically uses lightweight 20-second incremental polling (`GET /v1/snapshot?since=...`) without burning Vercel Fluid Compute on idle SSE sockets. Staff downloads live at `https://pigmentshow.us/ferrule` (Clerk staff-only).
+2. **Standalone `crates/staff-sync-server` (self-hosted SQLite + live SSE)**: A lightweight HTTP + SSE + SQLite companion binary with zero external database or SaaS dependencies that runs comfortably in 64-128 MB RAM.
 
 ## Configuration
 
