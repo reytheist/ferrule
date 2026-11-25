@@ -442,6 +442,8 @@ export function useMailApp(): MailApp {
     gmailClientId: null,
     outlookClientId: null,
     outlookTenant: null,
+    gmailBuiltIn: false,
+    outlookBuiltIn: false,
   });
   const [settings, setSettings] = useState<AppSettings>({
     developerToolsEnabled: false,

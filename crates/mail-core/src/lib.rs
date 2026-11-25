@@ -25,7 +25,10 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
 use crate::agent::AgentPort;
-use crate::auth::{CredentialKind, OAuthClient, ProviderAuth, ProviderKind, SecretKey, SecretStore, SecretString};
+use crate::auth::{
+    BuiltInOAuthDefaults, CredentialKind, OAuthClient, ProviderAuth, ProviderKind, SecretKey,
+    SecretStore, SecretString,
+};
 use crate::error::CoreError;
 use crate::events::{Alert, CoreEvent};
 use crate::host::{Clock, OsKeychain, SystemClock};
@@ -44,6 +47,7 @@ pub struct CoreConfig {
     pub db_path: Option<PathBuf>,
     pub sync_window_days: i64,
     pub default_undo_secs: u32,
+    pub oauth_defaults: BuiltInOAuthDefaults,
 }
 
 impl Default for CoreConfig {
@@ -52,6 +56,7 @@ impl Default for CoreConfig {
             db_path: None,
             sync_window_days: 90,
             default_undo_secs: 7,
+            oauth_defaults: BuiltInOAuthDefaults::from_compile_env(),
         }
     }
 }
@@ -357,10 +362,11 @@ impl MailCore {
             })
     }
 
-    /// Return the previously configured OAuth client IDs found on existing accounts so
-    /// adding another Gmail or Outlook account can launch browser sign-in in one click.
+    /// Return previously configured OAuth client IDs (from existing accounts or
+    /// build-time `FERRULE_*` defaults) so adding a Gmail or Outlook account can
+    /// launch browser sign-in in one click.
     pub async fn saved_oauth_clients(&self) -> Result<SavedOAuthClients, CoreError> {
-        self.inner.store.with_conn(|conn| {
+        let mut clients = self.inner.store.with_conn(|conn| {
             let rows = store::list_account_rows(conn)?;
             let mut clients = SavedOAuthClients::default();
             for row in rows {
@@ -389,7 +395,41 @@ impl MailCore {
                 }
             }
             Ok(clients)
-        })
+        })?;
+
+        let defaults = &self.inner.config.oauth_defaults;
+        if let Some(google_id) = defaults
+            .google_client_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            clients.gmail_built_in = true;
+            if clients.gmail_client_id.is_none() {
+                clients.gmail_client_id = Some(google_id.to_string());
+            }
+        }
+        if let Some(outlook_id) = defaults
+            .outlook_client_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            clients.outlook_built_in = true;
+            if clients.outlook_client_id.is_none() {
+                clients.outlook_client_id = Some(outlook_id.to_string());
+                if clients.outlook_tenant.is_none() {
+                    let tenant = defaults
+                        .outlook_tenant
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("common");
+                    clients.outlook_tenant = Some(tenant.to_string());
+                }
+            }
+        }
+        Ok(clients)
     }
 
     /// Run one-click browser OAuth2 PKCE sign-in, discover the selected account's email
@@ -619,6 +659,20 @@ impl MailCore {
             })? {
                 let _ = self.inner.host.secrets.put(&client_key, &secret);
                 return Ok(Some(secret));
+            }
+        }
+        let defaults = &self.inner.config.oauth_defaults;
+        if defaults
+            .google_client_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            == Some(target_client_id.as_str())
+        {
+            if let Some(secret) = defaults.google_client_secret.as_ref() {
+                if !secret.expose().trim().is_empty() {
+                    return Ok(Some(secret.clone()));
+                }
             }
         }
         Ok(None)

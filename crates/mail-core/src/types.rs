@@ -251,6 +251,10 @@ pub struct SavedOAuthClients {
     pub gmail_client_id: Option<String>,
     pub outlook_client_id: Option<String>,
     pub outlook_tenant: Option<String>,
+    #[serde(default)]
+    pub gmail_built_in: bool,
+    #[serde(default)]
+    pub outlook_built_in: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

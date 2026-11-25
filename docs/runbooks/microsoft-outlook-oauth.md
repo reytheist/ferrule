@@ -31,3 +31,13 @@ Click **Add account -> Outlook · Sign in with Microsoft** in Ferrule, paste the
 | Tenant | `common` (supports personal Microsoft accounts and organizational accounts) | `localStorage` (`ferrule.outlookTenant`) and SQLite `account.auth_json` | Public |
 | OAuth Refresh Token | Returned after browser PKCE sign-in | OS Keychain (`ferrule:v1:<account_id>:oauth-refresh`) | Secret |
 | OAuth Access Token | Refreshed on demand via PKCE | In-memory cache only | Secret |
+
+## Optional: Bake into release / local builds (no manual paste)
+To let users click **Outlook · Sign in with Microsoft** directly without pasting the Entra Application (client) ID, put these in a gitignored `.env.local` file at the repo root (or export them in your shell before running `scripts/release.ps1`, `scripts/release.sh`, or `pnpm tauri dev`):
+
+```dotenv
+FERRULE_OUTLOOK_CLIENT_ID=00000000-0000-0000-0000-000000000000
+FERRULE_OUTLOOK_TENANT=common
+```
+
+`mail-core` embeds them at compile time via `option_env!` and skips the manual OAuth setup step in `AddAccountModal`. Users can still override them via **Change OAuth client** if needed.

@@ -42,6 +42,35 @@ pub struct OAuthClient {
     pub has_client_secret: bool,
 }
 
+/// Optional build-time OAuth client defaults embedded via `FERRULE_GOOGLE_CLIENT_ID`,
+/// `FERRULE_GOOGLE_CLIENT_SECRET`, `FERRULE_OUTLOOK_CLIENT_ID`, and
+/// `FERRULE_OUTLOOK_TENANT`. When present, users can click "Sign in with Google" or
+/// "Sign in with Microsoft" directly without manually pasting client credentials.
+#[derive(Debug, Clone, Default)]
+pub struct BuiltInOAuthDefaults {
+    pub google_client_id: Option<String>,
+    pub google_client_secret: Option<SecretString>,
+    pub outlook_client_id: Option<String>,
+    pub outlook_tenant: Option<String>,
+}
+
+impl BuiltInOAuthDefaults {
+    pub fn from_compile_env() -> Self {
+        fn clean(val: Option<&str>) -> Option<String> {
+            val.map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        }
+        Self {
+            google_client_id: clean(option_env!("FERRULE_GOOGLE_CLIENT_ID")),
+            google_client_secret: clean(option_env!("FERRULE_GOOGLE_CLIENT_SECRET"))
+                .map(SecretString::new),
+            outlook_client_id: clean(option_env!("FERRULE_OUTLOOK_CLIENT_ID")),
+            outlook_tenant: clean(option_env!("FERRULE_OUTLOOK_TENANT")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ProviderKind {

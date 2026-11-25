@@ -59,6 +59,14 @@ function savePref(key: string, value: string): void {
   }
 }
 
+function clearPref(key: string): void {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Ignore storage failures in restricted webviews.
+  }
+}
+
 function validPort(raw: string): boolean {
   const value = Number(raw);
   return Number.isInteger(value) && value > 0 && value <= 65535;
@@ -201,11 +209,28 @@ export function AddAccountModal({
       return;
     }
     if (isGoogle) {
-      savePref(GOOGLE_CLIENT_KEY, clientId);
+      if (
+        app.savedOAuthClients.gmailBuiltIn &&
+        clientId === app.savedOAuthClients.gmailClientId
+      ) {
+        clearPref(GOOGLE_CLIENT_KEY);
+      } else {
+        savePref(GOOGLE_CLIENT_KEY, clientId);
+      }
       setGoogleClientId(clientId);
     } else {
-      savePref(OUTLOOK_CLIENT_KEY, clientId);
-      savePref(OUTLOOK_TENANT_KEY, tenant.trim() || "common");
+      const normalizedTenant = tenant.trim() || "common";
+      if (
+        app.savedOAuthClients.outlookBuiltIn &&
+        clientId === app.savedOAuthClients.outlookClientId &&
+        normalizedTenant === (app.savedOAuthClients.outlookTenant || "common")
+      ) {
+        clearPref(OUTLOOK_CLIENT_KEY);
+        clearPref(OUTLOOK_TENANT_KEY);
+      } else {
+        savePref(OUTLOOK_CLIENT_KEY, clientId);
+        savePref(OUTLOOK_TENANT_KEY, normalizedTenant);
+      }
       setOutlookClientId(clientId);
     }
 
@@ -590,8 +615,12 @@ export function AddAccountModal({
           <div className="modal-body">
             <span className="hint-text">
               {provider === "gmailOAuth"
-                ? "Paste your Google Desktop OAuth credentials once. After this, clicking Gmail opens Google directly."
-                : "Paste your Microsoft Entra Public Client ID once. After this, clicking Outlook opens Microsoft directly."}
+                ? app.savedOAuthClients.gmailBuiltIn
+                  ? "This build includes Ferrule's built-in Google OAuth client. Override below only if you want to use your own Google Cloud Desktop OAuth app."
+                  : "Paste your Google Desktop OAuth credentials once. After this, clicking Gmail opens Google directly."
+                : app.savedOAuthClients.outlookBuiltIn
+                  ? "This build includes Ferrule's built-in Microsoft Entra OAuth client. Override below only if you want to use your own Entra app registration."
+                  : "Paste your Microsoft Entra Public Client ID once. After this, clicking Outlook opens Microsoft directly."}
             </span>
 
             {provider === "gmailOAuth" ? (
@@ -611,11 +640,34 @@ export function AddAccountModal({
                   <input
                     className="input"
                     type="password"
-                    placeholder="GOCSPX-… (or leave blank to reuse saved secret)"
+                    placeholder={
+                      app.savedOAuthClients.gmailBuiltIn
+                        ? "GOCSPX-… (leave blank to reuse built-in or saved secret)"
+                        : "GOCSPX-… (or leave blank to reuse saved secret)"
+                    }
                     value={googleClientSecret}
                     onChange={(event) => setGoogleClientSecret(event.target.value)}
                   />
                 </div>
+                {app.savedOAuthClients.gmailBuiltIn &&
+                  app.savedOAuthClients.gmailClientId &&
+                  googleClientId.trim() !== app.savedOAuthClients.gmailClientId && (
+                    <div>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={busy}
+                        onClick={() => {
+                          clearPref(GOOGLE_CLIENT_KEY);
+                          setGoogleClientId(app.savedOAuthClients.gmailClientId ?? "");
+                          setGoogleClientSecret("");
+                          setError(null);
+                        }}
+                      >
+                        Reset to built-in Google OAuth client
+                      </button>
+                    </div>
+                  )}
               </>
             ) : (
               <>
@@ -638,6 +690,28 @@ export function AddAccountModal({
                     onChange={(event) => setTenant(event.target.value)}
                   />
                 </div>
+                {app.savedOAuthClients.outlookBuiltIn &&
+                  app.savedOAuthClients.outlookClientId &&
+                  (outlookClientId.trim() !== app.savedOAuthClients.outlookClientId ||
+                    (tenant.trim() || "common") !==
+                      (app.savedOAuthClients.outlookTenant || "common")) && (
+                    <div>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={busy}
+                        onClick={() => {
+                          clearPref(OUTLOOK_CLIENT_KEY);
+                          clearPref(OUTLOOK_TENANT_KEY);
+                          setOutlookClientId(app.savedOAuthClients.outlookClientId ?? "");
+                          setTenant(app.savedOAuthClients.outlookTenant || "common");
+                          setError(null);
+                        }}
+                      >
+                        Reset to built-in Microsoft OAuth client
+                      </button>
+                    </div>
+                  )}
               </>
             )}
 
@@ -682,6 +756,12 @@ export function AddAccountModal({
                   className="btn"
                   disabled={busy}
                   onClick={() => {
+                    if (provider === "gmailOAuth" && !googleClientId.trim() && effectiveGoogleClientId) {
+                      setGoogleClientId(effectiveGoogleClientId);
+                    }
+                    if (provider === "outlookOAuth" && !outlookClientId.trim() && effectiveOutlookClientId) {
+                      setOutlookClientId(effectiveOutlookClientId);
+                    }
                     setError(null);
                     setStep("oauthSetup");
                   }}

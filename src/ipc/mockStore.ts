@@ -1060,6 +1060,8 @@ export async function savedOAuthClients(): Promise<SavedOAuthClients> {
     gmailClientId: "preview-google-client.apps.googleusercontent.com",
     outlookClientId: null,
     outlookTenant: "common",
+    gmailBuiltIn: true,
+    outlookBuiltIn: false,
   };
 }
 

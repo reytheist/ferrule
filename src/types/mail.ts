@@ -137,6 +137,8 @@ export interface SavedOAuthClients {
   gmailClientId: string | null;
   outlookClientId: string | null;
   outlookTenant: string | null;
+  gmailBuiltIn: boolean;
+  outlookBuiltIn: boolean;
 }
 
 export interface ThreadQuery {

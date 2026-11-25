@@ -26,6 +26,31 @@ try {
         throw "Could not determine version from package.json"
     }
 
+    # Load optional gitignored .env.local (e.g., FERRULE_GOOGLE_CLIENT_ID / SECRET, FERRULE_OUTLOOK_CLIENT_ID)
+    # without overriding variables already set in the shell.
+    $EnvLocal = Join-Path $RepoRoot ".env.local"
+    if (Test-Path $EnvLocal) {
+        Write-Host "==> Loading build-time environment from .env.local"
+        foreach ($RawLine in (Get-Content $EnvLocal)) {
+            $Line = $RawLine.Trim()
+            if (-not $Line -or $Line.StartsWith("#")) { continue }
+            $Eq = $Line.IndexOf("=")
+            if ($Eq -le 0) { continue }
+            $Key = $Line.Substring(0, $Eq).Trim()
+            $Val = $Line.Substring($Eq + 1).Trim()
+            if (($Val.StartsWith('"') -and $Val.EndsWith('"')) -or ($Val.StartsWith("'") -and $Val.EndsWith("'"))) {
+                $Val = $Val.Substring(1, $Val.Length - 2)
+            }
+            if ([string]::IsNullOrEmpty([System.Environment]::GetEnvironmentVariable($Key))) {
+                [System.Environment]::SetEnvironmentVariable($Key, $Val, "Process")
+            }
+        }
+    }
+
+    $HasGoogleOAuth = -not [string]::IsNullOrWhiteSpace($env:FERRULE_GOOGLE_CLIENT_ID)
+    $HasOutlookOAuth = -not [string]::IsNullOrWhiteSpace($env:FERRULE_OUTLOOK_CLIENT_ID)
+    Write-Host "==> Built-in OAuth defaults: Google=$HasGoogleOAuth, Outlook=$HasOutlookOAuth"
+
     if (-not $SkipVerify) {
         Invoke-Checked "Local verification (pnpm verify)" { pnpm verify }
     } else {
