@@ -33,12 +33,13 @@ impl MailCore {
     ) -> Result<StaffWorkspaceView, CoreError> {
         let server_url = input.server_url.trim().trim_end_matches('/').to_string();
         let valid_scheme = server_url.starts_with("https://")
-            || server_url.starts_with("http://")
-            || server_url.starts_with("local://");
+            || server_url.starts_with("local://")
+            || crate::sync::staff::is_loopback_http(&server_url);
         if !valid_scheme {
             return Err(CoreError::InvalidInput {
                 field: "serverUrl".to_string(),
-                reason: "Server URL must start with https://, http://, or local://".to_string(),
+                reason: "Server URL must start with https://, local://, or http://localhost"
+                    .to_string(),
             });
         }
         let token = input.token.trim().to_string();
@@ -99,14 +100,16 @@ impl MailCore {
             let ws = self.inner.store.with_conn(|conn| {
                 let ws = store::upsert_staff_workspace(
                     conn,
-                    &server_url,
-                    &staff_name,
-                    &staff_handle,
-                    &staff_email,
-                    &staff_role,
-                    now,
-                    StaffSyncStatus::Connected,
-                    None,
+                    &store::StaffWorkspaceUpsert {
+                        server_url: &server_url,
+                        staff_name: &staff_name,
+                        staff_handle: &staff_handle,
+                        staff_email: &staff_email,
+                        staff_role: &staff_role,
+                        now,
+                        status: StaffSyncStatus::Connected,
+                        last_error: None,
+                    },
                 )?;
                 store::seed_local_pigment_demo(conn, &current_member, now)?;
                 store::seed_local_calendar_demo(conn, now)?;
@@ -126,14 +129,16 @@ impl MailCore {
             };
             let ws = store::upsert_staff_workspace(
                 conn,
-                &server_url,
-                &staff_name,
-                &staff_handle,
-                &staff_email,
-                &staff_role,
-                now,
-                status,
-                err_msg.as_deref(),
+                &store::StaffWorkspaceUpsert {
+                    server_url: &server_url,
+                    staff_name: &staff_name,
+                    staff_handle: &staff_handle,
+                    staff_email: &staff_email,
+                    staff_role: &staff_role,
+                    now,
+                    status,
+                    last_error: err_msg.as_deref(),
+                },
             )?;
             store::upsert_staff_member(conn, &current_member)?;
             if let Ok(snapshot) = &pull_res {
@@ -328,14 +333,27 @@ impl MailCore {
                 }
             };
 
-            let assignee_handle = input
+            let requested_assignee = input
                 .assignee_handle
                 .as_deref()
                 .map(normalize_handle)
                 .filter(|h| !h.is_empty());
 
-            let shared_id = store::find_shared_thread_by_source(conn, input.thread_id)?
+            let existing = match store::find_shared_thread_by_source(conn, input.thread_id)? {
+                Some(id) => store::get_shared_thread(conn, id)?,
+                None => None,
+            };
+            let shared_id = existing
+                .as_ref()
+                .map(|t| t.id)
                 .unwrap_or_else(SharedThreadId::fresh);
+            let assignee_handle = requested_assignee
+                .or_else(|| existing.as_ref().and_then(|t| t.assignee_handle.clone()));
+            let status = existing
+                .as_ref()
+                .map(|t| t.status)
+                .unwrap_or(HandoffStatus::Open);
+            let shared_at = existing.as_ref().map(|t| t.shared_at).unwrap_or(now);
 
             let snippet = messages
                 .last()
@@ -354,10 +372,10 @@ impl MailCore {
                 visibility: input.visibility,
                 invited_handles,
                 assignee_handle,
-                status: HandoffStatus::Open,
+                status,
                 comments: Vec::new(),
                 draft: None,
-                shared_at: now,
+                shared_at,
                 updated_at: now,
             };
             store::upsert_shared_thread(conn, &view)?;
@@ -391,7 +409,7 @@ impl MailCore {
 
         if let Some(client) = self.remote_staff_client(&ws)? {
             if client.push_shared_thread(&shared).await.is_err() {
-                self.mark_staff_offline("Queued locally — will sync when Staff Sync reconnects");
+                self.mark_staff_offline("Thread saved locally — offline");
             } else if let Some(comment) = &initial_comment {
                 let _ = client.push_comment(comment).await;
             }

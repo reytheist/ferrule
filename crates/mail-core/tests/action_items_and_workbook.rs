@@ -198,3 +198,64 @@ async fn workbook_csv_import_dry_run_dedup_and_contacts_roundtrip() {
     let parsed_back = parse_csv(&exported_items);
     assert_eq!(parsed_back.len(), 4); // header + 3 rows
 }
+
+#[tokio::test]
+async fn csv_export_neutralizes_formula_injection_and_tsv_import_works() {
+    let core = test_core();
+
+    // Formula-leading values must be neutralized with a leading apostrophe on CSV export.
+    core.save_action_item(SaveActionItemInput {
+        id: None,
+        title: "=HYPERLINK(\"http://evil.test\",\"Click\")".to_string(),
+        department: Some("-Ops".to_string()),
+        milestone: Some("+cmd|' /C calc'!A0".to_string()),
+        assignee_handle: Some("@jordan".to_string()),
+        status: ActionItemStatus::Open,
+        due_at: None,
+        start_time: None,
+        end_time: None,
+        location: None,
+        cost_note: None,
+        source_event_id: None,
+        source_series_id: None,
+        source_thread_id: None,
+        sync_to_calendar: false,
+    })
+    .await
+    .expect("save formula item");
+
+    let items = core.list_action_items().await.expect("list items");
+    let csv = format_action_items_csv(&items);
+    let parsed = parse_csv(&csv);
+    assert_eq!(parsed.len(), 2);
+    assert!(parsed[1][0].starts_with("'-ops"), "got {}", parsed[1][0]);
+    assert!(parsed[1][2].starts_with("'="), "got {}", parsed[1][2]);
+
+    // Tab-separated (.tsv) workbooks must split on tabs, not commas.
+    let tsv = "Dept.\tWhat\tTitle / Task\tAssignee\tDone\nVenue\tLoad-in\tConfirm dock pass\tdevon\t\n";
+    let tsv_b64 = base64::engine::general_purpose::STANDARD.encode(tsv.as_bytes());
+    let report = core
+        .import_operations_workbook(ImportWorkbookInput {
+            filename: "schedule.tsv".to_string(),
+            data_base64: tsv_b64,
+            target: WorkbookImportTarget::ActionItems,
+            sync_to_calendar: false,
+            dry_run: false,
+        })
+        .await
+        .expect("import tsv");
+    assert_eq!(report.action_items_created, 1);
+
+    // Oversized base64 payloads are rejected before decoding.
+    let huge = "A".repeat(30 * 1024 * 1024);
+    let err = core
+        .import_operations_workbook(ImportWorkbookInput {
+            filename: "huge.xlsx".to_string(),
+            data_base64: huge,
+            target: WorkbookImportTarget::Auto,
+            sync_to_calendar: false,
+            dry_run: true,
+        })
+        .await;
+    assert!(err.is_err());
+}

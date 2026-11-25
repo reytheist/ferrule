@@ -108,6 +108,11 @@ pub struct WorkbookImportReport {
 
 /// Parse an RFC 4180 CSV document into rows of cell strings (strips UTF-8 BOM).
 pub fn parse_csv(raw: &str) -> Vec<Vec<String>> {
+    parse_delimited(raw, ',')
+}
+
+/// Parse an RFC 4180 delimited text document (e.g. `,` for CSV or `\t` for TSV) into rows.
+pub fn parse_delimited(raw: &str, delimiter: char) -> Vec<Vec<String>> {
     let input = raw.strip_prefix('\u{feff}').unwrap_or(raw);
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut current_row: Vec<String> = Vec::new();
@@ -132,7 +137,7 @@ pub fn parse_csv(raw: &str) -> Vec<Vec<String>> {
                 '"' if cell.is_empty() => {
                     in_quotes = true;
                 }
-                ',' => {
+                c if c == delimiter => {
                     current_row.push(cell);
                     cell = String::new();
                 }
@@ -170,10 +175,20 @@ pub fn parse_csv(raw: &str) -> Vec<Vec<String>> {
 }
 
 fn csv_escape(field: &str) -> String {
-    if field.contains(',') || field.contains('"') || field.contains('\n') || field.contains('\r') {
-        format!("\"{}\"", field.replace('"', "\"\""))
+    // Neutralize spreadsheet formula injection (OWASP CSV injection) on leading
+    // formula-triggering characters before applying RFC 4180 quoting.
+    let neutralized = match field.chars().next() {
+        Some('=' | '+' | '-' | '@' | '\t' | '\r') => format!("'{field}"),
+        _ => field.to_string(),
+    };
+    if neutralized.contains(',')
+        || neutralized.contains('"')
+        || neutralized.contains('\n')
+        || neutralized.contains('\r')
+    {
+        format!("\"{}\"", neutralized.replace('"', "\"\""))
     } else {
-        field.to_string()
+        neutralized
     }
 }
 
@@ -418,27 +433,28 @@ fn cell_to_string(cell: &Data) -> String {
 
 fn extract_sheets(filename: &str, bytes: &[u8]) -> Result<Vec<RawSheet>, CoreError> {
     let lower = filename.trim().to_ascii_lowercase();
-    let is_csv = lower.ends_with(".csv") || lower.ends_with(".tsv") || lower.ends_with(".txt");
+    let is_tsv = lower.ends_with(".tsv");
+    let is_csv = lower.ends_with(".csv") || is_tsv || lower.ends_with(".txt");
 
     if is_csv {
-        let text = String::from_utf8(bytes.to_vec()).map_err(|_| CoreError::InvalidInput {
+        let text = std::str::from_utf8(bytes).map_err(|_| CoreError::InvalidInput {
             field: "dataBase64".to_string(),
             reason: "CSV file must be valid UTF-8 text".to_string(),
         })?;
-        let sheet_name = filename
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or("CSV")
-            .trim_end_matches(".csv")
-            .trim_end_matches(".CSV")
+        let base_name = filename.rsplit(['/', '\\']).next().unwrap_or("CSV");
+        let sheet_name = base_name
+            .rsplit_once('.')
+            .map(|(stem, _)| stem)
+            .unwrap_or(base_name)
             .to_string();
+        let delimiter = if is_tsv { '\t' } else { ',' };
         return Ok(vec![RawSheet {
             name: sheet_name,
-            rows: parse_csv(&text),
+            rows: parse_delimited(text, delimiter),
         }]);
     }
 
-    let cursor = Cursor::new(bytes.to_vec());
+    let cursor = Cursor::new(bytes);
     let mut wb = open_workbook_auto_from_rs(cursor).map_err(|e| CoreError::InvalidInput {
         field: "dataBase64".to_string(),
         reason: format!("Could not read spreadsheet workbook ({e})"),
@@ -539,8 +555,17 @@ impl MailCore {
         &self,
         input: ImportWorkbookInput,
     ) -> Result<WorkbookImportReport, CoreError> {
+        const MAX_WORKBOOK_BYTES: usize = 20 * 1024 * 1024;
+        const MAX_BASE64_CHARS: usize = (MAX_WORKBOOK_BYTES / 3 + 1) * 4 + 64;
+        let trimmed_b64 = input.data_base64.trim();
+        if trimmed_b64.len() > MAX_BASE64_CHARS {
+            return Err(CoreError::InvalidInput {
+                field: "dataBase64".to_string(),
+                reason: "workbook exceeds 20 MB size limit".to_string(),
+            });
+        }
         let bytes = base64::engine::general_purpose::STANDARD
-            .decode(input.data_base64.trim())
+            .decode(trimmed_b64)
             .map_err(|_| CoreError::InvalidInput {
                 field: "dataBase64".to_string(),
                 reason: "invalid base64 payload".to_string(),
@@ -549,6 +574,12 @@ impl MailCore {
             return Err(CoreError::InvalidInput {
                 field: "dataBase64".to_string(),
                 reason: "uploaded file is empty".to_string(),
+            });
+        }
+        if bytes.len() > MAX_WORKBOOK_BYTES {
+            return Err(CoreError::InvalidInput {
+                field: "dataBase64".to_string(),
+                reason: "workbook exceeds 20 MB size limit".to_string(),
             });
         }
 

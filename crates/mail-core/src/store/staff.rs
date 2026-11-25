@@ -45,17 +45,20 @@ pub(crate) fn get_staff_workspace(conn: &mut Connection) -> Result<StaffWorkspac
     Ok(row.unwrap_or_default())
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(crate) struct StaffWorkspaceUpsert<'a> {
+    pub server_url: &'a str,
+    pub staff_name: &'a str,
+    pub staff_handle: &'a str,
+    pub staff_email: &'a str,
+    pub staff_role: &'a str,
+    pub now: UnixMs,
+    pub status: StaffSyncStatus,
+    pub last_error: Option<&'a str>,
+}
+
 pub(crate) fn upsert_staff_workspace(
     conn: &mut Connection,
-    server_url: &str,
-    staff_name: &str,
-    staff_handle: &str,
-    staff_email: &str,
-    staff_role: &str,
-    now: UnixMs,
-    status: StaffSyncStatus,
-    last_error: Option<&str>,
+    input: &StaffWorkspaceUpsert<'_>,
 ) -> Result<StaffWorkspaceView, CoreError> {
     conn.execute(
         "INSERT INTO staff_workspace (
@@ -72,19 +75,19 @@ pub(crate) fn upsert_staff_workspace(
             sync_status = excluded.sync_status,
             last_error = excluded.last_error",
         params![
-            server_url,
-            staff_name,
-            staff_handle,
-            staff_email,
-            staff_role,
-            now.0,
-            if matches!(status, StaffSyncStatus::Connected) {
-                Some(now.0)
+            input.server_url,
+            input.staff_name,
+            input.staff_handle,
+            input.staff_email,
+            input.staff_role,
+            input.now.0,
+            if matches!(input.status, StaffSyncStatus::Connected) {
+                Some(input.now.0)
             } else {
                 None
             },
-            status.as_str(),
-            last_error,
+            input.status.as_str(),
+            input.last_error,
         ],
     )
     .sq()?;
@@ -474,7 +477,9 @@ pub(crate) fn upsert_shared_draft(
             approved_by = excluded.approved_by,
             approved_at = excluded.approved_at,
             rev = excluded.rev,
-            updated_at = excluded.updated_at",
+            updated_at = excluded.updated_at
+         WHERE excluded.rev > shared_draft.rev
+            OR (excluded.rev = shared_draft.rev AND excluded.updated_at >= shared_draft.updated_at)",
         params![
             id_to_blob(draft.shared_thread_id.as_bytes()),
             draft.subject,

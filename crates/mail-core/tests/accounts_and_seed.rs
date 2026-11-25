@@ -594,3 +594,80 @@ async fn pigment_staff_space_and_developer_tools_settings_persist() {
         .expect("switch to personal");
     assert_eq!(switched.space_kind, SpaceKind::Personal);
 }
+
+#[tokio::test]
+async fn pre_phase_a_sqlite_database_upgrades_cleanly_and_idempotently() {
+    let dir = std::env::temp_dir();
+    let db_path: PathBuf = dir.join(format!("ferrule-upgrade-test-{}.db", Uuid::now_v7()));
+
+    // Simulate a legacy pre-Phase-A SQLite database missing account.space_kind and action_item.start_time.
+    {
+        let conn = rusqlite::Connection::open(&db_path).expect("create legacy db");
+        conn.execute_batch(
+            "CREATE TABLE account (
+                id BLOB PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                provider TEXT NOT NULL CHECK (provider IN ('gmail', 'outlook', 'imap')),
+                color TEXT NOT NULL CHECK (color IN ('azure', 'berry', 'teal', 'amber', 'violet', 'emerald')),
+                email TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                auth_json TEXT NOT NULL,
+                sync_state_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            INSERT INTO account (id, display_name, provider, color, email, position, auth_json, sync_state_json, created_at)
+            VALUES (
+                X'0102030405060708090A0B0C0D0E0F10',
+                'Legacy Personal',
+                'gmail',
+                'teal',
+                'legacy@example.com',
+                0,
+                '{\"kind\":\"gmailAppPassword\",\"address\":\"legacy@example.com\"}',
+                '{\"kind\":\"idle\"}',
+                1700000000000
+            );
+            CREATE TABLE action_item (
+                id BLOB PRIMARY KEY,
+                title TEXT NOT NULL,
+                department TEXT,
+                milestone TEXT,
+                assignee_handle TEXT,
+                status TEXT NOT NULL DEFAULT 'open',
+                due_at INTEGER,
+                source_event_id BLOB,
+                source_series_id TEXT,
+                created_by TEXT NOT NULL DEFAULT 'staff',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );",
+        )
+        .expect("seed legacy schema");
+    }
+
+    // Opening MailCore twice must upgrade cleanly and idempotently.
+    for _ in 0..2 {
+        let core = MailCore::open(
+            CoreConfig {
+                db_path: Some(db_path.clone()),
+                ..CoreConfig::default()
+            },
+            Host {
+                secrets: Arc::new(MemorySecretStore::default()),
+                clock: Arc::new(ManualClock::new(UnixMs(START))),
+            },
+        )
+        .expect("open upgraded core");
+        core.db_health_check().expect("healthy");
+        let accounts = core.list_accounts().await.expect("list upgraded accounts");
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].display_name, "Legacy Personal");
+        assert_eq!(accounts[0].space_kind, SpaceKind::Personal);
+    }
+
+    for suffix in ["", "-wal", "-shm"] {
+        let mut path = db_path.clone().into_os_string();
+        path.push(suffix);
+        let _ = std::fs::remove_file(&path);
+    }
+}

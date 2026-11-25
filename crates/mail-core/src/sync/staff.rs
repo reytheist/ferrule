@@ -78,13 +78,27 @@ pub(crate) struct StaffSyncClient {
     http: reqwest::Client,
 }
 
+pub(crate) fn is_loopback_http(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    if parsed.scheme() != "http" {
+        return false;
+    }
+    matches!(
+        parsed.host_str(),
+        Some("localhost" | "127.0.0.1" | "[::1]" | "::1")
+    )
+}
+
 impl StaffSyncClient {
     pub(crate) fn new(base_url: &str, token: &str) -> Result<Self, CoreError> {
         let trimmed = base_url.trim().trim_end_matches('/').to_string();
-        if !(trimmed.starts_with("https://") || trimmed.starts_with("http://")) {
+        if !(trimmed.starts_with("https://") || is_loopback_http(&trimmed)) {
             return Err(CoreError::InvalidInput {
                 field: "serverUrl".to_string(),
-                reason: "Staff Sync URL must start with https://, http://, or local://".to_string(),
+                reason: "Remote Staff Sync URL must use https:// (or http://localhost for local dev)"
+                    .to_string(),
             });
         }
         let http = reqwest::Client::builder()

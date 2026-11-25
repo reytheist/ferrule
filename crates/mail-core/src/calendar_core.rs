@@ -573,21 +573,38 @@ impl MailCore {
                 retryable: true,
             })?;
 
+        const MAX_ICS_BYTES: usize = 5 * 1024 * 1024;
         match client.get(&fetch_url).send().await {
-            Ok(resp) if resp.status().is_success() => match resp.text().await {
-                Ok(body) => {
-                    let parsed = parse_ics(&body);
-                    self.inner.store.with_conn(|conn| {
-                        store::replace_overlay_events(conn, id, &parsed, now, None)
-                    })?;
-                }
-                Err(e) => {
-                    let msg = format!("read .ics response: {e}");
+            Ok(resp) if resp.status().is_success() => {
+                if resp.content_length().is_some_and(|n| n > MAX_ICS_BYTES as u64) {
+                    let msg = "feed exceeds 5 MB limit".to_string();
                     self.inner.store.with_conn(|conn| {
                         store::replace_overlay_events(conn, id, &[], now, Some(&msg))
                     })?;
+                } else {
+                    match resp.bytes().await {
+                        Ok(raw) if raw.len() > MAX_ICS_BYTES => {
+                            let msg = "feed exceeds 5 MB limit".to_string();
+                            self.inner.store.with_conn(|conn| {
+                                store::replace_overlay_events(conn, id, &[], now, Some(&msg))
+                            })?;
+                        }
+                        Ok(raw) => {
+                            let body = String::from_utf8_lossy(&raw);
+                            let parsed = parse_ics(&body);
+                            self.inner.store.with_conn(|conn| {
+                                store::replace_overlay_events(conn, id, &parsed, now, None)
+                            })?;
+                        }
+                        Err(e) => {
+                            let msg = format!("read .ics response: {}", e.without_url());
+                            self.inner.store.with_conn(|conn| {
+                                store::replace_overlay_events(conn, id, &[], now, Some(&msg))
+                            })?;
+                        }
+                    }
                 }
-            },
+            }
             Ok(resp) => {
                 let msg = format!("feed returned HTTP {}", resp.status().as_u16());
                 self.inner.store.with_conn(|conn| {
@@ -595,7 +612,7 @@ impl MailCore {
                 })?;
             }
             Err(e) => {
-                let msg = format!("feed unreachable: {e}");
+                let msg = format!("feed unreachable: {}", e.without_url());
                 self.inner.store.with_conn(|conn| {
                     store::replace_overlay_events(conn, id, &[], now, Some(&msg))
                 })?;
@@ -749,7 +766,7 @@ impl MailCore {
             .send()
             .await
             .map_err(|e| CoreError::Network {
-                reason: format!("Discord webhook unreachable: {e}"),
+                reason: format!("Discord webhook unreachable: {}", e.without_url()),
                 retryable: true,
             })?;
         if !resp.status().is_success() {

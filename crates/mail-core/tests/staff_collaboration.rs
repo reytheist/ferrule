@@ -15,7 +15,7 @@ use mail_core::staff::{
     SaveShowContactInput, ShareThreadInput, ShareVisibility, StaffSyncStatus, UpdateHandoffInput,
     UpdateSharedDraftInput,
 };
-use mail_core::types::{InboxCategory, MailboxView, NewAccountInput, Scope, SpaceColor, SpaceKind, ThreadQuery};
+use mail_core::types::{InboxCategory, MailboxView, NewAccountInput, Scope, SpaceColor, SpaceKind, ThreadQuery, UpdateAccountInput};
 use mail_core::{parse_sse_frame, CoreConfig, Host, MailCore, StaffSyncEvent};
 use uuid::Uuid;
 
@@ -444,4 +444,93 @@ fn sse_frame_parser_handles_events_and_comments() {
             shared_thread_id: id
         })
     );
+}
+
+#[tokio::test]
+async fn reshare_preserves_handoff_and_rejects_cleartext_non_loopback_http() {
+    let (core, _secrets) = open_test_core();
+    core.seed_demo_if_empty().await.expect("seed");
+
+    // Non-loopback plaintext http:// must be rejected to protect the Staff Sync bearer token.
+    let insecure = core
+        .connect_staff_workspace(ConnectStaffWorkspaceInput {
+            server_url: "http://sync.example.com".into(),
+            token: "secret-token".into(),
+            staff_name: "Alex".into(),
+            staff_handle: "alex".into(),
+            staff_email: "alex@pigmentminiatures.com".into(),
+            staff_role: "Director".into(),
+        })
+        .await;
+    assert!(matches!(insecure, Err(CoreError::InvalidInput { .. })));
+
+    core.connect_staff_workspace(ConnectStaffWorkspaceInput {
+        server_url: "local://pigment-2027".into(),
+        token: "demo-token".into(),
+        staff_name: "Alex".into(),
+        staff_handle: "alex".into(),
+        staff_email: "alex@pigmentminiatures.com".into(),
+        staff_role: "Director".into(),
+    })
+    .await
+    .expect("connect local");
+
+    let accounts = core.list_accounts().await.expect("accounts");
+    let staff_acct = core
+        .update_account(UpdateAccountInput {
+            account_id: accounts[0].id,
+            display_name: accounts[0].display_name.clone(),
+            color: accounts[0].color,
+            space_kind: Some(SpaceKind::PigmentStaff),
+        })
+        .await
+        .expect("mark account as pigment staff");
+    let threads = core
+        .list_threads(ThreadQuery {
+            scope: Scope::Account {
+                account_id: staff_acct.id,
+            },
+            view: MailboxView::Inbox {
+                category: InboxCategory::All,
+            },
+            limit: 5,
+            offset: 0,
+        })
+        .await
+        .expect("threads");
+    let thread_id = threads.items[0].id;
+
+    let first = core
+        .share_thread(ShareThreadInput {
+            thread_id,
+            visibility: ShareVisibility::AllStaff,
+            invited_handles: vec![],
+            assignee_handle: Some("jordan".into()),
+            initial_note: None,
+        })
+        .await
+        .expect("initial share");
+
+    core.update_shared_handoff(UpdateHandoffInput {
+        shared_thread_id: first.id,
+        assignee_handle: Some("jordan".into()),
+        status: HandoffStatus::Waiting,
+    })
+    .await
+    .expect("handoff waiting");
+
+    // Re-sharing the thread to refresh its message snapshot must preserve Waiting status & assignee.
+    let refreshed = core
+        .share_thread(ShareThreadInput {
+            thread_id,
+            visibility: ShareVisibility::AllStaff,
+            invited_handles: vec![],
+            assignee_handle: None,
+            initial_note: None,
+        })
+        .await
+        .expect("re-share");
+    assert_eq!(refreshed.id, first.id);
+    assert_eq!(refreshed.status, HandoffStatus::Waiting);
+    assert_eq!(refreshed.assignee_handle.as_deref(), Some("jordan"));
 }
