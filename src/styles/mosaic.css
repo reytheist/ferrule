@@ -44,16 +44,20 @@
 }
 
 .brand-mark .logo-dot {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-radius: 5px;
   background: var(--app-accent);
   color: var(--app-accent-fg);
   display: grid;
   place-items: center;
-  font-size: 10px;
-  font-weight: 700;
   transition: background 0.18s ease;
+}
+
+.brand-mark .logo-dot .ferrule-glyph {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .search-trigger {

@@ -20,6 +20,7 @@ import { ShareThreadModal } from "./features/staff/ShareThreadModal";
 import { ThreadList } from "./features/threads/ThreadList";
 import { Topbar } from "./features/topbar/Topbar";
 import { TemplatesModal } from "./features/templates/TemplatesModal";
+import { FerruleGlyph } from "./features/ui/FerruleGlyph";
 import { SchedulePopover } from "./features/ui/SchedulePopover";
 import { UndoToast } from "./features/ui/UndoToast";
 
@@ -30,7 +31,9 @@ export function App() {
     return (
       <div className="boot-screen">
         <div className="brand-mark">
-          <span className="logo-dot">F</span>
+          <span className="logo-dot">
+            <FerruleGlyph />
+          </span>
           <span>Ferrule</span>
         </div>
         <span>Booting mail core…</span>
@@ -42,7 +45,9 @@ export function App() {
     return (
       <div className="boot-screen error">
         <div className="brand-mark">
-          <span className="logo-dot">F</span>
+          <span className="logo-dot">
+            <FerruleGlyph />
+          </span>
           <span>Ferrule</span>
         </div>
         <span>Mail core failed to start: {app.error}</span>

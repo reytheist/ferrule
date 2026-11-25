@@ -30,7 +30,7 @@
     "targets": "all",
     "category": "Productivity",
     "copyright": "Copyright (c) Ferrule Contributors",
-    "licenseFile": "../LICENSE",
+    "licenseFile": "LICENSE-INSTALLER.txt",
     "shortDescription": "Low-memory email and staff collaboration client",
     "longDescription": "Local-first desktop email, shared calendar, and Pigment Staff collaboration client built with Tauri v2 and Rust.",
     "icon": [

@@ -1,5 +1,6 @@
 import { Moon, PenLine, Plus, RefreshCw, Search, Settings, Sun } from "lucide-react";
 import type { MailApp } from "../shell/useMailApp";
+import { FerruleGlyph } from "../ui/FerruleGlyph";
 
 const IS_MAC = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
 
@@ -35,7 +36,9 @@ export function Topbar({ app }: { app: MailApp }) {
   return (
     <header className="topbar">
       <div className="brand-mark">
-        <span className="logo-dot">F</span>
+        <span className="logo-dot">
+          <FerruleGlyph />
+        </span>
         <span>Ferrule</span>
       </div>
 
