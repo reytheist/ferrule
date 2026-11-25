@@ -340,7 +340,7 @@ export function OnboardingModal({ app }: { app: MailApp }) {
                       <label>Pigment Email</label>
                       <input
                         className="input"
-                        placeholder="e.g. info@pigmentminiatures.com"
+                        placeholder="e.g. info@pigmentshow.us"
                         value={staffEmail}
                         onChange={(event) => setStaffEmail(event.target.value)}
                       />

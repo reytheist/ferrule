@@ -16,7 +16,7 @@ Sign in with your Pigment staff account at **https://pigmentshow.us/ferrule** to
 
 1. Click **Add Account** in the left Account Space switcher (or open **Settings**).
 2. Choose the **Pigment Staff (IONOS)** preset.
-3. Enter your Pigment role email address (for example `info@pigmentminiatures.com`, `sponsors@pigmentminiatures.com`, `exhibition@pigmentminiatures.com`, `marketing@pigmentminiatures.com`, or `volunteers@pigmentminiatures.com`) and your IONOS mailbox password.
+3. Enter your Pigment role email address (for example `info@pigmentshow.us`, `sponsors@pigmentshow.us`, `exhibition@pigmentshow.us`, `marketing@pigmentshow.us`, or `volunteers@pigmentshow.us`) and your IONOS mailbox password.
 4. Click **Add Account**. Ferrule automatically configures `imap.ionos.com:993` (TLS) and `smtp.ionos.com:587` (STARTTLS) and saves your password strictly in your OS keychain.
 
 **Identity guard**: Pigment Staff spaces are color-coded and lock the **From** address to that space. If you also add a personal Gmail, Outlook, or iCloud account, personal spaces block accidental staff sharing by default.

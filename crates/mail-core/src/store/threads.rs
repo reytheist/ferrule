@@ -319,15 +319,19 @@ pub(crate) fn apply_mail_action(
 
         let (sql, params): (String, Vec<Value>) = match action {
             MailAction::Archive => (
-                format!("UPDATE thread SET archived = 1 WHERE id IN ({placeholders})"),
+                format!("UPDATE thread SET archived = 1, spam = 0 WHERE id IN ({placeholders})"),
                 values.clone(),
             ),
             MailAction::Unarchive => (
-                format!("UPDATE thread SET archived = 0, trashed = 0 WHERE id IN ({placeholders})"),
+                format!("UPDATE thread SET archived = 0, trashed = 0, spam = 0 WHERE id IN ({placeholders})"),
                 values.clone(),
             ),
             MailAction::Trash => (
-                format!("UPDATE thread SET trashed = 1 WHERE id IN ({placeholders})"),
+                format!("UPDATE thread SET trashed = 1, spam = 0 WHERE id IN ({placeholders})"),
+                values.clone(),
+            ),
+            MailAction::ReportSpam => (
+                format!("UPDATE thread SET spam = 1, archived = 0, trashed = 0 WHERE id IN ({placeholders})"),
                 values.clone(),
             ),
             MailAction::MarkRead { read } => (
@@ -373,6 +377,7 @@ pub(crate) fn apply_mail_action(
         // Restoring from trash clears both flags; trashing an already-archived thread
         // therefore lands in the inbox on undo, which matches user expectation.
         MailAction::Trash => Some(MailAction::Unarchive),
+        MailAction::ReportSpam => Some(MailAction::Unarchive),
         MailAction::MarkRead { read } => Some(MailAction::MarkRead { read: !read }),
         MailAction::Star { on } => Some(MailAction::Star { on: !on }),
     };
@@ -489,7 +494,7 @@ pub(crate) fn list_threads(
     let mut order = "t.last_at DESC, t.rowid DESC".to_string();
     match &query.view {
         MailboxView::Inbox { category } => {
-            wheres.push(("t.archived = 0 AND t.trashed = 0".to_string(), Vec::new()));
+            wheres.push(("t.archived = 0 AND t.trashed = 0 AND t.spam = 0".to_string(), Vec::new()));
             wheres.push((format!("NOT {SNOOZED_ARM}"), Vec::new()));
             if *category != InboxCategory::All {
                 wheres.push((
@@ -499,26 +504,26 @@ pub(crate) fn list_threads(
             }
         }
         MailboxView::Snoozed => {
-            wheres.push(("t.trashed = 0".to_string(), Vec::new()));
+            wheres.push(("t.trashed = 0 AND t.spam = 0".to_string(), Vec::new()));
             wheres.push((SNOOZED_ARM.to_string(), Vec::new()));
             order = "snoozed_until ASC, t.last_at DESC".to_string();
         }
         MailboxView::FollowUps => {
-            wheres.push(("t.trashed = 0".to_string(), Vec::new()));
+            wheres.push(("t.trashed = 0 AND t.spam = 0".to_string(), Vec::new()));
             wheres.push((FOLLOW_UP_LIVE.to_string(), Vec::new()));
             order = "follow_up_due ASC, t.last_at DESC".to_string();
         }
         MailboxView::Scheduled => {
-            wheres.push(("t.trashed = 0".to_string(), Vec::new()));
+            wheres.push(("t.trashed = 0 AND t.spam = 0".to_string(), Vec::new()));
             wheres.push((SEND_PENDING.to_string(), Vec::new()));
             order = "scheduled_at ASC, t.last_at DESC".to_string();
         }
         MailboxView::Sent => {
-            wheres.push(("t.trashed = 0".to_string(), Vec::new()));
+            wheres.push(("t.trashed = 0 AND t.spam = 0".to_string(), Vec::new()));
             wheres.push(sent_clause(&query.scope));
         }
         MailboxView::Drafts => {
-            wheres.push(("t.trashed = 0".to_string(), Vec::new()));
+            wheres.push(("t.trashed = 0 AND t.spam = 0".to_string(), Vec::new()));
             wheres.push((
                 "EXISTS (SELECT 1 FROM draft d WHERE d.reply_to_thread = t.id
                      AND json_extract(d.state_json, '$.kind') IN ('editing','pendingApproval','queued'))"
@@ -528,12 +533,15 @@ pub(crate) fn list_threads(
         }
         MailboxView::Starred => {
             wheres.push((
-                "t.archived = 0 AND t.trashed = 0 AND t.starred = 1".to_string(),
+                "t.archived = 0 AND t.trashed = 0 AND t.spam = 0 AND t.starred = 1".to_string(),
                 Vec::new(),
             ));
         }
         MailboxView::Archive => {
-            wheres.push(("t.archived = 1 AND t.trashed = 0".to_string(), Vec::new()));
+            wheres.push(("t.archived = 1 AND t.trashed = 0 AND t.spam = 0".to_string(), Vec::new()));
+        }
+        MailboxView::Spam => {
+            wheres.push(("t.spam = 1 AND t.trashed = 0".to_string(), Vec::new()));
         }
         MailboxView::Trash => {
             wheres.push(("t.trashed = 1".to_string(), Vec::new()));
@@ -545,7 +553,7 @@ pub(crate) fn list_threads(
             });
         }
         MailboxView::Search { text } => {
-            wheres.push(("t.trashed = 0".to_string(), Vec::new()));
+            wheres.push(("t.trashed = 0 AND t.spam = 0".to_string(), Vec::new()));
             wheres.push(search_fragment(conn, text)?);
         }
     }
@@ -686,7 +694,7 @@ pub(crate) fn mailbox_counts(
         }
     }
     let (scope_sql, scope_values) = scope_clause(scope)?;
-    let inbox_base = format!("t.archived = 0 AND t.trashed = 0 AND NOT {SNOOZED_ARM}");
+    let inbox_base = format!("t.archived = 0 AND t.trashed = 0 AND t.spam = 0 AND NOT {SNOOZED_ARM}");
 
     Ok(MailboxCounts {
         inbox: count_where(conn, &scope_sql, &scope_values, &inbox_base)?,

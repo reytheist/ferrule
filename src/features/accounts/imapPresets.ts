@@ -157,7 +157,7 @@ export const PIGMENT_STAFF_IONOS_PRESET: ImapServerPreset = {
   id: "ionos",
   name: "Pigment Staff (IONOS)",
   defaultSpaceName: "Pigment Staff",
-  emailPlaceholder: "info@pigmentminiatures.com",
+  emailPlaceholder: "info@pigmentshow.us",
   domains: ["ionos.com", "ionos.de", "ionos.co.uk", "1and1.com"],
   imap: { host: "imap.ionos.com", port: 993, tls: true },
   smtp: { host: "smtp.ionos.com", port: 587, tls: true },

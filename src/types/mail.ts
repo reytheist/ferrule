@@ -76,6 +76,7 @@ export type MailboxView =
   | { kind: "drafts" }
   | { kind: "starred" }
   | { kind: "archive" }
+  | { kind: "spam" }
   | { kind: "trash" }
   | { kind: "label"; labelId: LabelId }
   | { kind: "search"; text: string };
@@ -246,6 +247,7 @@ export type MailAction =
   | { kind: "archive" }
   | { kind: "unarchive" }
   | { kind: "trash" }
+  | { kind: "reportSpam" }
   | { kind: "markRead"; read: boolean }
   | { kind: "star"; on: boolean };
 

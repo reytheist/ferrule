@@ -122,6 +122,7 @@ pub enum MailboxView {
     Drafts,
     Starred,
     Archive,
+    Spam,
     Trash,
     Label { label_id: LabelId },
     Search { text: String },
@@ -402,6 +403,7 @@ pub enum MailAction {
     Archive,
     Unarchive,
     Trash,
+    ReportSpam,
     MarkRead { read: bool },
     Star { on: bool },
 }

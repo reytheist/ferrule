@@ -215,6 +215,34 @@ async fn archive_unarchive_star_and_read_are_idempotent() {
     core.act_on_threads(MailAction::Unarchive, vec![thread_id])
         .await
         .expect("undo");
+
+    // ReportSpam moves thread out of Inbox into Spam, and Unarchive restores it.
+    let spam_outcome = core
+        .act_on_threads(MailAction::ReportSpam, vec![thread_id])
+        .await
+        .expect("report spam");
+    assert_eq!(spam_outcome.undo_action, Some(MailAction::Unarchive));
+    assert!(!inbox_subjects(&core)
+        .await
+        .iter()
+        .any(|s| s.contains("Q2 illustration retainer")));
+    let spam_page = core
+        .list_threads(ThreadQuery {
+            scope: Scope::Unified,
+            view: MailboxView::Spam,
+            limit: 20,
+            offset: 0,
+        })
+        .await
+        .expect("list spam");
+    assert!(spam_page.items.iter().any(|t| t.id == thread_id));
+    core.act_on_threads(MailAction::Unarchive, vec![thread_id])
+        .await
+        .expect("restore from spam");
+    assert!(inbox_subjects(&core)
+        .await
+        .iter()
+        .any(|s| s.contains("Q2 illustration retainer")));
 }
 
 #[tokio::test]

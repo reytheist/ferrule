@@ -20,6 +20,7 @@ import {
   Search,
   Send,
   Settings,
+  ShieldAlert,
   SlidersHorizontal,
   Sparkles,
   Star,
@@ -145,10 +146,20 @@ export function CommandBar({ app }: { app: MailApp }) {
       },
       {
         id: "trash",
-        label: "Move current thread to trash",
+        label: "Delete current thread (move to Trash)",
+        hint: "Del",
         icon: Trash2,
         run: () => {
           if (selected) void app.trashThread(selected);
+        },
+      },
+      {
+        id: "spam",
+        label: "Report current thread as spam",
+        hint: "!",
+        icon: ShieldAlert,
+        run: () => {
+          if (selected) void app.reportSpam(selected);
         },
       },
       { id: "go-inbox", label: "Go to Unified Inbox", icon: Inbox, run: () => app.selectView({ kind: "inbox", category: "all" }) },
@@ -158,6 +169,7 @@ export function CommandBar({ app }: { app: MailApp }) {
       { id: "go-starred", label: "Go to Starred", icon: Star, run: () => app.selectView({ kind: "starred" }) },
       { id: "go-sent", label: "Go to Sent", icon: Send, run: () => app.selectView({ kind: "sent" }) },
       { id: "go-archive", label: "Go to Archive", icon: Archive, run: () => app.selectView({ kind: "archive" }) },
+      { id: "go-spam", label: "Go to Spam", icon: ShieldAlert, run: () => app.selectView({ kind: "spam" }) },
       { id: "go-trash", label: "Go to Trash", icon: Trash2, run: () => app.selectView({ kind: "trash" }) },
       { id: "go-shared", label: "Go to Shared with Me (Pigment Staff)", icon: Users, run: app.openSharedSection },
       { id: "go-calendar", label: "Go to Pigment Shared Calendar & Meetings", icon: CalendarDays, run: app.openCalendarSection },

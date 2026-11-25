@@ -196,6 +196,7 @@ export function SettingsModal({ app }: { app: MailApp }) {
                     <label>Pigment Email</label>
                     <input
                       className="input"
+                      placeholder="e.g. info@pigmentshow.us"
                       value={staffEmail}
                       onChange={(event) => setStaffEmail(event.target.value)}
                     />

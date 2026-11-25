@@ -14,8 +14,10 @@ import {
   MapPin,
   Paperclip,
   Share2,
+  ShieldAlert,
   ShieldCheck,
   Star,
+  Trash2,
   Users,
 } from "lucide-react";
 import type { CalendarInviteView, MessageView, RsvpStatus, ThreadView } from "../../types/mail";
@@ -304,7 +306,7 @@ function ReplyDock({ app, thread }: { app: MailApp; thread: ThreadView }) {
         <textarea
           ref={inputRef}
           className="reply-input"
-          rows={2}
+          rows={4}
           placeholder={`Reply to ${replyTarget}…`}
           value={app.replyText}
           onChange={(event) => app.setReplyText(event.target.value)}
@@ -389,6 +391,22 @@ export function ReadingPane({ app }: { app: MailApp }) {
           <button className="t-btn" onClick={() => void app.archiveThread(thread.id)}>
             <Archive />
             Archive <span className="k">E</span>
+          </button>
+          <button
+            className="t-btn"
+            onClick={() => void app.trashThread(thread.id)}
+            title="Delete (move to Trash)"
+          >
+            <Trash2 />
+            Delete <span className="k">Del</span>
+          </button>
+          <button
+            className="t-btn"
+            onClick={() => void app.reportSpam(thread.id)}
+            title="Report as spam"
+          >
+            <ShieldAlert />
+            Spam <span className="k">!</span>
           </button>
           <button
             className="t-btn"

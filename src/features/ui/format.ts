@@ -65,6 +65,8 @@ export function viewTitle(view: MailboxView): string {
       return "Starred";
     case "archive":
       return "Archive";
+    case "spam":
+      return "Spam";
     case "trash":
       return "Trash";
     case "label":

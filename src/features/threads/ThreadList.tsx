@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, Clock, ExternalLink, Inbox, RefreshCw, Star, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, Clock, ExternalLink, Inbox, RefreshCw, ShieldAlert, Star, Trash2 } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import type { InboxCategory, ThreadSummary } from "../../types/mail";
 import type { MailApp } from "../shell/useMailApp";
@@ -112,6 +112,26 @@ function ThreadRow({ app, thread }: { app: MailApp; thread: ThreadSummary }) {
           }}
         >
           <Star />
+        </button>
+        <button
+          className="icon-act"
+          title="Report spam (!)"
+          onClick={(event) => {
+            event.stopPropagation();
+            void app.reportSpam(thread.id);
+          }}
+        >
+          <ShieldAlert />
+        </button>
+        <button
+          className="icon-act"
+          title="Delete (Del)"
+          onClick={(event) => {
+            event.stopPropagation();
+            void app.trashThread(thread.id);
+          }}
+        >
+          <Trash2 />
         </button>
       </div>
     </div>

@@ -60,7 +60,7 @@ docker run -d \
 Bind the container to `127.0.0.1:8787` and terminate HTTPS with Caddy. Setting `flush_interval -1` ensures Server-Sent Events (`GET /v1/events`) stream immediately without proxy buffering:
 
 ```caddyfile
-sync.pigmentminiatures.com {
+sync.pigmentshow.us {
     reverse_proxy 127.0.0.1:8787 {
         flush_interval -1
     }
@@ -70,7 +70,7 @@ sync.pigmentminiatures.com {
 Verify TLS and health:
 
 ```bash
-curl -fsS https://sync.pigmentminiatures.com/health
+curl -fsS https://sync.pigmentshow.us/health
 ```
 
 ## Fly.io Deployment
@@ -141,15 +141,15 @@ Run this end-to-end checklist once before inviting the full Pigment staff team:
    - Never commit the token to git or paste it into public channels.
 2. **Deploy `staff-sync-server` with TLS**:
    - Set `STAFF_SYNC_TOKENS` and mount a persistent volume for `STAFF_SYNC_DB` (see Docker + Caddy or Fly.io above).
-   - Confirm `curl -fsS https://sync.pigmentminiatures.com/health` returns `{"status":"ok"}`.
+   - Confirm `curl -fsS https://sync.pigmentshow.us/health` returns `{"status":"ok"}`.
    - Confirm unauthenticated `GET /v1/snapshot` returns HTTP `401`, and authenticated `GET /v1/snapshot` with `Authorization: Bearer <token>` returns HTTP `200` with JSON.
-   - Confirm `curl -N -H "Authorization: Bearer <token>" https://sync.pigmentminiatures.com/v1/events` stays open with `Content-Type: text/event-stream` (verifying your reverse proxy does not buffer SSE).
+   - Confirm `curl -N -H "Authorization: Bearer <token>" https://sync.pigmentshow.us/v1/events` stays open with `Content-Type: text/event-stream` (verifying your reverse proxy does not buffer SSE).
 3. **Verify live Pigment IONOS login in Ferrule Desktop**:
    - Install the packaged Ferrule build from `release-artifacts/v<version>/`.
    - Add a Pigment role mailbox via **Add Account -> Pigment Staff (IONOS)** and confirm inbox sync and a test outbound email succeed.
    - Confirm the **From** address stays locked to the Pigment space and that credentials are stored in the OS keychain.
 4. **Verify live Staff Sync SSE across two clients (or two profiles)**:
-   - Open **Settings -> Pigment Staff Sync**, connect to `https://sync.pigmentminiatures.com` with the production token, and confirm the connection badge shows online.
+   - Open **Settings -> Pigment Staff Sync**, connect to `https://sync.pigmentshow.us` with the production token, and confirm the connection badge shows online.
    - Share a test thread from a Pigment space, add an internal comment or handoff status change, and confirm the second client receives the update in real time over SSE without manually refreshing.
 5. **Verify offline outbox flush**:
    - Temporarily disconnect Wi-Fi (or stop `staff-sync-server`), post an internal comment or toggle an action item, and confirm the UI displays `Offline (1 pending)`.

@@ -10,6 +10,7 @@ import {
   Inbox,
   Link2,
   Send,
+  ShieldAlert,
   Sparkles,
   Star,
   Trash2,
@@ -76,6 +77,13 @@ const ENTRIES: NavEntry[] = [
     label: "Archive",
     icon: Archive,
     view: { kind: "archive" },
+    count: () => null,
+  },
+  {
+    key: "spam",
+    label: "Spam",
+    icon: ShieldAlert,
+    view: { kind: "spam" },
     count: () => null,
   },
   {

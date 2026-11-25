@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS thread (
     starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)),
     archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
     trashed INTEGER NOT NULL DEFAULT 0 CHECK (trashed IN (0, 1)),
+    spam INTEGER NOT NULL DEFAULT 0 CHECK (spam IN (0, 1)),
     category TEXT NOT NULL DEFAULT 'primary' CHECK (category IN ('primary', 'receipts', 'newsletters')),
     trackers_blocked INTEGER NOT NULL DEFAULT 0,
     UNIQUE (account_id, remote_key)

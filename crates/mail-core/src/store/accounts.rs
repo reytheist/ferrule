@@ -358,7 +358,7 @@ pub(crate) fn account_unread(
     let count: i64 = conn
         .query_row(
             "SELECT COALESCE(SUM(t.unread_count), 0) FROM thread t
-             WHERE t.account_id = ?1 AND t.archived = 0 AND t.trashed = 0
+             WHERE t.account_id = ?1 AND t.archived = 0 AND t.trashed = 0 AND t.spam = 0
                AND NOT EXISTS (
                  SELECT 1 FROM job j WHERE j.thread_id = t.id AND j.kind = 'snooze'
                    AND j.live = 1 AND json_extract(j.state_json, '$.kind') = 'armed'

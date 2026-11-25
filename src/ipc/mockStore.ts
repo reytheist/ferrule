@@ -169,6 +169,7 @@ interface StoredThread {
   labels: LabelBadge[];
   archived: boolean;
   trashed: boolean;
+  spam?: boolean;
   sentByUser: boolean;
   pendingSendJob: JobId | null;
   messages: StoredMessage[];
@@ -487,9 +488,11 @@ function matchesView(thread: StoredThread, view: MailboxView): boolean {
     case "drafts":
       return false;
     case "starred":
-      return thread.starred && !thread.trashed;
+      return thread.starred && !thread.trashed && !thread.spam;
     case "archive":
-      return thread.archived && !thread.trashed;
+      return thread.archived && !thread.trashed && !thread.spam;
+    case "spam":
+      return Boolean(thread.spam) && !thread.trashed;
     case "trash":
       return thread.trashed;
     case "label":
@@ -1185,13 +1188,22 @@ export async function actOnThreads(
       case "archive":
         thread.archived = true;
         thread.trashed = false;
+        thread.spam = false;
         break;
       case "unarchive":
         thread.archived = false;
+        thread.trashed = false;
+        thread.spam = false;
         break;
       case "trash":
         thread.trashed = true;
         thread.archived = false;
+        thread.spam = false;
+        break;
+      case "reportSpam":
+        thread.spam = true;
+        thread.archived = false;
+        thread.trashed = false;
         break;
       case "markRead":
         for (const message of thread.messages) message.read = action.read;
@@ -1502,7 +1514,7 @@ function seedMockStaffDemo(): void {
     serverUrl: "local://pigment-demo",
     staffName: "Reyth",
     staffHandle: "reyth",
-    staffEmail: "info@pigmentminiatures.com",
+    staffEmail: "info@pigmentshow.us",
     staffRole: "Show Director",
     connectedAt: t - 3 * DAY,
     lastSyncAt: t - 2 * MINUTE,
@@ -1516,7 +1528,7 @@ function seedMockStaffDemo(): void {
       name: "Reyth",
       role: "Show Director",
       handle: "reyth",
-      email: "info@pigmentminiatures.com",
+      email: "info@pigmentshow.us",
       department: "operations",
       updatedAt: t,
     },
@@ -1525,7 +1537,7 @@ function seedMockStaffDemo(): void {
       name: "Maya Chen",
       role: "Sponsors Lead",
       handle: "maya",
-      email: "sponsors@pigmentminiatures.com",
+      email: "sponsors@pigmentshow.us",
       department: "sponsors",
       updatedAt: t,
     },
@@ -1534,7 +1546,7 @@ function seedMockStaffDemo(): void {
       name: "Devon Brooks",
       role: "Exhibition Coordinator",
       handle: "devon",
-      email: "exhibition@pigmentminiatures.com",
+      email: "exhibition@pigmentshow.us",
       department: "exhibition",
       updatedAt: t,
     },
@@ -1543,7 +1555,7 @@ function seedMockStaffDemo(): void {
       name: "Tessa Morales",
       role: "Marketing Lead",
       handle: "tessa",
-      email: "marketing@pigmentminiatures.com",
+      email: "marketing@pigmentshow.us",
       department: "marketing",
       updatedAt: t,
     },
@@ -1552,7 +1564,7 @@ function seedMockStaffDemo(): void {
       name: "Sam Patel",
       role: "Volunteer Coordinator",
       handle: "sam",
-      email: "volunteers@pigmentminiatures.com",
+      email: "volunteers@pigmentshow.us",
       department: "volunteers",
       updatedAt: t,
     },
@@ -1637,7 +1649,7 @@ function seedMockStaffDemo(): void {
     {
       id: newPinnedLinkId(),
       title: "Pigment Admin Portal",
-      url: "https://pigmentminiatures.com/admin",
+      url: "https://pigmentshow.us/admin",
       category: "admin",
       description: "Registrations, exhibitor badges, and ticket check-in",
       position: 1,
@@ -1670,17 +1682,17 @@ function seedMockStaffDemo(): void {
       id: sharedId,
       sourceThreadId: null,
       sourceAccountId: null,
-      ownerEmail: "sponsors@pigmentminiatures.com",
+      ownerEmail: "sponsors@pigmentshow.us",
       ownerName: "Maya Chen",
       subject: "Gold Sponsor corner booth + lighting drop request",
       snippet: "Could we reserve Corner Booth A1 again and add a 20A power drop?",
-      participants: ["dana@ferngate.co", "sponsors@pigmentminiatures.com"],
+      participants: ["dana@ferngate.co", "sponsors@pigmentshow.us"],
       messages: [
         {
           id: "snap-1",
           fromName: "Dana Okafor",
           fromEmail: "dana@ferngate.co",
-          to: ["sponsors@pigmentminiatures.com"],
+          to: ["sponsors@pigmentshow.us"],
           cc: [],
           date: t - 3 * HOUR,
           snippet: "Could we reserve Corner Booth A1 again and add a 20A power drop?",

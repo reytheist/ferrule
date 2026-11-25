@@ -320,6 +320,7 @@ export interface MailApp {
   openThread(id: ThreadId): void;
   archiveThread(id: ThreadId): void;
   trashThread(id: ThreadId): void;
+  reportSpam(id: ThreadId): void;
   starThread(id: ThreadId): void;
   snooze(id: ThreadId, until: UnixMs): Promise<void>;
   followUp(id: ThreadId, dueAt: UnixMs): Promise<void>;
@@ -763,7 +764,32 @@ export function useMailApp(): MailApp {
       await actOnThreads({ kind: "trash" }, [id]);
       if (selectedId === id) clearSelection();
       await reload(scope, view);
-      showToast("Moved to trash");
+      await reloadMeta();
+      showToast("Deleted (moved to Trash)", {
+        onUndo: async () => {
+          await actOnThreads({ kind: "unarchive" }, [id]);
+          await reload(scope, view);
+          await reloadMeta();
+        },
+      });
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function reportSpam(id: ThreadId): Promise<void> {
+    try {
+      await actOnThreads({ kind: "reportSpam" }, [id]);
+      if (selectedId === id) clearSelection();
+      await reload(scope, view);
+      await reloadMeta();
+      showToast("Reported as spam", {
+        onUndo: async () => {
+          await actOnThreads({ kind: "unarchive" }, [id]);
+          await reload(scope, view);
+          await reloadMeta();
+        },
+      });
     } catch (err) {
       showToast(friendlyError(err));
     }
@@ -1479,6 +1505,8 @@ export function useMailApp(): MailApp {
       addAccountOpen ||
       templatesOpen ||
       settingsOpen ||
+      onboardingOpen ||
+      tourOpen ||
       shareModalOpen ||
       contactsOpen ||
       pinnedLinksOpen ||
@@ -1500,6 +1528,19 @@ export function useMailApp(): MailApp {
         break;
       case "e":
         if (selectedId) void archiveThread(selectedId);
+        break;
+      case "#":
+      case "delete":
+        if (selectedId) {
+          event.preventDefault();
+          void trashThread(selectedId);
+        }
+        break;
+      case "!":
+        if (selectedId) {
+          event.preventDefault();
+          void reportSpam(selectedId);
+        }
         break;
       case "h":
         if (selectedId) requestSnooze(selectedId, centerAnchor());
@@ -1951,6 +1992,7 @@ export function useMailApp(): MailApp {
     openThread,
     archiveThread,
     trashThread,
+    reportSpam,
     starThread,
     snooze,
     followUp,

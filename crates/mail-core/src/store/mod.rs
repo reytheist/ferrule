@@ -45,6 +45,9 @@ ALTER TABLE action_item ADD COLUMN start_time TEXT;
 ALTER TABLE action_item ADD COLUMN end_time TEXT;
 ALTER TABLE action_item ADD COLUMN calendar_event_id BLOB REFERENCES calendar_event(id) ON DELETE SET NULL;";
 const MIGRATION_0007_STAFF_OUTBOX: &str = include_str!("0004_staff_outbox.sql");
+/// Adds `spam` flag to `thread` for Report Spam / Spam mailbox view.
+const MIGRATION_0008_THREAD_SPAM: &str =
+    "ALTER TABLE thread ADD COLUMN spam INTEGER NOT NULL DEFAULT 0 CHECK (spam IN (0, 1));";
 
 pub(crate) struct Store {
     conn: Mutex<Connection>,
@@ -108,6 +111,12 @@ impl Store {
             .map_err(|e| CoreError::Storage {
                 reason: format!("run migration 0007: {e}"),
             })?;
+        if !column_exists(&conn, "thread", "spam")? {
+            conn.execute_batch(MIGRATION_0008_THREAD_SPAM)
+                .map_err(|e| CoreError::Storage {
+                    reason: format!("run migration 0008: {e}"),
+                })?;
+        }
         let mut conn = conn;
         purge_legacy_demo_data(&mut conn)?;
         Ok(Self {
