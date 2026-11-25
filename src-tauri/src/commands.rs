@@ -2,9 +2,10 @@ use mail_core::calendar::{
     ActionItemStatus, ActionItemView, AddInviteToCalendarInput, AvailabilityQuery,
     AvailabilitySlot, CalendarEventView, CalendarInviteView, CalendarOccurrence,
     CalendarRangeQuery, DiscordWebhookStatus, IcsOverlayView, MeetingDocView, OverlayBusyBlock,
-    PromoteActionItemInput, RsvpInviteInput, SaveCalendarEventInput, SaveIcsOverlayInput,
-    UpdateMeetingDocInput,
+    PromoteActionItemInput, RsvpInviteInput, SaveActionItemInput, SaveCalendarEventInput,
+    SaveIcsOverlayInput, UpdateMeetingDocInput,
 };
+use mail_core::workbook::{ImportWorkbookInput, WorkbookImportReport};
 use mail_core::error::CoreError;
 use mail_core::ids::{
     AccountId, ActionItemId, CalendarEventId, ContactId, DraftId, IcsOverlayId, JobId,
@@ -490,6 +491,46 @@ pub async fn list_action_items(
     core: tauri::State<'_, MailCore>,
 ) -> Result<Vec<ActionItemView>, CoreError> {
     core.list_action_items().await
+}
+
+// ---------------------------------------------------------------- Phase D: Action Items & Workbook
+
+#[tauri::command]
+pub async fn save_action_item(
+    core: tauri::State<'_, MailCore>,
+    input: SaveActionItemInput,
+) -> Result<ActionItemView, CoreError> {
+    core.save_action_item(input).await
+}
+
+#[tauri::command]
+pub async fn delete_action_item(
+    core: tauri::State<'_, MailCore>,
+    action_item_id: ActionItemId,
+) -> Result<(), CoreError> {
+    core.delete_action_item(action_item_id).await
+}
+
+#[tauri::command]
+pub async fn import_operations_workbook(
+    core: tauri::State<'_, MailCore>,
+    input: ImportWorkbookInput,
+) -> Result<WorkbookImportReport, CoreError> {
+    core.import_operations_workbook(input).await
+}
+
+#[tauri::command]
+pub async fn export_action_items_csv(
+    core: tauri::State<'_, MailCore>,
+) -> Result<String, CoreError> {
+    core.export_action_items_csv().await
+}
+
+#[tauri::command]
+pub async fn export_show_contacts_csv(
+    core: tauri::State<'_, MailCore>,
+) -> Result<String, CoreError> {
+    core.export_show_contacts_csv().await
 }
 
 #[tauri::command]

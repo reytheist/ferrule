@@ -2,6 +2,7 @@ import {
   Archive,
   CalendarClock,
   CalendarDays,
+  CheckSquare,
   Contact,
   ExternalLink,
   FileText,
@@ -134,6 +135,17 @@ export function MailboxSidebar({ app }: { app: MailApp }) {
         <CalendarDays />
         <span className="nav-label">Calendar</span>
         <span className="nav-count">{app.calendarOccurrences.length}</span>
+      </button>
+      <button
+        className={`nav-item${app.activeSection === "actions" ? " active" : ""}`}
+        onClick={app.openActionsSection}
+        title="Pigment Shared Action Items & Operations Workbook"
+      >
+        <CheckSquare />
+        <span className="nav-label">Action Items</span>
+        <span className="nav-count">
+          {app.actionItems.filter((a) => a.status === "open").length}
+        </span>
       </button>
       <button className="nav-item" onClick={app.openContacts} title="Shared Show Contacts">
         <Contact />

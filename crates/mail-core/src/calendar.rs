@@ -309,14 +309,53 @@ pub struct ActionItemView {
     pub assignee_handle: Option<String>,
     pub status: ActionItemStatus,
     pub due_at: Option<UnixMs>,
+    #[serde(default)]
+    pub start_time: Option<String>,
+    #[serde(default)]
+    pub end_time: Option<String>,
     pub location: Option<String>,
     pub cost_note: Option<String>,
+    #[serde(default)]
+    pub calendar_event_id: Option<CalendarEventId>,
     pub source_event_id: Option<CalendarEventId>,
     pub source_series_id: Option<String>,
     pub source_thread_id: Option<ThreadId>,
     pub created_by: String,
     pub created_at: UnixMs,
     pub updated_at: UnixMs,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveActionItemInput {
+    pub id: Option<ActionItemId>,
+    pub title: String,
+    #[serde(default)]
+    pub department: Option<String>,
+    #[serde(default)]
+    pub milestone: Option<String>,
+    #[serde(default)]
+    pub assignee_handle: Option<String>,
+    #[serde(default)]
+    pub status: ActionItemStatus,
+    #[serde(default)]
+    pub due_at: Option<UnixMs>,
+    #[serde(default)]
+    pub start_time: Option<String>,
+    #[serde(default)]
+    pub end_time: Option<String>,
+    #[serde(default)]
+    pub location: Option<String>,
+    #[serde(default)]
+    pub cost_note: Option<String>,
+    #[serde(default)]
+    pub source_event_id: Option<CalendarEventId>,
+    #[serde(default)]
+    pub source_series_id: Option<String>,
+    #[serde(default)]
+    pub source_thread_id: Option<ThreadId>,
+    #[serde(default)]
+    pub sync_to_calendar: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

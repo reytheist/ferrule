@@ -221,13 +221,18 @@ pub(crate) fn delete_calendar_event(
 // ── Meeting Docs & Action Items (with Recurring Carryover) ──────────────────
 
 fn map_action_item(row: &Row<'_>) -> Result<ActionItemView, CoreError> {
+    let calendar_event_id = row
+        .get::<_, Option<Vec<u8>>>(11)
+        .sq()?
+        .map(|b| blob_to_id(&b, CalendarEventId::from_bytes))
+        .transpose()?;
     let source_event_id = row
-        .get::<_, Option<Vec<u8>>>(9)
+        .get::<_, Option<Vec<u8>>>(12)
         .sq()?
         .map(|b| blob_to_id(&b, CalendarEventId::from_bytes))
         .transpose()?;
     let source_thread_id = row
-        .get::<_, Option<Vec<u8>>>(11)
+        .get::<_, Option<Vec<u8>>>(14)
         .sq()?
         .map(|b| blob_to_id(&b, ThreadId::from_bytes))
         .transpose()?;
@@ -239,18 +244,21 @@ fn map_action_item(row: &Row<'_>) -> Result<ActionItemView, CoreError> {
         assignee_handle: row.get(4).sq()?,
         status: ActionItemStatus::from_db(&row.get::<_, String>(5).sq()?),
         due_at: row.get::<_, Option<i64>>(6).sq()?.map(UnixMs),
-        location: row.get(7).sq()?,
-        cost_note: row.get(8).sq()?,
+        start_time: row.get(7).sq()?,
+        end_time: row.get(8).sq()?,
+        location: row.get(9).sq()?,
+        cost_note: row.get(10).sq()?,
+        calendar_event_id,
         source_event_id,
-        source_series_id: row.get(10).sq()?,
+        source_series_id: row.get(13).sq()?,
         source_thread_id,
-        created_by: row.get(12).sq()?,
-        created_at: UnixMs(row.get(13).sq()?),
-        updated_at: UnixMs(row.get(14).sq()?),
+        created_by: row.get(15).sq()?,
+        created_at: UnixMs(row.get(16).sq()?),
+        updated_at: UnixMs(row.get(17).sq()?),
     })
 }
 
-const ACTION_COLS: &str = "id, title, department, milestone, assignee_handle, status, due_at, location, cost_note, source_event_id, source_series_id, source_thread_id, created_by, created_at, updated_at";
+const ACTION_COLS: &str = "id, title, department, milestone, assignee_handle, status, due_at, start_time, end_time, location, cost_note, calendar_event_id, source_event_id, source_series_id, source_thread_id, created_by, created_at, updated_at";
 
 pub(crate) fn list_action_items(conn: &mut Connection) -> Result<Vec<ActionItemView>, CoreError> {
     let sql = format!(
@@ -279,9 +287,10 @@ pub(crate) fn upsert_action_item_row(
     conn.execute(
         "INSERT INTO action_item (
             id, title, department, milestone, assignee_handle, status, due_at,
-            location, cost_note, source_event_id, source_series_id, source_thread_id,
+            start_time, end_time, location, cost_note, calendar_event_id,
+            source_event_id, source_series_id, source_thread_id,
             created_by, created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
          ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             department = excluded.department,
@@ -289,8 +298,11 @@ pub(crate) fn upsert_action_item_row(
             assignee_handle = excluded.assignee_handle,
             status = excluded.status,
             due_at = excluded.due_at,
+            start_time = excluded.start_time,
+            end_time = excluded.end_time,
             location = excluded.location,
             cost_note = excluded.cost_note,
+            calendar_event_id = excluded.calendar_event_id,
             source_event_id = excluded.source_event_id,
             source_series_id = excluded.source_series_id,
             source_thread_id = excluded.source_thread_id,
@@ -303,8 +315,11 @@ pub(crate) fn upsert_action_item_row(
             item.assignee_handle,
             item.status.as_str(),
             item.due_at.map(|t| t.0),
+            item.start_time,
+            item.end_time,
             item.location,
             item.cost_note,
+            item.calendar_event_id.map(|id| id_to_blob(id.as_bytes())),
             item.source_event_id.map(|id| id_to_blob(id.as_bytes())),
             item.source_series_id,
             item.source_thread_id.map(|id| id_to_blob(id.as_bytes())),
@@ -315,6 +330,19 @@ pub(crate) fn upsert_action_item_row(
     )
     .sq()?;
     Ok(())
+}
+
+pub(crate) fn delete_action_item(
+    conn: &mut Connection,
+    id: ActionItemId,
+) -> Result<bool, CoreError> {
+    let rows = conn
+        .execute(
+            "DELETE FROM action_item WHERE id = ?1",
+            params![id_to_blob(id.as_bytes())],
+        )
+        .sq()?;
+    Ok(rows > 0)
 }
 
 pub(crate) fn update_action_item_status(
@@ -865,8 +893,11 @@ pub(crate) fn seed_local_calendar_demo(
         assignee_handle: Some("marcus".to_string()),
         status: ActionItemStatus::Open,
         due_at: Some(UnixMs(base_day + 2 * day_ms)),
+        start_time: Some("14:00".to_string()),
+        end_time: Some("15:30".to_string()),
         location: Some("Ballroom A".to_string()),
-        cost_note: None,
+        cost_note: Some("$450 AV drop".to_string()),
+        calendar_event_id: Some(room_walk_id),
         source_event_id: Some(prev_sync_id),
         source_series_id: Some(series.clone()),
         source_thread_id: None,
@@ -875,6 +906,92 @@ pub(crate) fn seed_local_calendar_demo(
         updated_at: now,
     };
     upsert_action_item_row(conn, &carryover)?;
+
+    let workbook_seed = [
+        ActionItemView {
+            id: ActionItemId::derive(uuid::Uuid::NAMESPACE_URL, b"ferrule:demo:act:wb-1"),
+            title: "Collect Gold Sponsor logos for program print".to_string(),
+            department: Some("sponsors".to_string()),
+            milestone: Some("PMS 2027".to_string()),
+            assignee_handle: Some("maya".to_string()),
+            status: ActionItemStatus::Open,
+            due_at: Some(UnixMs(base_day + 3 * day_ms)),
+            start_time: None,
+            end_time: None,
+            location: None,
+            cost_note: None,
+            calendar_event_id: Some(sponsor_deadline_id),
+            source_event_id: Some(this_sync_id),
+            source_series_id: Some(series.clone()),
+            source_thread_id: None,
+            created_by: "reyth".to_string(),
+            created_at: UnixMs(base_day - 2 * day_ms),
+            updated_at: now,
+        },
+        ActionItemView {
+            id: ActionItemId::derive(uuid::Uuid::NAMESPACE_URL, b"ferrule:demo:act:wb-2"),
+            title: "Order 24 acrylic display plinths & velvet risers".to_string(),
+            department: Some("shopping-list".to_string()),
+            milestone: Some("PMS 2027".to_string()),
+            assignee_handle: None,
+            status: ActionItemStatus::Open,
+            due_at: Some(UnixMs(base_day - day_ms)),
+            start_time: None,
+            end_time: None,
+            location: Some("Exhibition Hall".to_string()),
+            cost_note: Some("$680".to_string()),
+            calendar_event_id: None,
+            source_event_id: None,
+            source_series_id: None,
+            source_thread_id: None,
+            created_by: "reyth".to_string(),
+            created_at: UnixMs(base_day - 5 * day_ms),
+            updated_at: now,
+        },
+        ActionItemView {
+            id: ActionItemId::derive(uuid::Uuid::NAMESPACE_URL, b"ferrule:demo:act:wb-3"),
+            title: "Publish workshop registration banner & Discord announcement".to_string(),
+            department: Some("marketing".to_string()),
+            milestone: Some("PMS 2027".to_string()),
+            assignee_handle: Some("reyth".to_string()),
+            status: ActionItemStatus::Open,
+            due_at: Some(UnixMs(base_day + 5 * day_ms)),
+            start_time: Some("10:00".to_string()),
+            end_time: Some("11:00".to_string()),
+            location: None,
+            cost_note: None,
+            calendar_event_id: None,
+            source_event_id: None,
+            source_series_id: None,
+            source_thread_id: None,
+            created_by: "reyth".to_string(),
+            created_at: UnixMs(base_day - 3 * day_ms),
+            updated_at: now,
+        },
+        ActionItemView {
+            id: ActionItemId::derive(uuid::Uuid::NAMESPACE_URL, b"ferrule:demo:act:wb-4"),
+            title: "Book promo table & badges for ReaperCon outreach".to_string(),
+            department: Some("marketing".to_string()),
+            milestone: Some("ReaperCon 2027".to_string()),
+            assignee_handle: Some("tessa".to_string()),
+            status: ActionItemStatus::Done,
+            due_at: Some(UnixMs(base_day - 4 * day_ms)),
+            start_time: None,
+            end_time: None,
+            location: Some("Denton Convention Center".to_string()),
+            cost_note: Some("$250".to_string()),
+            calendar_event_id: None,
+            source_event_id: None,
+            source_series_id: None,
+            source_thread_id: None,
+            created_by: "reyth".to_string(),
+            created_at: UnixMs(base_day - 10 * day_ms),
+            updated_at: now,
+        },
+    ];
+    for item in &workbook_seed {
+        upsert_action_item_row(conn, item)?;
+    }
 
     let doc = MeetingDocView {
         event_id: this_sync_id,

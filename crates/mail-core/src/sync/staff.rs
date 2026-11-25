@@ -241,6 +241,11 @@ impl StaffSyncClient {
         self.put_json(&url, item).await
     }
 
+    pub(crate) async fn delete_action_item(&self, id: ActionItemId) -> Result<(), CoreError> {
+        let url = format!("{}/v1/action-items/{id}", self.base_url);
+        self.delete_url(&url).await
+    }
+
     async fn post_json<T: Serialize>(&self, url: &str, body: &T) -> Result<(), CoreError> {
         let resp = self
             .http

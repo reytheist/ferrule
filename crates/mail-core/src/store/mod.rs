@@ -38,6 +38,12 @@ const MIGRATION_0003_ACCOUNT_SPACE_KIND: &str =
     "ALTER TABLE account ADD COLUMN space_kind TEXT NOT NULL DEFAULT 'personal' CHECK (space_kind IN ('personal', 'pigment_staff'));";
 const MIGRATION_0004_STAFF_COLLAB: &str = include_str!("0002_staff_collab.sql");
 const MIGRATION_0005_CALENDAR_MEETINGS: &str = include_str!("0003_calendar_meetings.sql");
+/// Phase D: adds optional `start_time`, `end_time`, and `calendar_event_id` to existing
+/// `action_item` tables created in Phase C.
+const MIGRATION_0006_ACTION_ITEM_SCHEDULE: &str = "\
+ALTER TABLE action_item ADD COLUMN start_time TEXT;
+ALTER TABLE action_item ADD COLUMN end_time TEXT;
+ALTER TABLE action_item ADD COLUMN calendar_event_id BLOB REFERENCES calendar_event(id) ON DELETE SET NULL;";
 
 pub(crate) struct Store {
     conn: Mutex<Connection>,
@@ -91,6 +97,12 @@ impl Store {
             .map_err(|e| CoreError::Storage {
                 reason: format!("run migration 0005: {e}"),
             })?;
+        if !column_exists(&conn, "action_item", "start_time")? {
+            conn.execute_batch(MIGRATION_0006_ACTION_ITEM_SCHEDULE)
+                .map_err(|e| CoreError::Storage {
+                    reason: format!("run migration 0006: {e}"),
+                })?;
+        }
         Ok(Self {
             conn: Mutex::new(conn),
         })

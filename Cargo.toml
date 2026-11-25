@@ -29,3 +29,4 @@ sha2 = "0.10"
 base64 = "0.22"
 url = "2"
 open = "5"
+calamine = { version = "0.38", features = ["dates"] }

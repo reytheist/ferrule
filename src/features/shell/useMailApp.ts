@@ -7,6 +7,7 @@ import {
   cancelSend,
   connectStaffWorkspace as connectStaffWorkspaceCommand,
   createDraft,
+  deleteActionItem as deleteActionItemCommand,
   deleteCalendarEvent as deleteCalendarEventCommand,
   deleteIcsOverlay as deleteIcsOverlayCommand,
   deletePinnedLink as deletePinnedLinkCommand,
@@ -15,13 +16,17 @@ import {
   deleteTemplate,
   disconnectStaffWorkspace as disconnectStaffWorkspaceCommand,
   dismissFollowUp,
+  exportActionItemsCsv,
+  exportShowContactsCsv,
   findSharedThreadForLocal,
   formatMeetingRecap as formatMeetingRecapCommand,
   getDiscordWebhookStatus,
   getMeetingDoc as getMeetingDocCommand,
   getSettings,
   getStaffWorkspace,
+  importOperationsWorkbook as importOperationsWorkbookCommand,
   listAccounts,
+  listActionItems,
   listCalendarEvents,
   listIcsOverlays,
   listJobs,
@@ -45,6 +50,7 @@ import {
   refreshIcsOverlay as refreshIcsOverlayCommand,
   removeAccount as removeAccountCommand,
   rsvpCalendarInvite as rsvpCalendarInviteCommand,
+  saveActionItem as saveActionItemCommand,
   saveCalendarEvent as saveCalendarEventCommand,
   saveIcsOverlay as saveIcsOverlayCommand,
   savePinnedLink as savePinnedLinkCommand,
@@ -74,6 +80,7 @@ import type {
   AccountView,
   ActionItemId,
   ActionItemStatus,
+  ActionItemView,
   AddInviteToCalendarInput,
   AddSharedCommentInput,
   AppSettings,
@@ -85,6 +92,7 @@ import type {
   CreateDraftInput,
   IcsOverlayId,
   IcsOverlayView,
+  ImportWorkbookInput,
   InboxCategory,
   JobId,
   JobView,
@@ -100,6 +108,7 @@ import type {
   PromoteActionItemInput,
   RemoteContent,
   RsvpInviteInput,
+  SaveActionItemInput,
   SaveCalendarEventInput,
   SaveIcsOverlayInput,
   SavePinnedLinkInput,
@@ -128,14 +137,17 @@ import type {
   UpdateHandoffInput,
   UpdateMeetingDocInput,
   UpdateSharedDraftInput,
+  WorkbookImportReport,
+  WorkbookImportTarget,
 } from "../../types/mail";
+import type { ActionItemDraftSeed } from "../actions/ActionItemModal";
 import { formatDue } from "../ui/format";
 
 export type Theme = "dark" | "light";
 export type Layout = "split" | "classic";
 export type Stage = "list" | "thread";
 export type PopoverMode = "snooze" | "followUp" | "sendLater";
-export type ActiveSection = "mail" | "shared" | "calendar";
+export type ActiveSection = "mail" | "shared" | "calendar" | "actions";
 
 const EMPTY_STAFF_WORKSPACE: StaffWorkspaceView = {
   connected: false,
@@ -271,6 +283,10 @@ export interface MailApp {
   selectedCalendarEvent: CalendarEventView | null;
   activeMeetingDoc: MeetingDocView | null;
   discordWebhookConfigured: boolean;
+  actionItems: ActionItemView[];
+  actionItemModalSeed: ActionItemDraftSeed | null;
+  workbookImportOpen: boolean;
+  workbookImportTarget: WorkbookImportTarget;
 
   toggleTheme(): void;
   toggleLayout(): void;
@@ -361,6 +377,17 @@ export interface MailApp {
   saveDiscordWebhook(url: string | null): Promise<void>;
   copyDiscordRecap(eventId: CalendarEventId): Promise<void>;
   postDiscordRecap(eventId: CalendarEventId): Promise<void>;
+  openActionsSection(): void;
+  openNewActionItemModal(seed?: ActionItemDraftSeed): void;
+  closeNewActionItemModal(): void;
+  openWorkbookImport(target?: WorkbookImportTarget): void;
+  closeWorkbookImport(): void;
+  persistActionItem(input: SaveActionItemInput): Promise<ActionItemView>;
+  removeActionItem(id: ActionItemId): Promise<void>;
+  jumpToCalendarEvent(eventId: CalendarEventId): Promise<void>;
+  importWorkbook(input: ImportWorkbookInput): Promise<WorkbookImportReport>;
+  downloadActionItemsCsv(): Promise<void>;
+  downloadShowContactsCsv(): Promise<void>;
 }
 
 export function useMailApp(): MailApp {
@@ -417,6 +444,10 @@ export function useMailApp(): MailApp {
   );
   const [activeMeetingDoc, setActiveMeetingDoc] = useState<MeetingDocView | null>(null);
   const [discordWebhookConfigured, setDiscordWebhookConfigured] = useState(false);
+  const [actionItems, setActionItems] = useState<ActionItemView[]>([]);
+  const [actionItemModalSeed, setActionItemModalSeed] = useState<ActionItemDraftSeed | null>(null);
+  const [workbookImportOpen, setWorkbookImportOpen] = useState(false);
+  const [workbookImportTarget, setWorkbookImportTarget] = useState<WorkbookImportTarget>("auto");
 
   const toastSeq = useRef(0);
   const insertSeq = useRef(0);
@@ -454,7 +485,7 @@ export function useMailApp(): MailApp {
 
   const reloadStaff = useCallback(async () => {
     const nowMs = Date.now();
-    const [ws, dir, shared, sharedTpls, contacts, links, overlays, webhook, upcoming] =
+    const [ws, dir, shared, sharedTpls, contacts, links, overlays, webhook, upcoming, actions] =
       await Promise.all([
         getStaffWorkspace(),
         listStaffDirectory(),
@@ -468,6 +499,7 @@ export function useMailApp(): MailApp {
           rangeStart: nowMs - 7 * 86_400_000,
           rangeEnd: nowMs + 30 * 86_400_000,
         }),
+        listActionItems(),
       ]);
     setStaffWorkspace(ws);
     setStaffDirectory(dir);
@@ -478,6 +510,7 @@ export function useMailApp(): MailApp {
     setIcsOverlays(overlays);
     setDiscordWebhookConfigured(webhook.configured);
     setCalendarOccurrences(upcoming);
+    setActionItems(actions);
   }, []);
 
   const reloadMeta = useCallback(async () => {
@@ -597,6 +630,9 @@ export function useMailApp(): MailApp {
   }, [scope, view, reload]);
 
   function openThread(id: ThreadId): void {
+    setActiveSection("mail");
+    setSelectedSharedId(null);
+    setActiveSharedThread(null);
     setSelectedId(id);
     setExpanded(new Set());
     setReplyText("");
@@ -1457,8 +1493,12 @@ export function useMailApp(): MailApp {
   async function promoteAgendaToAction(input: PromoteActionItemInput): Promise<void> {
     try {
       const item = await promoteToActionItemCommand(input);
-      const refreshed = await getMeetingDocCommand(input.eventId);
+      const [refreshed, nextItems] = await Promise.all([
+        getMeetingDocCommand(input.eventId),
+        listActionItems(),
+      ]);
       setActiveMeetingDoc(refreshed);
+      setActionItems(nextItems);
       showToast(`Promoted to Action Item: ${item.title}`);
     } catch (err) {
       showToast(friendlyError(err));
@@ -1468,6 +1508,8 @@ export function useMailApp(): MailApp {
   async function setActionItemStatus(id: ActionItemId, status: ActionItemStatus): Promise<void> {
     try {
       await toggleActionItemCommand(id, status);
+      const nextItems = await listActionItems();
+      setActionItems(nextItems);
       if (selectedCalendarEvent) {
         const refreshed = await getMeetingDocCommand(selectedCalendarEvent.id);
         setActiveMeetingDoc(refreshed);
@@ -1591,6 +1633,132 @@ export function useMailApp(): MailApp {
     }
   }
 
+  function openActionsSection(): void {
+    setActiveSection("actions");
+    setSelectedId(null);
+    setThread(null);
+    setSelectedSharedId(null);
+    setActiveSharedThread(null);
+    void reloadStaff().catch(() => undefined);
+  }
+
+  function openNewActionItemModal(seed?: ActionItemDraftSeed): void {
+    setActionItemModalSeed(seed ?? {});
+  }
+
+  function closeNewActionItemModal(): void {
+    setActionItemModalSeed(null);
+  }
+
+  function openWorkbookImport(target: WorkbookImportTarget = "auto"): void {
+    setWorkbookImportTarget(target);
+    setWorkbookImportOpen(true);
+  }
+
+  function closeWorkbookImport(): void {
+    setWorkbookImportOpen(false);
+  }
+
+  async function persistActionItem(input: SaveActionItemInput): Promise<ActionItemView> {
+    const saved = await saveActionItemCommand(input);
+    await reloadStaff();
+    showToast(input.id ? "Action item updated" : "Action item created");
+    return saved;
+  }
+
+  async function removeActionItem(id: ActionItemId): Promise<void> {
+    try {
+      await deleteActionItemCommand(id);
+      const next = await listActionItems();
+      setActionItems(next);
+      showToast("Action item deleted");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function jumpToCalendarEvent(eventId: CalendarEventId): Promise<void> {
+    setActiveSection("calendar");
+    setSelectedId(null);
+    setThread(null);
+    setSelectedSharedId(null);
+    setActiveSharedThread(null);
+    const match = calendarOccurrences.find((o) => o.event.id === eventId)?.event;
+    if (match) {
+      await selectCalendarEvent(match);
+      return;
+    }
+    try {
+      const nowMs = Date.now();
+      const occs = await listCalendarEvents({
+        rangeStart: nowMs - 365 * 86_400_000,
+        rangeEnd: nowMs + 730 * 86_400_000,
+      });
+      setCalendarOccurrences(occs);
+      const found = occs.find((o) => o.event.id === eventId)?.event;
+      if (found) {
+        await selectCalendarEvent(found);
+      } else {
+        showToast("Linked calendar event was deleted");
+      }
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function importWorkbook(input: ImportWorkbookInput): Promise<WorkbookImportReport> {
+    const report = await importOperationsWorkbookCommand(input);
+    if (!input.dryRun) {
+      await reloadStaff();
+      const parts: string[] = [];
+      const tasks = report.actionItemsCreated + report.actionItemsUpdated;
+      const contacts = report.contactsCreated + report.contactsUpdated;
+      if (tasks > 0) parts.push(`${tasks} action item${tasks === 1 ? "" : "s"}`);
+      if (contacts > 0) parts.push(`${contacts} contact${contacts === 1 ? "" : "s"}`);
+      if (report.calendarEventsCreated > 0) {
+        parts.push(
+          `${report.calendarEventsCreated} calendar event${report.calendarEventsCreated === 1 ? "" : "s"}`,
+        );
+      }
+      showToast(parts.length > 0 ? `Imported ${parts.join(", ")}` : "Workbook import complete");
+    }
+    return report;
+  }
+
+  function triggerCsvDownload(filename: string, csv: string): void {
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function downloadActionItemsCsv(): Promise<void> {
+    try {
+      const csv = await exportActionItemsCsv();
+      const stamp = new Date().toISOString().slice(0, 10);
+      triggerCsvDownload(`pigment-action-items-${stamp}.csv`, csv);
+      showToast("Exported Action Items CSV");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function downloadShowContactsCsv(): Promise<void> {
+    try {
+      const csv = await exportShowContactsCsv();
+      const stamp = new Date().toISOString().slice(0, 10);
+      triggerCsvDownload(`pigment-show-contacts-${stamp}.csv`, csv);
+      showToast("Exported Show Contacts CSV");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
   return {
     booting,
     error,
@@ -1639,6 +1807,10 @@ export function useMailApp(): MailApp {
     selectedCalendarEvent,
     activeMeetingDoc,
     discordWebhookConfigured,
+    actionItems,
+    actionItemModalSeed,
+    workbookImportOpen,
+    workbookImportTarget,
     toggleTheme: () => setTheme((prev) => (prev === "dark" ? "light" : "dark")),
     toggleLayout: () => setLayout((prev) => (prev === "split" ? "classic" : "split")),
     backToList,
@@ -1728,5 +1900,16 @@ export function useMailApp(): MailApp {
     saveDiscordWebhook,
     copyDiscordRecap,
     postDiscordRecap,
+    openActionsSection,
+    openNewActionItemModal,
+    closeNewActionItemModal,
+    openWorkbookImport,
+    closeWorkbookImport,
+    persistActionItem,
+    removeActionItem,
+    jumpToCalendarEvent,
+    importWorkbook,
+    downloadActionItemsCsv,
+    downloadShowContactsCsv,
   };
 }

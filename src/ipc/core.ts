@@ -29,6 +29,7 @@ import type {
   DraftView,
   IcsOverlayId,
   IcsOverlayView,
+  ImportWorkbookInput,
   JobId,
   JobView,
   MailboxCounts,
@@ -42,6 +43,7 @@ import type {
   PromoteActionItemInput,
   RemoteContent,
   RsvpInviteInput,
+  SaveActionItemInput,
   SaveCalendarEventInput,
   SaveIcsOverlayInput,
   SavePinnedLinkInput,
@@ -74,6 +76,7 @@ import type {
   UpdateHandoffInput,
   UpdateMeetingDocInput,
   UpdateSharedDraftInput,
+  WorkbookImportReport,
 } from "../types/mail";
 
 export function isTauriRuntime(): boolean {
@@ -418,6 +421,35 @@ export async function toggleActionItem(
 export async function listActionItems(): Promise<ActionItemView[]> {
   if (!isTauriRuntime()) return mock.listActionItems();
   return invoke<ActionItemView[]>("list_action_items");
+}
+
+// ── Phase D: Action Items & Operations Workbook Import/Export ───────────────
+
+export async function saveActionItem(input: SaveActionItemInput): Promise<ActionItemView> {
+  if (!isTauriRuntime()) return mock.saveActionItem(input);
+  return invoke<ActionItemView>("save_action_item", { input });
+}
+
+export async function deleteActionItem(actionItemId: ActionItemId): Promise<void> {
+  if (!isTauriRuntime()) return mock.deleteActionItem(actionItemId);
+  return invoke<void>("delete_action_item", { actionItemId });
+}
+
+export async function importOperationsWorkbook(
+  input: ImportWorkbookInput,
+): Promise<WorkbookImportReport> {
+  if (!isTauriRuntime()) return mock.importOperationsWorkbook(input);
+  return invoke<WorkbookImportReport>("import_operations_workbook", { input });
+}
+
+export async function exportActionItemsCsv(): Promise<string> {
+  if (!isTauriRuntime()) return mock.exportActionItemsCsv();
+  return invoke<string>("export_action_items_csv");
+}
+
+export async function exportShowContactsCsv(): Promise<string> {
+  if (!isTauriRuntime()) return mock.exportShowContactsCsv();
+  return invoke<string>("export_show_contacts_csv");
 }
 
 export async function rsvpCalendarInvite(input: RsvpInviteInput): Promise<CalendarInviteView> {

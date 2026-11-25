@@ -25,3 +25,4 @@ sha2.workspace = true
 base64.workspace = true
 url.workspace = true
 open.workspace = true
+calamine.workspace = true

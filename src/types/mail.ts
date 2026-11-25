@@ -708,14 +708,70 @@ export interface ActionItemView {
   assigneeHandle: string | null;
   status: ActionItemStatus;
   dueAt: UnixMs | null;
+  startTime: string | null;
+  endTime: string | null;
   location: string | null;
   costNote: string | null;
+  calendarEventId: CalendarEventId | null;
   sourceEventId: CalendarEventId | null;
   sourceSeriesId: string | null;
   sourceThreadId: ThreadId | null;
   createdBy: string;
   createdAt: UnixMs;
   updatedAt: UnixMs;
+}
+
+export interface SaveActionItemInput {
+  id: ActionItemId | null;
+  title: string;
+  department: string | null;
+  milestone: string | null;
+  assigneeHandle: string | null;
+  status: ActionItemStatus;
+  dueAt: UnixMs | null;
+  startTime: string | null;
+  endTime: string | null;
+  location: string | null;
+  costNote: string | null;
+  sourceEventId: CalendarEventId | null;
+  sourceSeriesId: string | null;
+  sourceThreadId: ThreadId | null;
+  syncToCalendar: boolean;
+}
+
+export type WorkbookImportTarget = "auto" | "actionItems" | "contacts";
+
+export interface ImportWorkbookInput {
+  filename: string;
+  dataBase64: string;
+  target: WorkbookImportTarget;
+  syncToCalendar: boolean;
+  dryRun: boolean;
+}
+
+export type PreviewRowKind = "actionItem" | "contact";
+export type PreviewRowStatus = "create" | "update" | "skip";
+
+export interface WorkbookPreviewRow {
+  kind: PreviewRowKind;
+  sheet: string;
+  title: string;
+  detail: string;
+  status: PreviewRowStatus;
+}
+
+export interface WorkbookImportReport {
+  dryRun: boolean;
+  actionItemsCreated: number;
+  actionItemsUpdated: number;
+  actionItemsSkipped: number;
+  calendarEventsCreated: number;
+  contactsCreated: number;
+  contactsUpdated: number;
+  contactsSkipped: number;
+  skippedSheets: string[];
+  warnings: string[];
+  previewRows: WorkbookPreviewRow[];
 }
 
 export interface MeetingDocView {

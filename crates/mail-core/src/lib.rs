@@ -9,6 +9,7 @@ pub mod sanitize;
 pub mod schedule;
 pub mod staff;
 pub mod types;
+pub mod workbook;
 
 mod calendar_core;
 mod staff_core;

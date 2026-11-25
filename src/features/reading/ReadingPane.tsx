@@ -4,6 +4,7 @@ import {
   CalendarClock,
   CalendarDays,
   CalendarPlus,
+  CheckSquare,
   ChevronDown,
   ChevronLeft,
   Clock,
@@ -421,6 +422,19 @@ export function ReadingPane({ app }: { app: MailApp }) {
           >
             <Image />
             {imagesAllowed ? "Images on" : "Images blocked"}
+          </button>
+          <button
+            className="t-btn"
+            onClick={() =>
+              app.openNewActionItemModal({
+                title: thread.subject,
+                sourceThreadId: thread.id,
+              })
+            }
+            title="Create a Pigment Staff Action Item linked to this email thread"
+          >
+            <CheckSquare />
+            + Action Item
           </button>
           <button
             className={`t-btn${shared ? " on" : ""}`}

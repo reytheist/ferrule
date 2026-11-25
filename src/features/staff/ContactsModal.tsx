@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Contact, Pencil, Search, Trash2, X } from "lucide-react";
+import { Contact, Download, FileSpreadsheet, Pencil, Search, Trash2, X } from "lucide-react";
 import type { ContactCategory, ContactId, ShowContactView } from "../../types/mail";
 import type { MailApp } from "../shell/useMailApp";
 
@@ -103,9 +103,32 @@ export function ContactsModal({ app }: { app: MailApp }) {
             <Contact style={{ width: 15, height: 15, color: "var(--app-accent)" }} />
             <h2>Shared Show Contacts</h2>
           </div>
-          <button className="icon-btn" onClick={app.closeContacts} title="Close (Esc)">
-            <X />
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button
+              type="button"
+              className="btn compact"
+              onClick={() => {
+                app.closeContacts();
+                app.openWorkbookImport("contacts");
+              }}
+              title="Import contacts from .xlsx or CSV"
+            >
+              <FileSpreadsheet style={{ width: 12, height: 12 }} />
+              Import
+            </button>
+            <button
+              type="button"
+              className="btn compact"
+              onClick={() => void app.downloadShowContactsCsv()}
+              title="Export contacts to CSV"
+            >
+              <Download style={{ width: 12, height: 12 }} />
+              Export CSV
+            </button>
+            <button className="icon-btn" onClick={app.closeContacts} title="Close (Esc)">
+              <X />
+            </button>
+          </div>
         </div>
 
         <div className="modal-body">

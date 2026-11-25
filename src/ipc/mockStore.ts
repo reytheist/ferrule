@@ -42,6 +42,7 @@ import type {
   CalendarOccurrence,
   CalendarRangeQuery,
   ConnectStaffWorkspaceInput,
+  ContactCategory,
   ContactId,
   CreateDraftInput,
   DiscordWebhookStatus,
@@ -50,6 +51,7 @@ import type {
   IcsOverlayId,
   IcsOverlayView,
   IdentityView,
+  ImportWorkbookInput,
   InboxCategory,
   JobId,
   JobView,
@@ -72,6 +74,7 @@ import type {
   RemoteContent,
   RemoteImagesStatus,
   RsvpInviteInput,
+  SaveActionItemInput,
   SaveCalendarEventInput,
   SaveIcsOverlayInput,
   SavePinnedLinkInput,
@@ -112,6 +115,8 @@ import type {
   UpdateHandoffInput,
   UpdateMeetingDocInput,
   UpdateSharedDraftInput,
+  WorkbookImportReport,
+  WorkbookPreviewRow,
 } from "../types/mail";
 
 const MINUTE = 60_000;
@@ -2306,8 +2311,11 @@ function seedMockCalendarDemo(): void {
     assigneeHandle: "marcus",
     status: "open",
     dueAt: base + 2 * DAY,
+    startTime: "14:00",
+    endTime: "15:30",
     location: "Ballroom A",
-    costNote: null,
+    costNote: "$450 AV drop",
+    calendarEventId: roomId,
     sourceEventId: prevSyncId,
     sourceSeriesId: series,
     sourceThreadId: null,
@@ -2315,7 +2323,89 @@ function seedMockCalendarDemo(): void {
     createdAt: base - 7 * DAY,
     updatedAt: t,
   };
-  calState.actionItems.push(carryoverItem);
+  calState.actionItems.push(
+    carryoverItem,
+    {
+      id: newActionItemId(),
+      title: "Collect Gold Sponsor logos for program print",
+      department: "sponsors",
+      milestone: "PMS 2027",
+      assigneeHandle: "maya",
+      status: "open",
+      dueAt: base + 3 * DAY,
+      startTime: null,
+      endTime: null,
+      location: null,
+      costNote: null,
+      calendarEventId: sponsorId,
+      sourceEventId: thisSyncId,
+      sourceSeriesId: series,
+      sourceThreadId: null,
+      createdBy: "reyth",
+      createdAt: base - 2 * DAY,
+      updatedAt: t,
+    },
+    {
+      id: newActionItemId(),
+      title: "Order 24 acrylic display plinths & velvet risers",
+      department: "shopping-list",
+      milestone: "PMS 2027",
+      assigneeHandle: null,
+      status: "open",
+      dueAt: base - DAY,
+      startTime: null,
+      endTime: null,
+      location: "Exhibition Hall",
+      costNote: "$680",
+      calendarEventId: null,
+      sourceEventId: null,
+      sourceSeriesId: null,
+      sourceThreadId: null,
+      createdBy: "reyth",
+      createdAt: base - 5 * DAY,
+      updatedAt: t,
+    },
+    {
+      id: newActionItemId(),
+      title: "Publish workshop registration banner & Discord announcement",
+      department: "marketing",
+      milestone: "PMS 2027",
+      assigneeHandle: "reyth",
+      status: "open",
+      dueAt: base + 5 * DAY,
+      startTime: "10:00",
+      endTime: "11:00",
+      location: null,
+      costNote: null,
+      calendarEventId: null,
+      sourceEventId: null,
+      sourceSeriesId: null,
+      sourceThreadId: null,
+      createdBy: "reyth",
+      createdAt: base - 3 * DAY,
+      updatedAt: t,
+    },
+    {
+      id: newActionItemId(),
+      title: "Book promo table & badges for ReaperCon outreach",
+      department: "marketing",
+      milestone: "ReaperCon 2027",
+      assigneeHandle: "tessa",
+      status: "done",
+      dueAt: base - 4 * DAY,
+      startTime: null,
+      endTime: null,
+      location: "Denton Convention Center",
+      costNote: "$250",
+      calendarEventId: null,
+      sourceEventId: null,
+      sourceSeriesId: null,
+      sourceThreadId: null,
+      createdBy: "reyth",
+      createdAt: base - 10 * DAY,
+      updatedAt: t,
+    },
+  );
 
   calState.meetingDocs.set(thisSyncId, {
     eventId: thisSyncId,
@@ -2681,8 +2771,11 @@ export async function promoteToActionItem(
     assigneeHandle: input.assigneeHandle?.trim().replace(/^@/, "") || null,
     status: "open",
     dueAt: input.dueAt,
+    startTime: null,
+    endTime: null,
     location: ev.location,
     costNote: null,
+    calendarEventId: null,
     sourceEventId: ev.id,
     sourceSeriesId: ev.seriesId,
     sourceThreadId: null,
@@ -2932,4 +3025,379 @@ export async function postMeetingRecapToDiscord(
   if (!customMarkdown?.trim()) {
     await formatMeetingRecap(eventId);
   }
+}
+
+// ── Phase D: Action Items CRUD & Operations Workbook CSV Import/Export ──────
+
+function parseMockHhmm(raw: string | null): [number, number] | null {
+  if (!raw?.trim()) return null;
+  const m = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i.exec(raw.trim());
+  if (!m) return null;
+  let h = Number(m[1]);
+  const mins = Number(m[2] ?? "0");
+  const mer = m[3]?.toLowerCase();
+  if (mer === "pm" && h !== 12) h += 12;
+  if (mer === "am" && h === 12) h = 0;
+  if (h < 0 || h > 23 || mins < 0 || mins > 59) return null;
+  return [h, mins];
+}
+
+export async function saveActionItem(input: SaveActionItemInput): Promise<ActionItemView> {
+  seedMockCalendarDemo();
+  const title = input.title.trim();
+  if (!title) throw new Error("Action item title is required.");
+  const t = now();
+  const existingIdx = input.id ? calState.actionItems.findIndex((a) => a.id === input.id) : -1;
+  const existing = existingIdx >= 0 ? calState.actionItems[existingIdx] : undefined;
+  let calendarEventId = existing?.calendarEventId ?? null;
+
+  if (input.syncToCalendar && input.dueAt !== null) {
+    const baseDay = new Date(input.dueAt);
+    baseDay.setHours(0, 0, 0, 0);
+    const startParsed = parseMockHhmm(input.startTime);
+    const endParsed = parseMockHhmm(input.endTime);
+    let startAt = baseDay.getTime();
+    let endAt = startAt + DAY;
+    let allDay = true;
+    if (startParsed) {
+      startAt = baseDay.getTime() + (startParsed[0] * 60 + startParsed[1]) * MINUTE;
+      endAt = endParsed
+        ? Math.max(startAt + HOUR, baseDay.getTime() + (endParsed[0] * 60 + endParsed[1]) * MINUTE)
+        : startAt + HOUR;
+      allDay = false;
+    }
+    const ev = await saveCalendarEvent({
+      id: calendarEventId,
+      title,
+      description: input.milestone
+        ? `Event / Milestone: ${input.milestone}\nSynced from Pigment Action Items`
+        : "Synced from Pigment Action Items",
+      startAt,
+      endAt,
+      allDay,
+      kind: input.location && startParsed ? "roomSchedule" : "milestone",
+      department: input.department?.trim().replace(/^#/, "").toLowerCase() || null,
+      location: input.location?.trim() || null,
+      recurrence: "none",
+      discordUrl: null,
+      attendees: input.assigneeHandle ? [normalizeHandle(input.assigneeHandle)] : [],
+    });
+    calendarEventId = ev.id;
+  }
+
+  const saved: ActionItemView = {
+    id: existing?.id ?? newActionItemId(),
+    title,
+    department: input.department?.trim().replace(/^#/, "").toLowerCase() || null,
+    milestone: input.milestone?.trim() || null,
+    assigneeHandle: input.assigneeHandle ? normalizeHandle(input.assigneeHandle) || null : null,
+    status: input.status,
+    dueAt: input.dueAt,
+    startTime: input.startTime?.trim() || null,
+    endTime: input.endTime?.trim() || null,
+    location: input.location?.trim() || null,
+    costNote: input.costNote?.trim() || null,
+    calendarEventId,
+    sourceEventId: input.sourceEventId ?? existing?.sourceEventId ?? null,
+    sourceSeriesId: input.sourceSeriesId ?? existing?.sourceSeriesId ?? null,
+    sourceThreadId: input.sourceThreadId ?? existing?.sourceThreadId ?? null,
+    createdBy: existing?.createdBy ?? (state.staffWorkspace.staffHandle || "reyth"),
+    createdAt: existing?.createdAt ?? t,
+    updatedAt: t,
+  };
+
+  if (existingIdx >= 0) calState.actionItems[existingIdx] = saved;
+  else calState.actionItems.unshift(saved);
+  return { ...saved };
+}
+
+export async function deleteActionItem(actionItemId: ActionItemId): Promise<void> {
+  seedMockCalendarDemo();
+  calState.actionItems = calState.actionItems.filter((a) => a.id !== actionItemId);
+}
+
+function parseMockCsv(raw: string): string[][] {
+  const text = raw.replace(/^\uFEFF/, "");
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]!;
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          cell += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell += ch;
+      }
+    } else if (ch === '"' && cell.length === 0) {
+      inQuotes = true;
+    } else if (ch === ",") {
+      row.push(cell);
+      cell = "";
+    } else if (ch === "\r" || ch === "\n") {
+      if (ch === "\r" && text[i + 1] === "\n") i += 1;
+      row.push(cell);
+      cell = "";
+      if (row.some((c) => c.trim().length > 0)) rows.push(row);
+      row = [];
+    } else {
+      cell += ch;
+    }
+  }
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell);
+    if (row.some((c) => c.trim().length > 0)) rows.push(row);
+  }
+  return rows;
+}
+
+function csvEscapeCell(val: string): string {
+  if (/[",\r\n]/.test(val)) return `"${val.replace(/"/g, '""')}"`;
+  return val;
+}
+
+export async function exportActionItemsCsv(): Promise<string> {
+  seedMockCalendarDemo();
+  const header = "Dept.,What,Title / Task,Assignee,Done,Date,Start Time,End Time,Where,$$$,Source";
+  const lines = [header];
+  for (const item of calState.actionItems) {
+    const due = item.dueAt ? new Date(item.dueAt).toISOString().slice(0, 10) : "";
+    const source = item.sourceThreadId ? "email" : item.sourceEventId ? "meeting" : "";
+    lines.push(
+      [
+        item.department ?? "",
+        item.milestone ?? "",
+        item.title,
+        item.assigneeHandle ? `@${item.assigneeHandle}` : "",
+        item.status === "done" ? "TRUE" : "FALSE",
+        due,
+        item.startTime ?? "",
+        item.endTime ?? "",
+        item.location ?? "",
+        item.costNote ?? "",
+        source,
+      ]
+        .map(csvEscapeCell)
+        .join(","),
+    );
+  }
+  return `${lines.join("\r\n")}\r\n`;
+}
+
+export async function exportShowContactsCsv(): Promise<string> {
+  seedMockStaffDemo();
+  const lines = ["Name,Category,Organization,Tier,Emails,Notes"];
+  for (const c of state.showContacts) {
+    lines.push(
+      [
+        c.name,
+        c.category,
+        c.organization ?? "",
+        c.tier ?? "",
+        c.emails.join("; "),
+        c.notes,
+      ]
+        .map(csvEscapeCell)
+        .join(","),
+    );
+  }
+  return `${lines.join("\r\n")}\r\n`;
+}
+
+export async function importOperationsWorkbook(
+  input: ImportWorkbookInput,
+): Promise<WorkbookImportReport> {
+  seedMockCalendarDemo();
+  seedMockStaffDemo();
+  const lowerName = input.filename.toLowerCase();
+  if (!lowerName.endsWith(".csv") && !lowerName.endsWith(".txt")) {
+    throw new Error(
+      "Browser preview supports CSV import. Use the Ferrule desktop app for native .xlsx Operations Workbook import.",
+    );
+  }
+  const binary = atob(input.dataBase64);
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  const text = new TextDecoder("utf-8").decode(bytes);
+  const rows = parseMockCsv(text);
+  const report: WorkbookImportReport = {
+    dryRun: input.dryRun,
+    actionItemsCreated: 0,
+    actionItemsUpdated: 0,
+    actionItemsSkipped: 0,
+    calendarEventsCreated: 0,
+    contactsCreated: 0,
+    contactsUpdated: 0,
+    contactsSkipped: 0,
+    skippedSheets: [],
+    warnings: [],
+    previewRows: [],
+  };
+  if (rows.length < 2) return report;
+
+  const headers = rows[0]!.map((h) => h.toLowerCase().replace(/[^a-z0-9$]/g, ""));
+  const findCol = (names: string[]): number => {
+    for (const n of names) {
+      const exact = headers.indexOf(n);
+      if (exact >= 0) return exact;
+    }
+    for (const n of names) {
+      const partial = headers.findIndex((h) => h.includes(n));
+      if (partial >= 0) return partial;
+    }
+    return -1;
+  };
+
+  const hasEmail = findCol(["emails", "email", "emailaddress"]) >= 0;
+  const hasTask = findCol(["titletask", "task", "title", "actionitem", "dept", "department"]) >= 0;
+  const mode =
+    input.target === "contacts" || (input.target === "auto" && hasEmail && !hasTask)
+      ? "contacts"
+      : "actionItems";
+
+  const sheetName = input.filename.replace(/\.csv$/i, "");
+  if (mode === "contacts") {
+    const cName = findCol(["name", "contact", "fullname"]);
+    const cEmail = findCol(["emails", "email", "emailaddress"]);
+    const cCat = findCol(["category", "type", "role"]);
+    const cOrg = findCol(["organization", "company", "studio"]);
+    const cTier = findCol(["tier", "level", "booth"]);
+    const cNotes = findCol(["notes", "note"]);
+    for (const r of rows.slice(1)) {
+      const name = (r[cName] ?? "").trim();
+      const emails = (r[cEmail] ?? "")
+        .split(/[;,\s]+/)
+        .map((e) => e.trim().toLowerCase())
+        .filter((e) => e.includes("@"));
+      if (!name || emails.length === 0) {
+        report.contactsSkipped += 1;
+        continue;
+      }
+      const existing = state.showContacts.find(
+        (c) =>
+          c.emails.some((e) => emails.includes(e.toLowerCase())) ||
+          c.name.toLowerCase() === name.toLowerCase(),
+      );
+      const rawCat = (r[cCat] ?? "").toLowerCase();
+      const category: ContactCategory = rawCat.includes("sponsor")
+        ? "sponsor"
+        : rawCat.includes("vendor")
+          ? "vendor"
+          : rawCat.includes("instructor")
+            ? "instructor"
+            : rawCat.includes("vip")
+              ? "vip"
+              : rawCat.includes("volunteer")
+                ? "volunteer"
+                : rawCat.includes("venue")
+                  ? "venue"
+                  : "other";
+      if (existing) report.contactsUpdated += 1;
+      else report.contactsCreated += 1;
+      if (!input.dryRun) {
+        await saveShowContact({
+          id: existing?.id ?? null,
+          name,
+          emails: Array.from(new Set([...(existing?.emails ?? []), ...emails])),
+          category,
+          organization: (r[cOrg] ?? "").trim() || existing?.organization || null,
+          tier: (r[cTier] ?? "").trim() || existing?.tier || null,
+          notes: (r[cNotes] ?? "").trim() || existing?.notes || "",
+        });
+      }
+      if (report.previewRows.length < 50) {
+        const preview: WorkbookPreviewRow = {
+          kind: "contact",
+          sheet: sheetName,
+          title: name,
+          detail: `${category} · ${emails.join(", ")}`,
+          status: existing ? "update" : "create",
+        };
+        report.previewRows.push(preview);
+      }
+    }
+    return report;
+  }
+
+  const cTitle = findCol(["titletask", "task", "title", "actionitem", "item"]);
+  const cDept = findCol(["dept", "department", "team"]);
+  const cWhat = findCol(["what", "event", "milestone"]);
+  const cWho = findCol(["assignee", "owner", "who"]);
+  const cDone = findCol(["done", "status", "complete"]);
+  const cDate = findCol(["date", "duedate", "due"]);
+  const cStart = findCol(["starttime", "start"]);
+  const cEnd = findCol(["endtime", "end"]);
+  const cWhere = findCol(["where", "location", "room"]);
+  const cCost = findCol(["$$$", "$$", "$", "cost", "budget"]);
+
+  for (const r of rows.slice(1)) {
+    const title = (r[cTitle] ?? "").trim();
+    if (!title) {
+      report.actionItemsSkipped += 1;
+      continue;
+    }
+    const dept = (r[cDept] ?? "").trim().toLowerCase().replace(/[\s_]+/g, "-") || null;
+    const milestone = (r[cWhat] ?? "").trim() || null;
+    const assigneeHandle = normalizeHandle(r[cWho] ?? "") || null;
+    const doneRaw = (r[cDone] ?? "").trim().toLowerCase();
+    const status: ActionItemStatus = ["true", "yes", "1", "x", "done", "complete"].includes(doneRaw)
+      ? "done"
+      : "open";
+    const dateRaw = (r[cDate] ?? "").trim();
+    const parsedDate = dateRaw ? Date.parse(dateRaw) : Number.NaN;
+    const dueAt = Number.isFinite(parsedDate) ? parsedDate : null;
+    const startTime = (r[cStart] ?? "").trim() || null;
+    const endTime = (r[cEnd] ?? "").trim() || null;
+    const location = (r[cWhere] ?? "").trim() || null;
+    const costNote = (r[cCost] ?? "").trim() || null;
+
+    const existing = calState.actionItems.find(
+      (a) =>
+        a.title.toLowerCase() === title.toLowerCase() &&
+        (a.milestone ?? "").toLowerCase() === (milestone ?? "").toLowerCase() &&
+        (a.department ?? "").toLowerCase() === (dept ?? "").toLowerCase(),
+    );
+    if (existing) report.actionItemsUpdated += 1;
+    else report.actionItemsCreated += 1;
+    if (input.syncToCalendar && dueAt !== null && !existing?.calendarEventId) {
+      report.calendarEventsCreated += 1;
+    }
+
+    if (!input.dryRun) {
+      await saveActionItem({
+        id: existing?.id ?? null,
+        title,
+        department: dept,
+        milestone,
+        assigneeHandle,
+        status,
+        dueAt,
+        startTime,
+        endTime,
+        location,
+        costNote,
+        sourceEventId: existing?.sourceEventId ?? null,
+        sourceSeriesId: existing?.sourceSeriesId ?? null,
+        sourceThreadId: existing?.sourceThreadId ?? null,
+        syncToCalendar: input.syncToCalendar,
+      });
+    }
+    if (report.previewRows.length < 50) {
+      report.previewRows.push({
+        kind: "actionItem",
+        sheet: sheetName,
+        title,
+        detail: [dept ? `#${dept}` : "", milestone ?? "", assigneeHandle ? `@${assigneeHandle}` : ""]
+          .filter(Boolean)
+          .join(" · "),
+        status: existing ? "update" : "create",
+      });
+    }
+  }
+  return report;
 }

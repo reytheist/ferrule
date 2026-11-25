@@ -1,4 +1,7 @@
 import { AddAccountModal } from "./features/accounts/AddAccountModal";
+import { ActionItemModal } from "./features/actions/ActionItemModal";
+import { ActionItemsView } from "./features/actions/ActionItemsView";
+import { WorkbookImportModal } from "./features/actions/WorkbookImportModal";
 import { CalendarView } from "./features/calendar/CalendarView";
 import { CommandBar } from "./features/command-bar/CommandBar";
 import { ComposeModal } from "./features/compose/ComposeModal";
@@ -53,7 +56,9 @@ export function App() {
       <SpaceSwitcher app={app} />
       <div className="workspace">
         <MailboxSidebar app={app} />
-        {app.activeSection === "calendar" ? (
+        {app.activeSection === "actions" ? (
+          <ActionItemsView app={app} />
+        ) : app.activeSection === "calendar" ? (
           <CalendarView app={app} />
         ) : app.activeSection === "shared" ? (
           <>
@@ -76,6 +81,21 @@ export function App() {
       {app.shareModalOpen && <ShareThreadModal app={app} />}
       {app.contactsOpen && <ContactsModal app={app} />}
       {app.pinnedLinksOpen && <PinnedLinksModal app={app} />}
+      {app.actionItemModalSeed !== null && (
+        <ActionItemModal
+          app={app}
+          initial={null}
+          seed={app.actionItemModalSeed}
+          onClose={app.closeNewActionItemModal}
+        />
+      )}
+      {app.workbookImportOpen && (
+        <WorkbookImportModal
+          app={app}
+          initialTarget={app.workbookImportTarget}
+          onClose={app.closeWorkbookImport}
+        />
+      )}
       <SchedulePopover app={app} />
       <UndoToast app={app} />
     </div>

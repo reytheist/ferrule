@@ -10,7 +10,8 @@ use crate::calendar::{
     AvailabilityQuery, AvailabilitySlot, CalendarEventKind, CalendarEventView, CalendarInviteView,
     CalendarOccurrence, CalendarRangeQuery, DiscordWebhookStatus, IcsOverlayView, MeetingDocAction,
     MeetingDocView, OverlayBusyBlock, ParsedIcsEvent, PromoteActionItemInput, RecurrenceRule,
-    RsvpInviteInput, SaveCalendarEventInput, SaveIcsOverlayInput, UpdateMeetingDocInput,
+    RsvpInviteInput, SaveActionItemInput, SaveCalendarEventInput, SaveIcsOverlayInput,
+    UpdateMeetingDocInput,
 };
 use crate::error::CoreError;
 use crate::events::CoreEvent;
@@ -230,8 +231,11 @@ impl MailCore {
                     .filter(|h| !h.is_empty()),
                 status: ActionItemStatus::Open,
                 due_at: input.due_at,
+                start_time: None,
+                end_time: None,
                 location: event.location.clone(),
                 cost_note: None,
+                calendar_event_id: None,
                 source_event_id: Some(event.id),
                 source_series_id: event.series_id.clone(),
                 source_thread_id: None,
@@ -293,6 +297,151 @@ impl MailCore {
 
     pub async fn list_action_items(&self) -> Result<Vec<ActionItemView>, CoreError> {
         self.inner.store.with_conn(store::list_action_items)
+    }
+
+    pub async fn save_action_item(
+        &self,
+        input: SaveActionItemInput,
+    ) -> Result<ActionItemView, CoreError> {
+        let title = input.title.trim();
+        if title.is_empty() {
+            return Err(CoreError::InvalidInput {
+                field: "title".to_string(),
+                reason: "action item title is required".to_string(),
+            });
+        }
+        let ws = self.get_staff_workspace().await?;
+        let actor = if ws.connected && !ws.staff_handle.is_empty() {
+            ws.staff_handle.clone()
+        } else {
+            "staff".to_string()
+        };
+        let now = self.now();
+
+        let (saved, synced_event) = self.inner.store.with_conn(|conn| {
+            let existing = match input.id {
+                Some(id) => store::get_action_item(conn, id)?,
+                None => None,
+            };
+            let id = input.id.unwrap_or_else(ActionItemId::fresh);
+            let department = input
+                .department
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim_start_matches('#').to_ascii_lowercase());
+            let milestone = input
+                .milestone
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let assignee_handle = input
+                .assignee_handle
+                .as_deref()
+                .map(normalize_handle)
+                .filter(|h| !h.is_empty());
+            let start_time = input
+                .start_time
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let end_time = input
+                .end_time
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let location = input
+                .location
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let cost_note = input
+                .cost_note
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+
+            let mut item = ActionItemView {
+                id,
+                title: title.to_string(),
+                department,
+                milestone,
+                assignee_handle,
+                status: input.status,
+                due_at: input.due_at,
+                start_time,
+                end_time,
+                location,
+                cost_note,
+                calendar_event_id: existing.as_ref().and_then(|e| e.calendar_event_id),
+                source_event_id: input
+                    .source_event_id
+                    .or_else(|| existing.as_ref().and_then(|e| e.source_event_id)),
+                source_series_id: input
+                    .source_series_id
+                    .or_else(|| existing.as_ref().and_then(|e| e.source_series_id.clone())),
+                source_thread_id: input
+                    .source_thread_id
+                    .or_else(|| existing.as_ref().and_then(|e| e.source_thread_id)),
+                created_by: existing
+                    .as_ref()
+                    .map(|e| e.created_by.clone())
+                    .unwrap_or_else(|| actor.clone()),
+                created_at: existing.as_ref().map(|e| e.created_at).unwrap_or(now),
+                updated_at: now,
+            };
+
+            let mut synced_event: Option<CalendarEventView> = None;
+            if input.sync_to_calendar {
+                if let Some(due) = item.due_at {
+                    let cal_input = calendar_input_from_action(&item, due);
+                    let ev = store::save_calendar_event(conn, &cal_input, &actor, now)?;
+                    item.calendar_event_id = Some(ev.id);
+                    synced_event = Some(ev);
+                }
+            }
+
+            store::upsert_action_item_row(conn, &item)?;
+            Ok((item, synced_event))
+        })?;
+
+        if ws.connected {
+            if let Some(client) = self.remote_staff_client(&ws)? {
+                if client.push_action_item(&saved).await.is_err() {
+                    self.mark_staff_offline("Action item saved locally — offline");
+                }
+                if let Some(ev) = &synced_event {
+                    let _ = client.push_calendar_event(ev).await;
+                }
+            }
+        }
+        self.emit(CoreEvent::CalendarChanged);
+        Ok(saved)
+    }
+
+    pub async fn delete_action_item(&self, id: ActionItemId) -> Result<(), CoreError> {
+        let removed = self
+            .inner
+            .store
+            .with_conn(|conn| store::delete_action_item(conn, id))?;
+        if !removed {
+            return Err(CoreError::NotFound {
+                entity: "actionItem".to_string(),
+            });
+        }
+        let ws = self.get_staff_workspace().await?;
+        if ws.connected {
+            if let Some(client) = self.remote_staff_client(&ws)? {
+                let _ = client.delete_action_item(id).await;
+            }
+        }
+        self.emit(CoreEvent::CalendarChanged);
+        Ok(())
     }
 
     // ---------------------------------------------------------------- email <-> calendar bridges
@@ -611,6 +760,109 @@ impl MailCore {
         }
         Ok(())
     }
+}
+
+pub(crate) fn calendar_input_from_action(
+    item: &ActionItemView,
+    due_at: UnixMs,
+) -> SaveCalendarEventInput {
+    let day_ms: i64 = 86_400_000;
+    let base_day = (due_at.0 / day_ms) * day_ms;
+    let parsed_start = item.start_time.as_deref().and_then(parse_hhmm);
+    let parsed_end = item.end_time.as_deref().and_then(parse_hhmm);
+
+    let (start_at, end_at, all_day) = match parsed_start {
+        Some((sh, sm)) => {
+            let start_ms = base_day + (sh as i64 * 60 + sm as i64) * 60_000;
+            let end_ms = match parsed_end {
+                Some((eh, em)) => {
+                    let candidate = base_day + (eh as i64 * 60 + em as i64) * 60_000;
+                    if candidate > start_ms {
+                        candidate
+                    } else {
+                        start_ms + 3_600_000
+                    }
+                }
+                None => start_ms + 3_600_000,
+            };
+            (UnixMs(start_ms), UnixMs(end_ms), false)
+        }
+        None => (UnixMs(base_day), UnixMs(base_day + day_ms), true),
+    };
+
+    let kind = if item.location.is_some() && parsed_start.is_some() {
+        CalendarEventKind::RoomSchedule
+    } else if item.title.to_ascii_lowercase().contains("deadline") {
+        CalendarEventKind::Deadline
+    } else {
+        CalendarEventKind::Milestone
+    };
+
+    let mut desc_parts = Vec::new();
+    if let Some(m) = &item.milestone {
+        desc_parts.push(format!("Event / Milestone: {m}"));
+    }
+    if let Some(c) = &item.cost_note {
+        desc_parts.push(format!("Cost: {c}"));
+    }
+    desc_parts.push("Synced from Pigment Action Items".to_string());
+
+    SaveCalendarEventInput {
+        id: item.calendar_event_id,
+        series_id: None,
+        title: item.title.clone(),
+        description: desc_parts.join("\n"),
+        start_at,
+        end_at,
+        all_day,
+        kind,
+        department: item.department.clone(),
+        location: item.location.clone(),
+        recurrence: RecurrenceRule::None,
+        discord_url: None,
+        attendees: item
+            .assignee_handle
+            .as_ref()
+            .map(|h| vec![h.clone()])
+            .unwrap_or_default(),
+        source_ics_uid: None,
+    }
+}
+
+pub(crate) fn parse_hhmm(raw: &str) -> Option<(u32, u32)> {
+    let lower = raw.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return None;
+    }
+    let (body, is_pm, has_meridiem) = if let Some(b) = lower.strip_suffix("pm") {
+        (b.trim(), true, true)
+    } else if let Some(b) = lower.strip_suffix("am") {
+        (b.trim(), false, true)
+    } else {
+        (lower.as_str(), false, false)
+    };
+    let (h_str, m_str) = match body.split_once(':') {
+        Some((h, m)) => (h.trim(), m.trim()),
+        None => (body, "0"),
+    };
+    let mut h: u32 = h_str.parse().ok()?;
+    let m: u32 = m_str.parse().ok()?;
+    if m >= 60 {
+        return None;
+    }
+    if has_meridiem {
+        if h == 0 || h > 12 {
+            return None;
+        }
+        if is_pm && h != 12 {
+            h += 12;
+        } else if !is_pm && h == 12 {
+            h = 0;
+        }
+    } else if h >= 24 {
+        return None;
+    }
+    Some((h, m))
 }
 
 fn demo_personal_overlay_events(now: UnixMs) -> Vec<ParsedIcsEvent> {
