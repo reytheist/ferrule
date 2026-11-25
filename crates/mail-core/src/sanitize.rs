@@ -38,7 +38,7 @@ const CSP_BLOCK_ALL: &str = "default-src 'none'; img-src data:; style-src 'unsaf
 const CSP_ALLOW_IMAGES: &str =
     "default-src 'none'; img-src data: https:; style-src 'unsafe-inline';";
 
-const BASE_STYLE: &str = "<style>body{margin:0;font-family:Inter,system-ui,sans-serif;font-size:13px;line-height:1.6;color:inherit;}img{max-width:100%;height:auto;}a{color:#4f86ff;}</style>";
+const BASE_STYLE: &str = "<style>html{box-sizing:border-box;padding:14px 16px!important;}body{margin:0;font-family:Inter,system-ui,sans-serif;font-size:13px;line-height:1.6;color:inherit;}img{max-width:100%;height:auto;}a{color:#4f86ff;}</style>";
 
 /// A fully sanitized HTML document ready to be used as an iframe `srcdoc`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -688,5 +688,14 @@ mod tests {
     #[test]
     fn text_to_html_escapes_and_breaks_lines() {
         assert_eq!(text_to_html("a < b & c\nd"), "a &lt; b &amp; c<br>\nd");
+    }
+
+    #[test]
+    fn sanitized_document_includes_frame_padding() {
+        let out = sanitize_html("<p>Hello</p>", RemoteContent::BlockAll);
+        assert!(out
+            .srcdoc
+            .as_str()
+            .contains("html{box-sizing:border-box;padding:14px 16px!important;}"));
     }
 }

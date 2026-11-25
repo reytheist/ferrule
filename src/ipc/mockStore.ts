@@ -423,7 +423,8 @@ function srcdocFor(sanitized: SanitizeResult, remoteContent: RemoteContent): str
     `<!DOCTYPE html><html><head><meta charset="utf-8">` +
     `<meta http-equiv="Content-Security-Policy" content="${csp}">` +
     `<style>` +
-    `body{margin:12px;background:${bg};color:${ink};` +
+    `html{box-sizing:border-box;padding:14px 16px!important;}` +
+    `body{margin:0;background:${bg};color:${ink};` +
     `font-family:Inter,-apple-system,sans-serif;font-size:13px;line-height:1.6}` +
     `img{max-width:100%;height:auto}a{color:#4F86FF}` +
     `</style></head><body>${sanitized.html}</body></html>`
