@@ -3437,8 +3437,8 @@ export async function importOperationsWorkbook(
 
 // ── In-App Updates (browser preview / dev mock) ─────────────────────────────
 
-const MOCK_CURRENT_VERSION = "0.3.1";
-const MOCK_LATEST_VERSION = "0.3.2";
+const MOCK_CURRENT_VERSION = "0.3.2";
+const MOCK_LATEST_VERSION = "0.3.3";
 const mockProgressListeners = new Set<(progress: UpdateDownloadProgress) => void>();
 
 function readMockUpdateMode(): "available" | "upToDate" | "error" {

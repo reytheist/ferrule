@@ -9,7 +9,7 @@ import type {
   UpdateReleaseInfo,
 } from "../../types/mail";
 
-const INITIAL_VERSION = "0.3.1";
+const INITIAL_VERSION = "0.3.2";
 const STARTUP_CHECK_DELAY_MS = 2_500;
 const DAILY_CHECK_HOUR = 3;
 const DAILY_DRIFT_POLL_MS = 60_000;
