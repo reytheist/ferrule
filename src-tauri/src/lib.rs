@@ -1,4 +1,5 @@
 mod commands;
+mod updater;
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -247,6 +248,8 @@ pub fn run() {
             commands::set_discord_webhook,
             commands::format_meeting_recap,
             commands::post_meeting_recap_to_discord,
+            commands::check_for_updates,
+            commands::download_and_install_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Ferrule");

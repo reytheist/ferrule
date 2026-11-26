@@ -23,6 +23,32 @@ if [[ -z "${VERSION}" ]]; then
   exit 1
 fi
 
+# Load optional gitignored .env.local (e.g., FERRULE_GOOGLE_CLIENT_ID / SECRET, FERRULE_OUTLOOK_CLIENT_ID)
+# without overriding variables already set in the shell.
+if [[ -f "${REPO_ROOT}/.env.local" ]]; then
+  echo "==> Loading build-time environment from .env.local"
+  while IFS= read -r raw_line || [[ -n "${raw_line}" ]]; do
+    line="${raw_line#"${raw_line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [[ -z "${line}" || "${line}" == \#* ]] && continue
+    [[ "${line}" != *=* ]] && continue
+    key="${line%%=*}"
+    val="${line#*=}"
+    key="${key%"${key##*[![:space:]]}"}"
+    val="${val#"${val%%[![:space:]]*}"}"
+    if [[ ( "${val}" == \"*\" && "${val}" == *\" ) || ( "${val}" == \'*\' && "${val}" == *\' ) ]]; then
+      val="${val:1:${#val}-2}"
+    fi
+    if [[ -z "${!key:-}" ]]; then
+      export "${key}=${val}"
+    fi
+  done < "${REPO_ROOT}/.env.local"
+fi
+
+HAS_GOOGLE_OAUTH=$([[ -n "${FERRULE_GOOGLE_CLIENT_ID:-}" ]] && echo "true" || echo "false")
+HAS_OUTLOOK_OAUTH=$([[ -n "${FERRULE_OUTLOOK_CLIENT_ID:-}" ]] && echo "true" || echo "false")
+echo "==> Built-in OAuth defaults: Google=${HAS_GOOGLE_OAUTH}, Outlook=${HAS_OUTLOOK_OAUTH}"
+
 if [[ "${SKIP_VERIFY}" -eq 0 ]]; then
   echo "==> Local verification (pnpm verify)"
   pnpm verify

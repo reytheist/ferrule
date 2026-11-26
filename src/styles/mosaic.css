@@ -4229,3 +4229,156 @@
   color: var(--app-ink);
   font-weight: 600;
 }
+
+/* ── In-app update button (T3-style refresh + rainbow gradient) ─────────── */
+
+.update-btn {
+  position: relative;
+  overflow: hidden;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    background 140ms ease,
+    box-shadow 180ms ease;
+}
+
+.update-btn:disabled {
+  cursor: default;
+}
+
+.update-btn .update-refresh-icon {
+  position: relative;
+  z-index: 2;
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+
+.update-btn.checking {
+  border-color: var(--app-accent);
+  color: var(--app-accent);
+}
+
+.update-btn.available {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: 0 0 12px rgba(129, 140, 248, 0.28);
+}
+
+/* Rotating rainbow border ring behind an inset surface */
+.update-btn.available::before {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  z-index: 0;
+  background: conic-gradient(
+    from 0deg,
+    #ff5f6d,
+    #fbbf24,
+    #34d399,
+    #38bdf8,
+    #818cf8,
+    #e879f9,
+    #ff5f6d
+  );
+  animation: update-rainbow-spin 3.2s linear infinite;
+}
+
+.update-btn.available::after {
+  content: "";
+  position: absolute;
+  inset: 1.5px;
+  z-index: 1;
+  border-radius: 4.5px;
+  background: var(--app-surface);
+  transition: background 140ms ease;
+}
+
+.update-btn.available:hover::after {
+  background: var(--app-hover);
+}
+
+.update-btn.available:hover {
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.36);
+}
+
+.update-refresh-icon.rainbow {
+  animation: update-rainbow-hue 3.2s linear infinite;
+}
+
+.update-refresh-icon.spinning {
+  animation: update-icon-spin 0.9s linear infinite;
+}
+
+.update-btn.downloading {
+  width: auto;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-color: var(--app-accent);
+  color: var(--app-accent);
+  background: var(--app-accent-soft);
+}
+
+.update-progress-label {
+  position: relative;
+  z-index: 2;
+  font-family: var(--font-mono);
+  font-size: calc(10px * var(--chrome-font-scale));
+  font-weight: 600;
+  line-height: 1;
+}
+
+.update-btn.launched {
+  border-color: var(--app-shield);
+  color: var(--app-shield);
+  background: var(--app-shield-bg);
+}
+
+.update-btn.error {
+  border-color: var(--app-followup);
+  color: var(--app-followup);
+  background: var(--app-followup-bg);
+}
+
+.update-dev-preview {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--app-border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+@keyframes update-rainbow-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes update-rainbow-hue {
+  from {
+    filter: hue-rotate(0deg) saturate(1.15);
+  }
+  to {
+    filter: hue-rotate(360deg) saturate(1.15);
+  }
+}
+
+@keyframes update-icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-btn.available::before,
+  .update-refresh-icon.rainbow {
+    animation: none;
+  }
+
+  .update-refresh-icon.spinning {
+    animation-duration: 2.4s;
+  }
+}

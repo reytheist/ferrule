@@ -28,6 +28,9 @@ use mail_core::types::{
 use mail_core::MailCore;
 use tauri::Manager;
 
+use crate::updater::{
+    self, InstallUpdateInput, InstallUpdateOutcome, UpdateCheckResult,
+};
 use crate::SplashState;
 
 const MIN_SPLASH_DWELL: Duration = Duration::from_millis(1200);
@@ -658,4 +661,19 @@ pub async fn post_meeting_recap_to_discord(
 ) -> Result<(), CoreError> {
     core.post_meeting_recap_to_discord(event_id, custom_markdown)
         .await
+}
+
+// ---------------------------------------------------------------- In-App Updates
+
+#[tauri::command]
+pub async fn check_for_updates() -> Result<UpdateCheckResult, CoreError> {
+    updater::check_for_updates().await
+}
+
+#[tauri::command]
+pub async fn download_and_install_update(
+    app: tauri::AppHandle,
+    input: InstallUpdateInput,
+) -> Result<InstallUpdateOutcome, CoreError> {
+    updater::download_and_install_update(&app, input).await
 }

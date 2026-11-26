@@ -399,11 +399,14 @@ async fn gmail_app_password_strips_spaces() {
 
 #[tokio::test]
 async fn second_gmail_oauth_reuses_saved_client_secret_from_first_account() {
-    use mail_core::auth::{CredentialKind, OAuthClient, SecretString};
+    use mail_core::auth::{BuiltInOAuthDefaults, CredentialKind, OAuthClient, SecretString};
 
     let secrets = Arc::new(MemorySecretStore::default());
     let core = MailCore::open(
-        CoreConfig::default(),
+        CoreConfig {
+            oauth_defaults: BuiltInOAuthDefaults::default(),
+            ..CoreConfig::default()
+        },
         Host {
             secrets: secrets.clone(),
             clock: Arc::new(ManualClock::new(UnixMs(1_795_000_000_000))),
@@ -457,6 +460,75 @@ async fn second_gmail_oauth_reuses_saved_client_secret_from_first_account() {
         Some("shared-client.apps.googleusercontent.com")
     );
     assert!(saved.outlook_client_id.is_none());
+}
+
+#[tokio::test]
+async fn builtin_oauth_defaults_populate_saved_clients_and_resolve_secret() {
+    use mail_core::auth::{BuiltInOAuthDefaults, OAuthClient, SecretString};
+
+    let core = MailCore::open(
+        CoreConfig {
+            oauth_defaults: BuiltInOAuthDefaults {
+                google_client_id: Some("builtin-google.apps.googleusercontent.com".into()),
+                google_client_secret: Some(SecretString::new("GOCSPX-builtin-secret")),
+                outlook_client_id: Some("11111111-2222-3333-4444-555555555555".into()),
+                outlook_tenant: Some("consumers".into()),
+            },
+            ..CoreConfig::default()
+        },
+        Host {
+            secrets: Arc::new(MemorySecretStore::default()),
+            clock: Arc::new(ManualClock::new(UnixMs(START))),
+        },
+    )
+    .expect("open");
+
+    let saved = core.saved_oauth_clients().await.expect("saved clients");
+    assert_eq!(
+        saved.gmail_client_id.as_deref(),
+        Some("builtin-google.apps.googleusercontent.com")
+    );
+    assert!(saved.gmail_built_in);
+    assert_eq!(
+        saved.outlook_client_id.as_deref(),
+        Some("11111111-2222-3333-4444-555555555555")
+    );
+    assert_eq!(saved.outlook_tenant.as_deref(), Some("consumers"));
+    assert!(saved.outlook_built_in);
+
+    // Matching built-in Google client ID resolves the built-in secret automatically.
+    let matching_auth = ProviderAuth::GmailOAuth {
+        address: "staff@gmail.com".into(),
+        client: OAuthClient {
+            client_id: "builtin-google.apps.googleusercontent.com".into(),
+            has_client_secret: false,
+        },
+    };
+    let resolved = core
+        .resolve_oauth_client_secret(&matching_auth, None, None)
+        .expect("resolve")
+        .expect("resolved built-in secret");
+    assert_eq!(resolved.expose(), "GOCSPX-builtin-secret");
+
+    // Explicit secret still wins over built-in default.
+    let overridden = core
+        .resolve_oauth_client_secret(&matching_auth, Some("GOCSPX-explicit".into()), None)
+        .expect("resolve")
+        .expect("explicit secret");
+    assert_eq!(overridden.expose(), "GOCSPX-explicit");
+
+    // A different custom Google client ID never receives the built-in secret.
+    let custom_auth = ProviderAuth::GmailOAuth {
+        address: "custom@gmail.com".into(),
+        client: OAuthClient {
+            client_id: "custom-other.apps.googleusercontent.com".into(),
+            has_client_secret: false,
+        },
+    };
+    assert!(core
+        .resolve_oauth_client_secret(&custom_auth, None, None)
+        .expect("resolve")
+        .is_none());
 }
 
 #[tokio::test]

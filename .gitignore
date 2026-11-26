@@ -8,3 +8,5 @@ release-artifacts/
 todo.md
 .DS_Store
 Thumbs.db
+.env.local
+.env.*.local

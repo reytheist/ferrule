@@ -24,3 +24,13 @@ Clicking **Sign in with Google** inside Ferrule opens Google's sign-in screen in
 | Google OAuth Client Secret | Google Cloud Console → Google Auth Platform → Clients → Desktop app | OS Keychain (Windows Credential Manager / Linux Secret Service) | Secret |
 | OAuth Refresh Token | Issued during browser PKCE sign-in | OS Keychain (Windows Credential Manager / Linux Secret Service) | Secret |
 | OAuth Access Token | Exchanged from Refresh Token on demand | Memory only (`MailCore` token cache, never persisted) | Secret (ephemeral) |
+
+## Optional: Bake into release / local builds (no manual paste)
+To let users click **Gmail · Sign in with Google** directly without pasting the Client ID or Client secret, put these in a gitignored `.env.local` file at the repo root (or export them in your shell before running `scripts/release.ps1`, `scripts/release.sh`, or `pnpm tauri dev`):
+
+```dotenv
+FERRULE_GOOGLE_CLIENT_ID=123456789-xxxx.apps.googleusercontent.com
+FERRULE_GOOGLE_CLIENT_SECRET=GOCSPX-your-desktop-client-secret
+```
+
+`mail-core` embeds them at compile time via `option_env!` and skips the manual OAuth setup step in `AddAccountModal`. Users can still override them via **Change OAuth client** if needed.
