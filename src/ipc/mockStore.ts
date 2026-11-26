@@ -1763,6 +1763,7 @@ function summarizeShared(t: SharedThreadView): SharedThreadSummary {
     assigneeHandle: t.assigneeHandle,
     status: t.status,
     commentCount: t.comments.length,
+    hasDraft: Boolean(t.draft && t.draft.bodyText.trim().length > 0),
     draftLockState: t.draft?.lockState ?? "unlocked",
     draftEditorName: t.draft?.editorName ?? null,
     sharedAt: t.sharedAt,

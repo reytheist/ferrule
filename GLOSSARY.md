@@ -23,3 +23,15 @@ _Avoid_: Mailbox, profile, account tab
 **Pigment Staff Sync**:
 The optional team collaboration connection that syncs shared threads, comments, drafts, show contacts, calendar, and action items with a Pigment Staff server.
 _Avoid_: Team sync, staff mode
+
+**Shared Draft**:
+A collaborative reply draft attached to a shared Pigment Staff thread that one teammate locks to edit at a time, routes for review and approval, and hands back to the original mailbox owner to send.
+_Avoid_: Team email draft, shared compose, group reply
+
+**Action Item**:
+A trackable Pigment operations task with status, owner, department, milestone, optional due window, location, and budget note, linkable to an email thread, Meeting Doc, or shared calendar event.
+_Avoid_: Todo, ticket, checklist item
+
+**Meeting Doc**:
+The shared collaboration workspace attached to a Pigment calendar event, holding its agenda, carried-over tasks from prior recurring meetings, Markdown notes, linked Action Items, and Discord recap.
+_Avoid_: Event notes, meeting minutes, calendar note

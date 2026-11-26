@@ -1,6 +1,6 @@
 # First-boot-only frameless Launch Splash window
 
-Start the `main` Tauri window hidden in `tauri.conf.json` and have `src-tauri/src/lib.rs` check `AppSettings::onboarding_completed` and `account_count` immediately after opening `MailCore`. Only when setup has not been completed and no accounts exist does Ferrule spawn a dedicated frameless `splash` window (held for a ~1.2s minimum dwell until the main webview signals ready), then close it and reveal `main` on Step 1 of Onboarding; on all subsequent launches, `splash` is never created and `main` is shown immediately.
+Start the `main` Tauri window hidden in `tauri.conf.json` and have `src-tauri/src/lib.rs` check `AppSettings::onboarding_completed` and `account_count` immediately after opening `MailCore`. Only when setup has not been completed and no accounts exist does Ferrule spawn a dedicated frameless `splash` window (held for a ~2.4s minimum dwell until the main webview signals ready), then close it and reveal `main` on Step 1 of Onboarding; on all subsequent launches, `splash` is never created and `main` is shown immediately.
 
 ## Considered Options
 

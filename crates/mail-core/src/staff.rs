@@ -235,6 +235,8 @@ pub struct SharedThreadSummary {
     pub assignee_handle: Option<String>,
     pub status: HandoffStatus,
     pub comment_count: u32,
+    #[serde(default)]
+    pub has_draft: bool,
     pub draft_lock_state: DraftLockState,
     pub draft_editor_name: Option<String>,
     pub shared_at: UnixMs,

@@ -255,7 +255,7 @@ pub(crate) fn list_shared_threads(
                 st.subject, st.snippet, st.participants_json, st.messages_json, st.visibility,
                 st.invited_handles_json, st.assignee_handle, st.handoff_status, st.shared_at, st.updated_at,
                 (SELECT COUNT(*) FROM shared_comment c WHERE c.shared_thread_id = st.id) AS comment_count,
-                d.lock_state, d.editor_name
+                d.lock_state, d.editor_name, d.body_text
          FROM shared_thread st
          LEFT JOIN shared_draft d ON d.shared_thread_id = st.id
          ORDER BY st.updated_at DESC, st.shared_at DESC",
@@ -273,6 +273,10 @@ pub(crate) fn list_shared_threads(
                 .map(|s| DraftLockState::from_db(&s))
                 .unwrap_or(DraftLockState::Unlocked);
             let draft_editor_name: Option<String> = r.get(17).sq()?;
+            let has_draft = r
+                .get::<_, Option<String>>(18)
+                .sq()?
+                .is_some_and(|b| !b.trim().is_empty());
             Ok(SharedThreadSummary {
                 id: row_id(r, 0, SharedThreadId::from_bytes)?,
                 source_thread_id: opt_row_id(r, 1, ThreadId::from_bytes)?,
@@ -288,6 +292,7 @@ pub(crate) fn list_shared_threads(
                 assignee_handle: r.get(11).sq()?,
                 status,
                 comment_count: comment_count.max(0) as u32,
+                has_draft,
                 draft_lock_state,
                 draft_editor_name,
                 shared_at: UnixMs(r.get(13).sq()?),

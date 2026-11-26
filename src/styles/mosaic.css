@@ -4558,3 +4558,38 @@
   color: var(--app-ink);
   font-size: calc(13px * var(--chrome-font-scale));
 }
+
+.shared-draft-guide {
+  margin-top: 8px;
+  text-align: left;
+  max-width: 520px;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border-soft);
+  border-radius: var(--app-radius);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shared-draft-guide-title {
+  font-family: var(--font-display);
+  font-size: calc(11.5px * var(--chrome-font-scale));
+  font-weight: 600;
+  color: var(--app-ink);
+}
+
+.shared-draft-steps {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
+  line-height: 1.45;
+  color: var(--app-ink-2);
+}
+
+.shared-draft-steps strong {
+  color: var(--app-ink);
+}

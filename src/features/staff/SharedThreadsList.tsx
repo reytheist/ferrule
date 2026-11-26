@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   Edit3,
   FileEdit,
+  HelpCircle,
   Lock,
   Mail,
   MessageSquare,
@@ -23,6 +24,35 @@ function snapshotSender(msg: SharedMessageSnapshot): string {
   return msg.fromName ?? msg.fromEmail;
 }
 
+function SharedDraftGuide() {
+  return (
+    <div className="shared-draft-guide">
+      <div className="shared-draft-guide-title">How Shared Drafts work</div>
+      <ol className="shared-draft-steps">
+        <li>
+          <strong>Share a thread</strong> — Open an email in a <em>Pigment Staff</em> space and
+          click <strong>Share with Staff</strong>. Only a sanitized snapshot is shared; your mailbox
+          stays private.
+        </li>
+        <li>
+          <strong>Claim the lock &amp; write</strong> — Click <strong>Start Shared Reply Draft</strong>{" "}
+          (or <strong>Edit Shared Draft</strong>) so one person edits at a time, then click{" "}
+          <strong>Save Draft</strong>.
+        </li>
+        <li>
+          <strong>Review &amp; approve</strong> — Click <strong>Request Review</strong> to unlock
+          and ping teammates, or click <strong>Approve Draft</strong> when the wording is ready.
+        </li>
+        <li>
+          <strong>Send from your mailbox</strong> — Only the original mailbox owner can send. Once
+          approved, click <strong>Open in Mailbox &amp; Load Reply</strong> to send it from your
+          own address.
+        </li>
+      </ol>
+    </div>
+  );
+}
+
 export function SharedThreadsList({ app }: { app: MailApp }) {
   const ws = app.staffWorkspace;
   const outboxBadge =
@@ -38,7 +68,9 @@ export function SharedThreadsList({ app }: { app: MailApp }) {
           : `${ws.pendingOutboxCount} pending`
       : null;
 
-  const draftThreads = app.sharedThreads.filter((item) => item.draftLockState !== "unlocked");
+  const draftThreads = app.sharedThreads.filter(
+    (item) => item.hasDraft || item.draftLockState !== "unlocked",
+  );
   const visibleThreads =
     app.sharedListTab === "drafts" ? draftThreads : app.sharedThreads;
 
@@ -177,6 +209,7 @@ export function SharedThreadReadingPane({ app }: { app: MailApp }) {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewHandle, setReviewHandle] = useState("");
   const [reviewNote, setReviewNote] = useState("");
+  const [showGuide, setShowGuide] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -199,6 +232,7 @@ export function SharedThreadReadingPane({ app }: { app: MailApp }) {
                 ? "Pick a shared draft on the left to read, review, approve, or edit it in full."
                 : "Pick a shared thread on the left to review snapshots, comments, and shared reply drafts."}
             </span>
+            {app.sharedListTab === "drafts" && <SharedDraftGuide />}
           </div>
         </div>
       </main>
@@ -324,7 +358,17 @@ export function SharedThreadReadingPane({ app }: { app: MailApp }) {
                   {draft && (
                     <span className="hint-text">Updated {formatFull(draft.updatedAt)}</span>
                   )}
+                  <button
+                    type="button"
+                    className={`sidebar-mini-btn${showGuide ? " active" : ""}`}
+                    onClick={() => setShowGuide((v) => !v)}
+                    title="How Shared Drafts work"
+                  >
+                    <HelpCircle style={{ width: 11, height: 11 }} />
+                    {showGuide ? "Hide guide" : "How it works"}
+                  </button>
                 </div>
+                {showGuide && <SharedDraftGuide />}
                 {draft && (draft.to.length > 0 || draft.cc.length > 0) && (
                   <div className="draft-recipients-bar">
                     {draft.to.length > 0 && (
@@ -446,6 +490,7 @@ export function SharedThreadReadingPane({ app }: { app: MailApp }) {
                           Start a shared draft so Pigment teammates can review and approve the reply
                           before the mailbox owner sends it.
                         </span>
+                        <SharedDraftGuide />
                       </div>
                     )}
 

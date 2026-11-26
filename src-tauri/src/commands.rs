@@ -33,7 +33,7 @@ use crate::updater::{
 };
 use crate::SplashState;
 
-const MIN_SPLASH_DWELL: Duration = Duration::from_millis(1200);
+const MIN_SPLASH_DWELL: Duration = Duration::from_millis(2400);
 
 #[tauri::command]
 pub fn health_check(core: tauri::State<'_, MailCore>) -> Result<String, CoreError> {

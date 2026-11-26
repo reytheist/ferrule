@@ -439,6 +439,7 @@ export interface SharedThreadSummary {
   assigneeHandle: string | null;
   status: HandoffStatus;
   commentCount: number;
+  hasDraft: boolean;
   draftLockState: DraftLockState;
   draftEditorName: string | null;
   sharedAt: UnixMs;
