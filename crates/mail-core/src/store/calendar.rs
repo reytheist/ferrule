@@ -65,6 +65,17 @@ pub(crate) fn upsert_calendar_event_row(
     conn: &mut Connection,
     event: &CalendarEventView,
 ) -> Result<(), CoreError> {
+    if event
+        .discord_url
+        .as_deref()
+        .is_some_and(|u| u.to_ascii_lowercase().contains("/api/webhooks/"))
+    {
+        return Err(CoreError::InvalidInput {
+            field: "discordUrl".to_string(),
+            reason: "Discord webhook URLs contain secrets and cannot be stored on calendar events"
+                .to_string(),
+        });
+    }
     conn.execute(
         "INSERT INTO calendar_event (
             id, series_id, title, description, start_at, end_at, all_day, kind,
@@ -134,6 +145,13 @@ pub(crate) fn save_calendar_event(
         .map(str::trim)
         .filter(|u| !u.is_empty())
     {
+        if url.to_ascii_lowercase().contains("/api/webhooks/") {
+            return Err(CoreError::InvalidInput {
+                field: "discordUrl".to_string(),
+                reason: "Discord webhook URLs contain secrets and cannot be stored on calendar events"
+                    .to_string(),
+            });
+        }
         let valid = url.starts_with("discord://")
             || url.starts_with("https://discord.com/")
             || url.starts_with("https://discord.gg/")
@@ -665,13 +683,12 @@ pub(crate) fn save_ics_overlay(
     }
     let url = input.url.trim();
     let valid_url = url.starts_with("https://")
-        || url.starts_with("http://")
         || url.starts_with("webcal://")
         || url.starts_with("local://");
     if !valid_url {
         return Err(CoreError::InvalidInput {
             field: "url".to_string(),
-            reason: "feed URL must start with https://, http://, webcal://, or local://".to_string(),
+            reason: "feed URL must start with https://, webcal://, or local://".to_string(),
         });
     }
     let id = input.id.unwrap_or_else(IcsOverlayId::fresh);

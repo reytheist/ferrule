@@ -207,50 +207,79 @@ pub(crate) fn build_authorize_url(
     Ok(url.into())
 }
 
+#[derive(Debug)]
+pub(crate) enum CallbackParseError {
+    StateMismatch(CoreError),
+    Fatal(CoreError),
+}
+
 pub(crate) fn parse_callback_request(
     request_line: &str,
     expected_state: &str,
-) -> Result<String, CoreError> {
+) -> Result<String, CallbackParseError> {
     let path = request_line
         .split_whitespace()
         .nth(1)
-        .ok_or_else(|| CoreError::Network {
-            reason: "malformed OAuth callback request".to_string(),
-            retryable: false,
+        .ok_or_else(|| {
+            CallbackParseError::Fatal(CoreError::Network {
+                reason: "malformed OAuth callback request".to_string(),
+                retryable: false,
+            })
         })?;
-    let parsed = Url::parse(&format!("http://127.0.0.1{path}")).map_err(|e| CoreError::Network {
-        reason: format!("malformed OAuth callback URL: {e}"),
-        retryable: false,
+    let parsed = Url::parse(&format!("http://127.0.0.1{path}")).map_err(|e| {
+        CallbackParseError::Fatal(CoreError::Network {
+            reason: format!("malformed OAuth callback URL: {e}"),
+            retryable: false,
+        })
     })?;
     let params: HashMap<String, String> = parsed.query_pairs().into_owned().collect();
+
+    // Always validate state BEFORE inspecting error/code so an unauthenticated local
+    // request cannot abort or spoof an in-flight sign-in flow.
+    let got_state = params.get("state").map(String::as_str).unwrap_or("");
+    if got_state != expected_state {
+        return Err(CallbackParseError::StateMismatch(CoreError::Network {
+            reason: "OAuth state mismatch; try signing in again".to_string(),
+            retryable: false,
+        }));
+    }
 
     if let Some(error) = params.get("error") {
         let desc = params
             .get("error_description")
             .cloned()
             .unwrap_or_else(|| error.clone());
-        return Err(CoreError::Network {
+        return Err(CallbackParseError::Fatal(CoreError::Network {
             reason: format!("OAuth sign-in declined: {desc}"),
             retryable: false,
-        });
-    }
-
-    let got_state = params.get("state").map(String::as_str).unwrap_or("");
-    if got_state != expected_state {
-        return Err(CoreError::Network {
-            reason: "OAuth state mismatch; try signing in again".to_string(),
-            retryable: false,
-        });
+        }));
     }
 
     params
         .get("code")
         .filter(|c| !c.is_empty())
         .cloned()
-        .ok_or_else(|| CoreError::Network {
-            reason: "OAuth callback did not contain an authorization code".to_string(),
-            retryable: false,
+        .ok_or_else(|| {
+            CallbackParseError::Fatal(CoreError::Network {
+                reason: "OAuth callback did not contain an authorization code".to_string(),
+                retryable: false,
+            })
         })
+}
+
+fn html_escape(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 fn callback_html(ok: bool, detail: &str) -> String {
@@ -259,6 +288,7 @@ fn callback_html(ok: bool, detail: &str) -> String {
     } else {
         ("Sign-in did not finish", "#F16A7A")
     };
+    let escaped_detail = html_escape(detail);
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>{title}</title>\
          <style>body{{margin:0;min-height:100vh;display:grid;place-items:center;\
@@ -266,7 +296,7 @@ fn callback_html(ok: bool, detail: &str) -> String {
          .card{{max-width:420px;padding:28px 32px;border-radius:12px;background:#161923;\
          border:1px solid #272e40;text-align:center;}}h1{{margin:0 0 10px;font-size:18px;\
          color:{accent};}}p{{margin:0;font-size:13px;line-height:1.5;color:#b3bacb;}}</style>\
-         </head><body><div class=\"card\"><h1>{title}</h1><p>{detail}</p></div></body></html>"
+         </head><body><div class=\"card\"><h1>{title}</h1><p>{escaped_detail}</p></div></body></html>"
     )
 }
 
@@ -276,7 +306,12 @@ async fn write_http_response(
     html: &str,
 ) {
     let response = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{html}",
+        "HTTP/1.1 {status}\r\n\
+         Content-Type: text/html; charset=utf-8\r\n\
+         Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'\r\n\
+         Referrer-Policy: no-referrer\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\r\n{html}",
         html.len()
     );
     let _ = stream.write_all(response.as_bytes()).await;
@@ -354,7 +389,16 @@ pub(crate) async fn run_browser_pkce_flow_for_endpoints(
                     .await;
                     return Ok(code);
                 }
-                Err(err) => {
+                Err(CallbackParseError::StateMismatch(err)) => {
+                    write_http_response(
+                        &mut stream,
+                        "400 Bad Request",
+                        &callback_html(false, &err.to_string()),
+                    )
+                    .await;
+                    continue;
+                }
+                Err(CallbackParseError::Fatal(err)) => {
                     write_http_response(
                         &mut stream,
                         "400 Bad Request",
@@ -647,13 +691,36 @@ mod tests {
 
         let bad_state =
             parse_callback_request("GET /callback?code=abc123&state=wrong HTTP/1.1", "good");
-        assert!(bad_state.is_err());
+        assert!(matches!(bad_state, Err(CallbackParseError::StateMismatch(_))));
 
-        let denied = parse_callback_request(
-            "GET /callback?error=access_denied&error_description=User+cancelled HTTP/1.1",
+        // Missing or mismatched state must be rejected BEFORE inspecting `error`,
+        // preventing unauthenticated local requests from aborting the sign-in flow.
+        let unauthed_error = parse_callback_request(
+            "GET /callback?error=access_denied&error_description=spoofed HTTP/1.1",
             "good",
         );
-        assert!(denied.unwrap_err().to_string().contains("User cancelled"));
+        assert!(matches!(
+            unauthed_error,
+            Err(CallbackParseError::StateMismatch(_))
+        ));
+
+        let denied = parse_callback_request(
+            "GET /callback?state=good&error=access_denied&error_description=User+cancelled HTTP/1.1",
+            "good",
+        );
+        match denied {
+            Err(CallbackParseError::Fatal(err)) => {
+                assert!(err.to_string().contains("User cancelled"));
+            }
+            other => panic!("expected Fatal error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn callback_html_escapes_detail_to_prevent_reflected_xss() {
+        let html = callback_html(false, r#"<script>alert("xss")</script> & 'quoted'"#);
+        assert!(!html.contains("<script>"));
+        assert!(html.contains("&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt; &amp; &#39;quoted&#39;"));
     }
 
     #[test]

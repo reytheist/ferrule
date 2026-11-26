@@ -10,7 +10,9 @@ pub mod db;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
@@ -32,18 +34,21 @@ use mail_core::staff::{
 use mail_core::{StaffSyncEvent, StaffSyncSnapshot};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{broadcast, oneshot, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::{Stream, StreamExt};
 
 use crate::db::{DbError, SyncDb};
 
+const DEFAULT_MAX_SSE_CONNECTIONS: usize = 64;
+
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub db_path: Option<PathBuf>,
     pub tokens: Vec<String>,
     pub heartbeat_interval: Duration,
+    pub max_sse_connections: usize,
 }
 
 impl ServerConfig {
@@ -52,6 +57,7 @@ impl ServerConfig {
             db_path,
             tokens,
             heartbeat_interval: Duration::from_secs(15),
+            max_sse_connections: DEFAULT_MAX_SSE_CONNECTIONS,
         }
     }
 }
@@ -71,6 +77,7 @@ pub struct AppState {
     tokens: Vec<String>,
     events: broadcast::Sender<StaffSyncEvent>,
     heartbeat_interval: Duration,
+    sse_semaphore: Arc<Semaphore>,
 }
 
 impl AppState {
@@ -86,11 +93,13 @@ impl AppState {
         }
         let db = SyncDb::open(config.db_path.as_deref())?;
         let (events, _) = broadcast::channel(256);
+        let max_sse = config.max_sse_connections.max(1);
         Ok(Arc::new(Self {
             db,
             tokens,
             events,
             heartbeat_interval: config.heartbeat_interval,
+            sse_semaphore: Arc::new(Semaphore::new(max_sse)),
         }))
     }
 
@@ -142,6 +151,14 @@ impl From<DbError> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         match self.0 {
+            DbError::BadRequest(msg) => (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorBody {
+                    error: msg,
+                    current_rev: None,
+                }),
+            )
+                .into_response(),
             DbError::NotFound(entity) => (
                 StatusCode::NOT_FOUND,
                 Json(ErrorBody {
@@ -158,14 +175,17 @@ impl IntoResponse for ApiError {
                 }),
             )
                 .into_response(),
-            other => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorBody {
-                    error: other.to_string(),
-                    current_rev: None,
-                }),
-            )
-                .into_response(),
+            other => {
+                eprintln!("staff-sync-server internal error: {other}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorBody {
+                        error: "internal server error".to_string(),
+                        current_rev: None,
+                    }),
+                )
+                    .into_response()
+            }
         }
     }
 }
@@ -186,6 +206,7 @@ async fn require_bearer_auth(
         Some(t) if state.is_authorized(t) => next.run(request).await,
         _ => (
             StatusCode::UNAUTHORIZED,
+            [(header::WWW_AUTHENTICATE, "Bearer")],
             Json(ErrorBody {
                 error: "invalid or missing bearer token".to_string(),
                 current_rev: None,
@@ -309,31 +330,62 @@ async fn get_snapshot(
     Ok(Json(snapshot))
 }
 
-async fn get_events(
-    State(state): State<Arc<AppState>>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+struct PermitStream<S> {
+    inner: Pin<Box<S>>,
+    _permit: OwnedSemaphorePermit,
+}
+
+impl<S: Stream> Stream for PermitStream<S> {
+    type Item = S::Item;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.as_mut().poll_next(cx)
+    }
+}
+
+async fn get_events(State(state): State<Arc<AppState>>) -> Response {
+    let Ok(permit) = state.sse_semaphore.clone().try_acquire_owned() else {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(ErrorBody {
+                error: "too many concurrent SSE connections".to_string(),
+                current_rev: None,
+            }),
+        )
+            .into_response();
+    };
     let rx = state.events.subscribe();
     let stream = BroadcastStream::new(rx).filter_map(|item| match item {
-        Ok(ev) => Event::default().event("update").json_data(ev).ok().map(Ok),
+        Ok(ev) => Event::default().event("update").json_data(ev).ok().map(Ok::<Event, Infallible>),
         Err(_) => Event::default()
             .event("update")
             .json_data(StaffSyncEvent::SnapshotInvalidated { since: None })
             .ok()
-            .map(Ok),
+            .map(Ok::<Event, Infallible>),
     });
-    Sse::new(stream).keep_alive(
-        KeepAlive::new()
-            .interval(state.heartbeat_interval)
-            .text("keep-alive"),
-    )
+    let guarded = PermitStream {
+        inner: Box::pin(stream),
+        _permit: permit,
+    };
+    Sse::new(guarded)
+        .keep_alive(
+            KeepAlive::new()
+                .interval(state.heartbeat_interval)
+                .text("keep-alive"),
+        )
+        .into_response()
 }
 
 async fn put_member(
     State(state): State<Arc<AppState>>,
     Path(id): Path<StaffMemberId>,
-    Json(mut member): Json<StaffMemberView>,
+    Json(member): Json<StaffMemberView>,
 ) -> Result<StatusCode, ApiError> {
-    member.id = id;
+    if member.id != id {
+        return Err(ApiError(DbError::BadRequest(
+            "member id in request body must match path id".to_string(),
+        )));
+    }
     state.db.upsert_member(&member, now_unix_ms())?;
     state.broadcast(StaffSyncEvent::DirectoryUpdated);
     Ok(StatusCode::NO_CONTENT)

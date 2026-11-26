@@ -248,6 +248,7 @@ impl StaffSyncClient {
         }
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(12))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| CoreError::Network {
                 reason: format!("init Staff Sync HTTP client: {e}"),
@@ -326,6 +327,7 @@ impl StaffSyncClient {
     pub(crate) async fn open_event_stream(&self) -> Result<StaffEventStream, StaffHttpError> {
         let sse_client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| StaffHttpError::Retryable(format!("init Staff Sync SSE client: {e}")))?;
         let url = format!("{}/v1/events", self.base_url);

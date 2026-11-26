@@ -534,3 +534,56 @@ async fn reshare_preserves_handoff_and_rejects_cleartext_non_loopback_http() {
     assert_eq!(refreshed.status, HandoffStatus::Waiting);
     assert_eq!(refreshed.assignee_handle.as_deref(), Some("jordan"));
 }
+
+#[tokio::test]
+async fn external_and_pinned_link_urls_enforce_parsed_scheme_rules() {
+    let (core, _secrets) = open_test_core();
+
+    for bad in [
+        "javascript:alert(1)",
+        "file:///C:/Windows/System32/calc.exe",
+        "data:text/html,<script>alert(1)</script>",
+        "http://example.com/non-loopback",
+        "https://evil.example/a\nb",
+        "discord://",
+    ] {
+        assert!(
+            matches!(
+                core.save_pinned_link(SavePinnedLinkInput {
+                    id: None,
+                    title: "Bad".into(),
+                    url: bad.into(),
+                    category: "ops".into(),
+                    description: None,
+                })
+                .await,
+                Err(CoreError::InvalidInput { .. })
+            ),
+            "expected save_pinned_link to reject '{bad}'"
+        );
+        assert!(
+            matches!(
+                core.open_external_url(bad),
+                Err(CoreError::InvalidInput { .. })
+            ),
+            "expected open_external_url to reject '{bad}'"
+        );
+    }
+
+    for good in [
+        "https://docs.google.com/spreadsheets/d/123",
+        "http://localhost:8787/health",
+        "http://127.0.0.1:8787/health",
+        "discord://-/channels/12345/67890",
+    ] {
+        core.save_pinned_link(SavePinnedLinkInput {
+            id: None,
+            title: "Good".into(),
+            url: good.into(),
+            category: "ops".into(),
+            description: None,
+        })
+        .await
+        .unwrap_or_else(|e| panic!("expected '{good}' to be accepted, got {e:?}"));
+    }
+}

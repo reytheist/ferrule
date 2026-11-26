@@ -480,3 +480,89 @@ async fn discord_webhook_lives_strictly_in_secret_store() {
         .expect("get secret")
         .is_none());
 }
+
+#[tokio::test]
+async fn calendar_event_rejects_discord_webhook_urls_and_ssrf_ics_overlays() {
+    let (core, _secrets) = test_core();
+
+    for webhook in [
+        "https://discord.com/api/webhooks/123456789/secret-token",
+        "https://canary.discord.com/API/WEBHOOKS/123456789/secret-token",
+    ] {
+        let err = core
+            .save_calendar_event(SaveCalendarEventInput {
+                id: None,
+                series_id: None,
+                title: "Webhook Leak Attempt".to_string(),
+                description: String::new(),
+                start_at: UnixMs(BASE_MS + DAY),
+                end_at: UnixMs(BASE_MS + DAY + HOUR),
+                all_day: false,
+                kind: CalendarEventKind::Meeting,
+                department: None,
+                location: None,
+                recurrence: RecurrenceRule::None,
+                discord_url: Some(webhook.to_string()),
+                attendees: Vec::new(),
+                source_ics_uid: None,
+            })
+            .await
+            .expect_err("webhook URL must be rejected on calendar_event");
+        assert!(matches!(err, mail_core::error::CoreError::InvalidInput { .. }));
+    }
+
+    for bad_ics in [
+        "http://example.com/feed.ics",
+        "https://169.254.169.254/latest/meta-data/",
+        "https://127.0.0.1/feed.ics",
+        "file:///etc/passwd",
+    ] {
+        let err = core
+            .save_ics_overlay(SaveIcsOverlayInput {
+                id: None,
+                name: "Bad Feed".to_string(),
+                url: bad_ics.to_string(),
+                color: "violet".to_string(),
+                enabled: true,
+            })
+            .await
+            .expect_err("disallowed ICS URL must be rejected");
+        assert!(matches!(err, mail_core::error::CoreError::InvalidInput { .. }));
+    }
+}
+
+#[tokio::test]
+async fn delete_account_atomically_removes_messages_and_fts_entries() {
+    let (core, _secrets) = test_core();
+    core.seed_demo_if_empty().await.expect("seed demo");
+    let accounts = core.list_accounts().await.expect("list accounts");
+    assert!(!accounts.is_empty());
+    let target = accounts[0].id;
+
+    let before_threads = core
+        .list_threads(mail_core::types::ThreadQuery {
+            scope: mail_core::types::Scope::Account { account_id: target },
+            view: mail_core::types::MailboxView::Inbox {
+                category: mail_core::types::InboxCategory::All,
+            },
+            limit: 20,
+            offset: 0,
+        })
+        .await
+        .expect("list threads before delete");
+    assert!(!before_threads.items.is_empty());
+
+    core.remove_account(target).await.expect("remove account");
+
+    let after_accounts = core.list_accounts().await.expect("list accounts after");
+    assert!(!after_accounts.iter().any(|a| a.id == target));
+    let after_search = core
+        .agent_port(mail_core::ids::AgentId::parse("test-agent").expect("agent id"))
+        .search("the", 50)
+        .await
+        .expect("search after delete");
+    assert!(
+        !after_search.iter().any(|t| t.account_id == target),
+        "deleted account messages must not appear in FTS search"
+    );
+}

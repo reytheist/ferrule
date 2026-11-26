@@ -1114,3 +1114,256 @@ async fn missing_keychain_token_and_misrouted_404_preserve_outbox() {
 
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn server_security_hardening_auth_headers_member_validation_sse_cap_and_snapshot_sanitization() {
+    let mut cfg = ServerConfig::with_tokens(vec!["sec-token".into()], None);
+    cfg.max_sse_connections = 2;
+    let server = spawn_server(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0), cfg)
+        .await
+        .expect("spawn server");
+
+    let http = reqwest::Client::new();
+
+    // 1. 401 responses must include `WWW-Authenticate: Bearer`.
+    let unauth = http
+        .get(format!("{}/v1/snapshot", server.url()))
+        .send()
+        .await
+        .expect("unauth");
+    assert_eq!(unauth.status(), reqwest::StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        unauth
+            .headers()
+            .get(reqwest::header::WWW_AUTHENTICATE)
+            .and_then(|v| v.to_str().ok()),
+        Some("Bearer")
+    );
+
+    // 2. Rejected initial connect must NOT persist the invalid token in SecretStore.
+    let bad_secrets = Arc::new(MemorySecretStore::default());
+    let bad_core = MailCore::open(
+        CoreConfig::default(),
+        Host {
+            secrets: bad_secrets.clone(),
+            clock: Arc::new(ManualClock::new(UnixMs(BASE_MS))),
+        },
+    )
+    .expect("open bad core");
+    let bad_ws = bad_core
+        .connect_staff_workspace(ConnectStaffWorkspaceInput {
+            server_url: server.url(),
+            token: "wrong-token".into(),
+            staff_name: "Mallory".into(),
+            staff_handle: "mallory".into(),
+            staff_email: "mallory@pigmentminiatures.com".into(),
+            staff_role: "Staff".into(),
+        })
+        .await
+        .expect("connect returns error status");
+    bad_core.stop_staff_sync_listener();
+    assert_eq!(bad_ws.status, StaffSyncStatus::Error);
+    assert!(
+        bad_secrets
+            .get(&SecretKey::staff_sync_token())
+            .expect("secret lookup")
+            .is_none(),
+        "rejected bearer token must not be persisted in SecretStore"
+    );
+
+    // 3. PUT /v1/members/{id} rejects path/body id mismatch (400) and handle hijacking (409).
+    let alice_id = mail_core::ids::StaffMemberId::fresh();
+    let other_id = mail_core::ids::StaffMemberId::fresh();
+    let alice_member = mail_core::staff::StaffMemberView {
+        id: alice_id,
+        name: "Alice".into(),
+        role: "Director".into(),
+        handle: "alice".into(),
+        email: "alice@pigmentminiatures.com".into(),
+        department: None,
+        updated_at: UnixMs(BASE_MS),
+    };
+    let mismatch_resp = http
+        .put(format!("{}/v1/members/{other_id}", server.url()))
+        .bearer_auth("sec-token")
+        .json(&alice_member)
+        .send()
+        .await
+        .expect("put mismatch");
+    assert_eq!(mismatch_resp.status(), reqwest::StatusCode::BAD_REQUEST);
+
+    let ok_put = http
+        .put(format!("{}/v1/members/{alice_id}", server.url()))
+        .bearer_auth("sec-token")
+        .json(&alice_member)
+        .send()
+        .await
+        .expect("put alice");
+    assert_eq!(ok_put.status(), reqwest::StatusCode::NO_CONTENT);
+
+    let hijack_member = mail_core::staff::StaffMemberView {
+        id: other_id,
+        name: "Impostor".into(),
+        role: "Admin".into(),
+        handle: "alice".into(),
+        email: "evil@example.com".into(),
+        department: None,
+        updated_at: UnixMs(BASE_MS + 1000),
+    };
+    let hijack_resp = http
+        .put(format!("{}/v1/members/{other_id}", server.url()))
+        .bearer_auth("sec-token")
+        .json(&hijack_member)
+        .send()
+        .await
+        .expect("put hijack");
+    assert_eq!(hijack_resp.status(), reqwest::StatusCode::CONFLICT);
+
+    // 4. Bounded concurrent SSE connections return 429 when cap is exceeded.
+    let sse1 = http
+        .get(format!("{}/v1/events", server.url()))
+        .bearer_auth("sec-token")
+        .send()
+        .await
+        .expect("sse1");
+    assert_eq!(sse1.status(), reqwest::StatusCode::OK);
+    let sse2 = http
+        .get(format!("{}/v1/events", server.url()))
+        .bearer_auth("sec-token")
+        .send()
+        .await
+        .expect("sse2");
+    assert_eq!(sse2.status(), reqwest::StatusCode::OK);
+    let sse3 = http
+        .get(format!("{}/v1/events", server.url()))
+        .bearer_auth("sec-token")
+        .send()
+        .await
+        .expect("sse3");
+    assert_eq!(sse3.status(), reqwest::StatusCode::TOO_MANY_REQUESTS);
+    drop(sse1);
+    drop(sse2);
+
+    // 5. Remote snapshot re-sanitizes body_srcdoc, filters disallowed pinned_links,
+    //    and protects the local user's own staff_handle identity row.
+    let poisoned_thread_id = mail_core::ids::SharedThreadId::fresh();
+    let poisoned_thread = mail_core::staff::SharedThreadView {
+        id: poisoned_thread_id,
+        source_thread_id: None,
+        source_account_id: None,
+        owner_email: "attacker@example.com".into(),
+        owner_name: "Attacker".into(),
+        subject: "Poisoned HTML".into(),
+        snippet: "Test".into(),
+        participants: vec!["attacker@example.com".into()],
+        messages: vec![mail_core::staff::SharedMessageSnapshot {
+            id: "m1".into(),
+            from_name: Some("Attacker".into()),
+            from_email: "attacker@example.com".into(),
+            to: vec!["staff@pigmentminiatures.com".into()],
+            cc: vec![],
+            date: UnixMs(BASE_MS),
+            snippet: "Hello".into(),
+            body_srcdoc: r#"<p onclick="evil()">Hello</p><script>alert(1)</script><img src="https://evil.example/spy.gif" width="100">"#.into(),
+            body_text: "Hello".into(),
+        }],
+        visibility: ShareVisibility::AllStaff,
+        invited_handles: vec![],
+        assignee_handle: None,
+        status: HandoffStatus::Open,
+        shared_at: UnixMs(BASE_MS),
+        updated_at: UnixMs(BASE_MS),
+        comments: vec![],
+        draft: None,
+    };
+    let post_thread = http
+        .post(format!("{}/v1/shared-threads", server.url()))
+        .bearer_auth("sec-token")
+        .json(&poisoned_thread)
+        .send()
+        .await
+        .expect("post poisoned thread");
+    assert_eq!(post_thread.status(), reqwest::StatusCode::NO_CONTENT);
+
+    let bad_link_id = mail_core::ids::PinnedLinkId::fresh();
+    let bad_link = mail_core::staff::PinnedLinkView {
+        id: bad_link_id,
+        title: "XSS Link".into(),
+        url: "javascript:alert(1)".into(),
+        category: "ops".into(),
+        description: None,
+        position: 0,
+        updated_at: UnixMs(BASE_MS),
+    };
+    let put_link = http
+        .put(format!("{}/v1/pinned-links/{bad_link_id}", server.url()))
+        .bearer_auth("sec-token")
+        .json(&bad_link)
+        .send()
+        .await
+        .expect("put bad link");
+    assert_eq!(put_link.status(), reqwest::StatusCode::NO_CONTENT);
+
+    // Connect a client as `@bob` and sync; verify sanitized HTML, rejected pinned link,
+    // and untouched local `@bob` member identity.
+    let bob = open_test_core(None, BASE_MS + 2_000);
+    bob.connect_staff_workspace(ConnectStaffWorkspaceInput {
+        server_url: server.url(),
+        token: "sec-token".into(),
+        staff_name: "Bob Real".into(),
+        staff_handle: "bob".into(),
+        staff_email: "bob@pigmentminiatures.com".into(),
+        staff_role: "Sponsors Lead".into(),
+    })
+    .await
+    .expect("connect bob");
+    bob.stop_staff_sync_listener();
+
+    let synced_thread = bob
+        .open_shared_thread(poisoned_thread_id)
+        .await
+        .expect("open synced thread");
+    let srcdoc = &synced_thread.messages[0].body_srcdoc;
+    assert!(!srcdoc.contains("<script"));
+    assert!(!srcdoc.contains("onclick"));
+    assert!(!srcdoc.contains("evil.example/spy.gif"));
+    assert!(srcdoc.contains("Hello"));
+
+    let links = bob.list_pinned_links().await.expect("list links");
+    assert!(
+        !links.iter().any(|l| l.id == bad_link_id),
+        "disallowed remote pinned link must not be persisted locally"
+    );
+
+    // Push a tampered member row with bob's handle on the server (same id as bob's derived id),
+    // then sync bob — bob's local identity row must NOT be overwritten.
+    let bob_derived_id = mail_core::ids::StaffMemberId::derive(
+        Uuid::NAMESPACE_URL,
+        b"ferrule:staff:bob",
+    );
+    let tampered_bob = mail_core::staff::StaffMemberView {
+        id: bob_derived_id,
+        name: "Tampered Bob".into(),
+        role: "Hacked".into(),
+        handle: "bob".into(),
+        email: "tampered@evil.example".into(),
+        department: None,
+        updated_at: UnixMs(BASE_MS + 10_000),
+    };
+    let put_tampered = http
+        .put(format!("{}/v1/members/{bob_derived_id}", server.url()))
+        .bearer_auth("sec-token")
+        .json(&tampered_bob)
+        .send()
+        .await
+        .expect("put tampered bob");
+    assert_eq!(put_tampered.status(), reqwest::StatusCode::NO_CONTENT);
+
+    bob.sync_staff_workspace().await.expect("bob sync");
+    let dir = bob.list_staff_directory().await.expect("list directory");
+    let bob_row = dir.iter().find(|m| m.handle == "bob").expect("bob in dir");
+    assert_eq!(bob_row.name, "Bob Real");
+    assert_eq!(bob_row.email, "bob@pigmentminiatures.com");
+
+    server.shutdown().await;
+}

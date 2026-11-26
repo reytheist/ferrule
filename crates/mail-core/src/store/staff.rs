@@ -822,16 +822,7 @@ pub(crate) fn save_pinned_link(
             reason: "link title is required".to_string(),
         });
     }
-    let url = input.url.trim();
-    let valid_url = url.starts_with("https://")
-        || url.starts_with("http://")
-        || url.starts_with("discord://");
-    if !valid_url {
-        return Err(CoreError::InvalidInput {
-            field: "url".to_string(),
-            reason: "URL must start with https://, http://, or discord://".to_string(),
-        });
-    }
+    let url = crate::staff_core::validate_external_url(&input.url)?;
     let next_pos: i64 = conn
         .query_row(
             "SELECT COALESCE(MAX(position) + 1, 0) FROM pinned_link",

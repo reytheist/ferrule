@@ -1692,7 +1692,7 @@ impl MailCore {
         let plan = sync::imap::plan_for(
             job.account_id,
             &account.auth,
-            secret.expose().to_string(),
+            secret,
             Dialect::from_auth(&account.auth)
                 .primary_sync_folder()
                 .to_string(),
@@ -1777,7 +1777,7 @@ impl MailCore {
         let plan = sync::imap::plan_for(
             account_id,
             &auth,
-            secret.expose().to_string(),
+            secret,
             folder,
             sync::imap::SyncWindow {
                 since,

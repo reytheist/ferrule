@@ -5,8 +5,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::{DateTime, Utc};
+use zeroize::Zeroizing;
 
-use crate::auth::CredentialKind;
+use crate::auth::{CredentialKind, SecretString};
 use crate::error::CoreError;
 use crate::ids::{AccountId, UnixMs};
 use crate::sync::{parse_raw, IngestMessage};
@@ -29,7 +30,7 @@ pub(crate) struct FetchPlan {
     pub plaintext: bool,
     pub auth_mode: ImapAuthMode,
     pub username: String,
-    pub secret: String,
+    pub secret: SecretString,
     pub folder: String,
     pub since: UnixMs,
     pub now: UnixMs,
@@ -82,7 +83,7 @@ fn map_imap_err(err: &imap::Error, account_id: AccountId, auth_phase: bool) -> C
 
 struct XOAuth2Authenticator {
     user: String,
-    access_token: String,
+    access_token: Zeroizing<String>,
     sent: AtomicBool,
 }
 
@@ -95,7 +96,11 @@ impl imap::Authenticator for XOAuth2Authenticator {
         if self.sent.swap(true, Ordering::SeqCst) {
             String::new()
         } else {
-            format!("user={}\x01auth=Bearer {}\x01\x01", self.user, self.access_token)
+            format!(
+                "user={}\x01auth=Bearer {}\x01\x01",
+                self.user,
+                self.access_token.as_str()
+            )
         }
     }
 }
@@ -110,12 +115,12 @@ fn open_session(plan: &FetchPlan) -> Result<imap::Session<imap::Connection>, Cor
         .map_err(|e| map_imap_err(&e, plan.account_id, false))?;
     match plan.auth_mode {
         ImapAuthMode::Login => client
-            .login(&plan.username, &plan.secret)
+            .login(&plan.username, plan.secret.expose())
             .map_err(|(e, _)| map_imap_err(&e, plan.account_id, true)),
         ImapAuthMode::XOAuth2 => {
             let auth = XOAuth2Authenticator {
                 user: plan.username.clone(),
-                access_token: plan.secret.clone(),
+                access_token: Zeroizing::new(plan.secret.expose().to_string()),
                 sent: AtomicBool::new(false),
             };
             client
@@ -276,7 +281,7 @@ pub(crate) fn verify_in_sent(plan: &FetchPlan, message_id_hdr: &str) -> Result<b
 pub(crate) fn plan_for(
     account_id: AccountId,
     auth: &crate::auth::ProviderAuth,
-    secret: String,
+    secret: SecretString,
     folder: String,
     window: SyncWindow,
 ) -> FetchPlan {

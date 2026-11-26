@@ -216,19 +216,21 @@ pub(crate) fn identity(
     )
 }
 
-pub(crate) fn delete_account(conn: &mut Connection, id: AccountId) -> Result<bool, CoreError> {
+pub(crate) fn delete_account_inner(conn: &Connection, id: AccountId) -> Result<bool, CoreError> {
     // Contentless FTS5 rows have no foreign-key cascade: purge them first so search
     // never points at messages that no longer exist.
     let blob = id_to_blob(id.as_bytes());
-    let rowids: Vec<i64> = query_all(
-        conn,
-        "SELECT rowid FROM message WHERE account_id = ?1",
-        params![blob],
-        |row| {
-            let rowid: i64 = row.get(0).sq()?;
-            Ok(rowid)
-        },
-    )?;
+    let mut stmt = conn
+        .prepare("SELECT rowid FROM message WHERE account_id = ?1")
+        .sq()?;
+    let mut rows = stmt.query(params![blob]).sq()?;
+    let mut rowids = Vec::new();
+    while let Some(row) = rows.next().sq()? {
+        rowids.push(row.get::<_, i64>(0).sq()?);
+    }
+    drop(rows);
+    drop(stmt);
+
     for rowid in rowids {
         fts_delete(conn, rowid)?;
     }
@@ -239,6 +241,13 @@ pub(crate) fn delete_account(conn: &mut Connection, id: AccountId) -> Result<boo
         )
         .sq()?;
     Ok(changed > 0)
+}
+
+pub(crate) fn delete_account(conn: &mut Connection, id: AccountId) -> Result<bool, CoreError> {
+    let tx = conn.transaction().sq()?;
+    let deleted = delete_account_inner(&tx, id)?;
+    tx.commit().sq()?;
+    Ok(deleted)
 }
 
 pub(crate) fn update_account_meta(

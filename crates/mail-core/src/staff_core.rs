@@ -84,12 +84,6 @@ impl MailCore {
             input.staff_role.trim().to_string()
         };
 
-        // Store token strictly in OS keychain (SecretStore), never in SQLite.
-        self.inner
-            .host
-            .secrets
-            .put(&SecretKey::staff_sync_token(), &SecretString::new(token.clone()))?;
-
         let now = self.now();
         let current_member = StaffMemberView {
             id: StaffMemberId::derive(
@@ -105,6 +99,11 @@ impl MailCore {
         };
 
         if server_url.starts_with("local://") {
+            // Store token strictly in OS keychain (SecretStore), never in SQLite.
+            self.inner
+                .host
+                .secrets
+                .put(&SecretKey::staff_sync_token(), &SecretString::new(token))?;
             self.stop_staff_sync_listener();
             let ws = self.inner.store.with_conn(|conn| {
                 let ws = store::upsert_staff_workspace(
@@ -137,6 +136,20 @@ impl MailCore {
             Ok(()) => client.pull_snapshot(None).await,
             Err(err) => Err(err),
         };
+        // Only persist the token to OS keychain if auth was not rejected; clear any stale
+        // token if the server explicitly rejected credentials (401/403).
+        if matches!(&pull_res, Err(StaffHttpError::AuthRejected(_))) {
+            let _ = self
+                .inner
+                .host
+                .secrets
+                .delete(&SecretKey::staff_sync_token());
+        } else {
+            self.inner
+                .host
+                .secrets
+                .put(&SecretKey::staff_sync_token(), &SecretString::new(token))?;
+        }
         let ws = self.inner.store.with_conn(|conn| {
             let (status, err_msg) = match &pull_res {
                 Ok(_) => (StaffSyncStatus::Connected, None),
@@ -989,17 +1002,8 @@ impl MailCore {
 
     /// Safely open a pinned staff link or external URL in the system browser / Discord.
     pub fn open_external_url(&self, url: &str) -> Result<(), CoreError> {
-        let trimmed = url.trim();
-        let allowed = trimmed.starts_with("https://")
-            || trimmed.starts_with("http://")
-            || trimmed.starts_with("discord://");
-        if !allowed {
-            return Err(CoreError::InvalidInput {
-                field: "url".to_string(),
-                reason: "only https://, http://, and discord:// links can be opened".to_string(),
-            });
-        }
-        open::that(trimmed).map_err(|e| CoreError::Internal {
+        let validated = validate_external_url(url)?;
+        open::that(&validated).map_err(|e| CoreError::Internal {
             reason: format!("failed to open link: {e}"),
         })
     }
@@ -1362,19 +1366,97 @@ async fn run_staff_sse_loop(weak: Weak<MailCoreInner>) {
     }
 }
 
+/// Parse and validate an external or pinned link URL.
+///
+/// Allows `https://` (with a host), loopback `http://` (`localhost`, `127.0.0.1`, `[::1]`),
+/// and well-formed `discord://` deep links. Rejects all other schemes and control characters.
+pub(crate) fn validate_external_url(raw: &str) -> Result<String, CoreError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.chars().any(|c| c.is_control()) {
+        return Err(CoreError::InvalidInput {
+            field: "url".to_string(),
+            reason: "URL must be a valid https://, loopback http://, or discord:// link"
+                .to_string(),
+        });
+    }
+    let parsed = url::Url::parse(trimmed).map_err(|e| CoreError::InvalidInput {
+        field: "url".to_string(),
+        reason: format!("invalid URL: {e}"),
+    })?;
+    match parsed.scheme() {
+        "https" => {
+            if parsed.host_str().is_none_or(str::is_empty) {
+                return Err(CoreError::InvalidInput {
+                    field: "url".to_string(),
+                    reason: "https:// URL must include a host".to_string(),
+                });
+            }
+            Ok(parsed.to_string())
+        }
+        "http" => {
+            if crate::sync::staff::is_loopback_http(parsed.as_str()) {
+                Ok(parsed.to_string())
+            } else {
+                Err(CoreError::InvalidInput {
+                    field: "url".to_string(),
+                    reason: "plain http:// links are only allowed for localhost/loopback; use https://"
+                        .to_string(),
+                })
+            }
+        }
+        "discord" => {
+            let has_target = parsed.host_str().is_some_and(|h| !h.is_empty())
+                || (!parsed.path().is_empty() && parsed.path() != "/");
+            if !has_target {
+                return Err(CoreError::InvalidInput {
+                    field: "url".to_string(),
+                    reason: "discord:// link must include a channel or server path".to_string(),
+                });
+            }
+            Ok(parsed.to_string())
+        }
+        _ => Err(CoreError::InvalidInput {
+            field: "url".to_string(),
+            reason: "only https://, loopback http://, and discord:// links are allowed"
+                .to_string(),
+        }),
+    }
+}
+
 fn apply_snapshot_tx(
     conn: &mut rusqlite::Connection,
     snapshot: &StaffSyncSnapshot,
 ) -> Result<(), CoreError> {
+    let local_ws = store::get_staff_workspace(conn)?;
+    let local_handle = if local_ws.connected && !local_ws.staff_handle.is_empty() {
+        Some(normalize_handle(&local_ws.staff_handle))
+    } else {
+        None
+    };
+
     for member in &snapshot.members {
+        // Never allow a remote snapshot to overwrite the local user's own identity row.
+        if local_handle
+            .as_deref()
+            .is_some_and(|lh| normalize_handle(&member.handle) == lh)
+        {
+            continue;
+        }
         store::upsert_staff_member(conn, member)?;
     }
     for thread in &snapshot.shared_threads {
-        store::upsert_shared_thread(conn, thread)?;
-        for comment in &thread.comments {
+        // Re-sanitize every remote message's HTML srcdoc under BlockAll before storing.
+        let mut sanitized_thread = thread.clone();
+        for msg in &mut sanitized_thread.messages {
+            msg.body_srcdoc = sanitize::sanitize_html(&msg.body_srcdoc, RemoteContent::BlockAll)
+                .srcdoc
+                .into_inner();
+        }
+        store::upsert_shared_thread(conn, &sanitized_thread)?;
+        for comment in &sanitized_thread.comments {
             store::insert_shared_comment(conn, comment)?;
         }
-        if let Some(draft) = &thread.draft {
+        if let Some(draft) = &sanitized_thread.draft {
             store::upsert_shared_draft(conn, draft)?;
         }
     }
@@ -1385,10 +1467,25 @@ fn apply_snapshot_tx(
         store::upsert_show_contact_row(conn, contact)?;
     }
     for link in &snapshot.pinned_links {
+        // Reject remote pinned links with disallowed URL schemes (e.g. javascript:, file:).
+        if validate_external_url(&link.url).is_err() {
+            continue;
+        }
         store::upsert_pinned_link_row(conn, link)?;
     }
     for event in &snapshot.calendar_events {
-        store::upsert_calendar_event_row(conn, event)?;
+        // Never persist Discord webhook secrets from remote events into SQLite.
+        if event
+            .discord_url
+            .as_deref()
+            .is_some_and(|u| u.to_ascii_lowercase().contains("/api/webhooks/"))
+        {
+            let mut cleaned = event.clone();
+            cleaned.discord_url = None;
+            store::upsert_calendar_event_row(conn, &cleaned)?;
+        } else {
+            store::upsert_calendar_event_row(conn, event)?;
+        }
     }
     for doc in &snapshot.meeting_docs {
         store::upsert_meeting_doc_row(conn, doc)?;

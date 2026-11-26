@@ -28,22 +28,12 @@ use serde::Serialize;
 use crate::error::CoreError;
 
 const MIGRATION_0001: &str = include_str!("0001_init.sql");
-/// Adds the frozen outbox payload columns. Applied once, guarded by a column check,
-/// because `ALTER TABLE … ADD COLUMN` is not idempotent.
-const MIGRATION_0002_JOB_PAYLOAD: &str =
-    "ALTER TABLE job ADD COLUMN payload TEXT;\nALTER TABLE job ADD COLUMN message_id_hdr TEXT;";
 /// Adds `space_kind` to existing `account` tables so Pigment Staff spaces are distinguished
 /// from personal spaces (which have Staff Sharing disabled by default).
 const MIGRATION_0003_ACCOUNT_SPACE_KIND: &str =
     "ALTER TABLE account ADD COLUMN space_kind TEXT NOT NULL DEFAULT 'personal' CHECK (space_kind IN ('personal', 'pigment_staff'));";
 const MIGRATION_0004_STAFF_COLLAB: &str = include_str!("0002_staff_collab.sql");
 const MIGRATION_0005_CALENDAR_MEETINGS: &str = include_str!("0003_calendar_meetings.sql");
-/// Phase D: adds optional `start_time`, `end_time`, and `calendar_event_id` to existing
-/// `action_item` tables created in Phase C.
-const MIGRATION_0006_ACTION_ITEM_SCHEDULE: &str = "\
-ALTER TABLE action_item ADD COLUMN start_time TEXT;
-ALTER TABLE action_item ADD COLUMN end_time TEXT;
-ALTER TABLE action_item ADD COLUMN calendar_event_id BLOB REFERENCES calendar_event(id) ON DELETE SET NULL;";
 const MIGRATION_0007_STAFF_OUTBOX: &str = include_str!("0004_staff_outbox.sql");
 /// Adds `spam` flag to `thread` for Report Spam / Spam mailbox view.
 const MIGRATION_0008_THREAD_SPAM: &str =
@@ -75,17 +65,31 @@ impl Store {
         Self::init(conn)
     }
 
-    fn init(conn: Connection) -> Result<Self, CoreError> {
+    fn init(mut conn: Connection) -> Result<Self, CoreError> {
         // Runs every open: idempotent DDL plus connection-scoped pragmas (WAL, FKs, mmap).
         conn.execute_batch(MIGRATION_0001)
             .map_err(|e| CoreError::Storage {
                 reason: format!("run migration 0001: {e}"),
             })?;
-        if !column_exists(&conn, "job", "payload")? {
-            conn.execute_batch(MIGRATION_0002_JOB_PAYLOAD)
-                .map_err(|e| CoreError::Storage {
-                    reason: format!("run migration 0002: {e}"),
-                })?;
+        {
+            let tx = conn.transaction().map_err(|e| CoreError::Storage {
+                reason: format!("begin migration 0002 tx: {e}"),
+            })?;
+            if !column_exists(&tx, "job", "payload")? {
+                tx.execute_batch("ALTER TABLE job ADD COLUMN payload TEXT;")
+                    .map_err(|e| CoreError::Storage {
+                        reason: format!("run migration 0002 (payload): {e}"),
+                    })?;
+            }
+            if !column_exists(&tx, "job", "message_id_hdr")? {
+                tx.execute_batch("ALTER TABLE job ADD COLUMN message_id_hdr TEXT;")
+                    .map_err(|e| CoreError::Storage {
+                        reason: format!("run migration 0002 (message_id_hdr): {e}"),
+                    })?;
+            }
+            tx.commit().map_err(|e| CoreError::Storage {
+                reason: format!("commit migration 0002 tx: {e}"),
+            })?;
         }
         if !column_exists(&conn, "account", "space_kind")? {
             conn.execute_batch(MIGRATION_0003_ACCOUNT_SPACE_KIND)
@@ -101,11 +105,33 @@ impl Store {
             .map_err(|e| CoreError::Storage {
                 reason: format!("run migration 0005: {e}"),
             })?;
-        if !column_exists(&conn, "action_item", "start_time")? {
-            conn.execute_batch(MIGRATION_0006_ACTION_ITEM_SCHEDULE)
+        {
+            let tx = conn.transaction().map_err(|e| CoreError::Storage {
+                reason: format!("begin migration 0006 tx: {e}"),
+            })?;
+            if !column_exists(&tx, "action_item", "start_time")? {
+                tx.execute_batch("ALTER TABLE action_item ADD COLUMN start_time TEXT;")
+                    .map_err(|e| CoreError::Storage {
+                        reason: format!("run migration 0006 (start_time): {e}"),
+                    })?;
+            }
+            if !column_exists(&tx, "action_item", "end_time")? {
+                tx.execute_batch("ALTER TABLE action_item ADD COLUMN end_time TEXT;")
+                    .map_err(|e| CoreError::Storage {
+                        reason: format!("run migration 0006 (end_time): {e}"),
+                    })?;
+            }
+            if !column_exists(&tx, "action_item", "calendar_event_id")? {
+                tx.execute_batch(
+                    "ALTER TABLE action_item ADD COLUMN calendar_event_id BLOB REFERENCES calendar_event(id) ON DELETE SET NULL;",
+                )
                 .map_err(|e| CoreError::Storage {
-                    reason: format!("run migration 0006: {e}"),
+                    reason: format!("run migration 0006 (calendar_event_id): {e}"),
                 })?;
+            }
+            tx.commit().map_err(|e| CoreError::Storage {
+                reason: format!("commit migration 0006 tx: {e}"),
+            })?;
         }
         conn.execute_batch(MIGRATION_0007_STAFF_OUTBOX)
             .map_err(|e| CoreError::Storage {
@@ -117,7 +143,6 @@ impl Store {
                     reason: format!("run migration 0008: {e}"),
                 })?;
         }
-        let mut conn = conn;
         purge_legacy_demo_data(&mut conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -253,7 +278,7 @@ pub(crate) fn fts_insert(
     Ok(())
 }
 
-pub(crate) fn fts_delete(conn: &mut Connection, rowid: i64) -> Result<(), CoreError> {
+pub(crate) fn fts_delete(conn: &Connection, rowid: i64) -> Result<(), CoreError> {
     conn.execute(
         "DELETE FROM message_fts WHERE rowid = ?1",
         rusqlite::params![rowid],
@@ -293,11 +318,13 @@ fn purge_legacy_demo_data(conn: &mut Connection) -> Result<(), CoreError> {
             .map(|row| row.id)
             .collect()
     };
+
+    let tx = conn.transaction().sq()?;
     for id in demo_ids {
-        delete_account(conn, id)?;
+        delete_account_inner(&tx, id)?;
     }
 
-    conn.execute(
+    tx.execute(
         "DELETE FROM template
          WHERE (name = 'Invoice reminder' AND shortcut = '/invoice')
             OR (name = 'Intro reply' AND shortcut = '/intro')
@@ -306,13 +333,14 @@ fn purge_legacy_demo_data(conn: &mut Connection) -> Result<(), CoreError> {
     )
     .sq()?;
 
-    conn.execute(
+    tx.execute(
         "INSERT INTO app_setting (key, value_json) VALUES (?1, 'true')
          ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
         rusqlite::params![LEGACY_DEMO_PURGE_KEY],
     )
     .sq()?;
 
+    tx.commit().sq()?;
     Ok(())
 }
 

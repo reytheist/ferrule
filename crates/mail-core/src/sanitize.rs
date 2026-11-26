@@ -5,6 +5,7 @@
 //! hardened [ammonia] pass removes anything executable, and the result is embedded in a
 //! document with a strict Content-Security-Policy `<meta>`.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -220,8 +221,9 @@ fn transform(raw: &str, policy: RemoteContent) -> Scan {
     let mut remote_kept = 0u32;
     let mut html = raw.to_string();
 
-    // 1. CSS `url()` and `@import` beacons inside <style> blocks — always stripped.
-    let style_block = re(re_style_block(), r"(?is)<style\b[^>]*>(.*?)</style\s*>");
+    // 1. CSS `url()` and `@import` beacons inside <style> blocks — always stripped,
+    //    even if the <style> block is unclosed.
+    let style_block = re(re_style_block(), r"(?is)<style\b[^>]*>(.*?)(?:</style\s*>|\z)");
     html = style_block
         .replace_all(&html, |caps: &Captures<'_>| {
             let inner = caps.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -232,15 +234,16 @@ fn transform(raw: &str, policy: RemoteContent) -> Scan {
         })
         .into_owned();
 
-    // 2. Inline `style="…"` attributes: scrub CSS beacons there too.
+    // 2. Inline `style="…"` / `style=…` attributes: scrub CSS beacons there too.
     let style_attr = re(
         re_style_attr(),
-        r#"(?is)\bstyle\s*=\s*("([^"]*)"|'([^']*)')"#,
+        r#"(?is)\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+))"#,
     );
     html = style_attr
         .replace_all(&html, |caps: &Captures<'_>| {
             let value = caps
-                .get(2)
+                .get(1)
+                .or_else(|| caps.get(2))
                 .or_else(|| caps.get(3))
                 .map(|m| m.as_str())
                 .unwrap_or("");
@@ -513,7 +516,58 @@ fn is_hidden_style(style: &str) -> bool {
         .filter(|c| !c.is_whitespace())
         .collect::<String>()
         .to_ascii_lowercase();
-    norm.contains("display:none") || norm.contains("visibility:hidden") || opacity_zero(&norm)
+    if norm.contains("display:none") || norm.contains("visibility:hidden") || opacity_zero(&norm) {
+        return true;
+    }
+
+    let mut css_width: Option<f32> = None;
+    let mut css_height: Option<f32> = None;
+    for decl in norm.split(';') {
+        let Some((prop, raw_val)) = decl.split_once(':') else {
+            continue;
+        };
+        let val = raw_val.trim_end_matches("!important");
+        match prop {
+            "width" => {
+                if let Some(px) = parse_css_px_dim(val) {
+                    if px == 0.0 {
+                        return true;
+                    }
+                    css_width = Some(px);
+                }
+            }
+            "height" => {
+                if let Some(px) = parse_css_px_dim(val) {
+                    if px == 0.0 {
+                        return true;
+                    }
+                    css_height = Some(px);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    matches!((css_width, css_height), (Some(w), Some(h)) if w <= 1.0 && h <= 1.0)
+}
+
+/// Parse a CSS length like `0`, `0px`, `0em`, `1px`, or `1` into pixels (returns `Some(0.0)`
+/// for any zero-valued length, or `Some(v)` for unitless / `px` lengths).
+fn parse_css_px_dim(val: &str) -> Option<f32> {
+    if let Some(num) = val.strip_suffix("px") {
+        return num.parse::<f32>().ok().filter(|v| *v >= 0.0);
+    }
+    if let Ok(v) = val.parse::<f32>() {
+        return (v >= 0.0).then_some(v);
+    }
+    let num_prefix: String = val
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    if !num_prefix.is_empty() && num_prefix.parse::<f32>().is_ok_and(|v| v == 0.0) {
+        return Some(0.0);
+    }
+    None
 }
 
 /// `opacity:0` (with no fractional part) means invisible.
@@ -539,8 +593,20 @@ fn ammonia_clean(html: &str) -> String {
     builder.rm_clean_content_tags(&["style"]);
     builder.add_tags(&["style"]);
     builder.add_generic_attributes(&["style", "class"]);
-    // Inline `data:` images survive so BlockAll still renders logo-sized data URIs.
+    // Allow `data:` only for `img[src]` so inline logo/data images survive under BlockAll
+    // without allowing `data:` on links (`<a href="data:text/html,...">`) or other elements.
     builder.add_url_schemes(&["data"]);
+    builder.attribute_filter(|element, attribute, value| {
+        let trimmed = value.trim_start();
+        if trimmed
+            .get(..5)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("data:"))
+            && !(element == "img" && attribute == "src")
+        {
+            return None;
+        }
+        Some(Cow::Borrowed(value))
+    });
     builder.clean(html).to_string()
 }
 
@@ -688,5 +754,62 @@ mod tests {
     #[test]
     fn text_to_html_escapes_and_breaks_lines() {
         assert_eq!(text_to_html("a < b & c\nd"), "a &lt; b &amp; c<br>\nd");
+    }
+
+    #[test]
+    fn unclosed_style_block_still_scrubs_beacons_and_imports() {
+        let html = r#"<style>@import url("https://evil.example/a.css"); body { background: url("https://evil.example/p.gif"); color: green; }<p>hi</p>"#;
+        let out = sanitize_html(html, RemoteContent::AllowImagesStripTrackers);
+        assert!(!out.srcdoc.as_str().contains("evil.example"));
+        assert!(out
+            .privacy
+            .trackers
+            .iter()
+            .any(|t| t.kind == TrackerKind::CssBeacon));
+    }
+
+    #[test]
+    fn unquoted_style_attribute_is_scrubbed() {
+        let html = r#"<div style=background:url(https://evil.example/beacon.gif)>hi</div>"#;
+        let out = sanitize_html(html, RemoteContent::AllowImagesStripTrackers);
+        assert!(!out.srcdoc.as_str().contains("evil.example"));
+        assert!(out
+            .privacy
+            .trackers
+            .iter()
+            .any(|t| t.kind == TrackerKind::CssBeacon));
+    }
+
+    #[test]
+    fn data_scheme_allowed_only_on_img_src() {
+        let html = r#"<a href="data:text/html,<script>alert(1)</script>">click</a><img src="data:image/gif;base64,R0lGOD" width="60">"#;
+        let out = sanitize_html(html, RemoteContent::BlockAll);
+        let doc = out.srcdoc.as_str();
+        assert!(!doc.contains("data:text/html"));
+        assert!(doc.contains("data:image/gif;base64,R0lGOD"));
+    }
+
+    #[test]
+    fn css_sized_tracking_pixels_are_flagged_and_stripped() {
+        let html = r#"
+            <img src="https://cdn.example.com/zero-w.gif" style="width:0;height:10px">
+            <img src="https://cdn.example.com/zero-h.gif" style="height: 0px !important">
+            <img src="https://cdn.example.com/one-by-one.gif" style="width: 1px; height: 1px;">
+            <img src="https://cdn.example.com/visible.png" style="width: 200px; height: 100px;">
+        "#;
+        let out = sanitize_html(html, RemoteContent::AllowImagesStripTrackers);
+        let doc = out.srcdoc.as_str();
+        assert!(!doc.contains("zero-w.gif"));
+        assert!(!doc.contains("zero-h.gif"));
+        assert!(!doc.contains("one-by-one.gif"));
+        assert!(doc.contains("visible.png"));
+        assert_eq!(
+            out.privacy
+                .trackers
+                .iter()
+                .filter(|t| t.kind == TrackerKind::HiddenImage)
+                .count(),
+            3
+        );
     }
 }

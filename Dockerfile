@@ -22,7 +22,7 @@ RUN mkdir -p src-tauri/src && \
     printf 'pub fn run() {}\n' > src-tauri/src/lib.rs && \
     printf 'fn main() {}\n' > src-tauri/src/main.rs
 
-RUN cargo build --release -p staff-sync-server --bin staff-sync-server
+RUN cargo build --release --locked -p staff-sync-server --bin staff-sync-server
 
 FROM debian:bookworm-slim AS runtime
 
@@ -36,6 +36,9 @@ COPY --from=builder /src/target/release/staff-sync-server /usr/local/bin/staff-s
 WORKDIR /data
 VOLUME ["/data"]
 
+# Bind to all interfaces inside the container for reverse-proxy networking.
+# In production, always place behind a TLS-terminating reverse proxy and/or publish
+# only on loopback (e.g. `docker run -p 127.0.0.1:8787:8787 ...`).
 ENV STAFF_SYNC_BIND=0.0.0.0:8787
 ENV STAFF_SYNC_DB=/data/staff-sync.db
 

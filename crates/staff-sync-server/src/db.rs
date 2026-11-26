@@ -23,8 +23,12 @@ pub enum DbError {
     Sqlite(#[from] rusqlite::Error),
     #[error("serialization error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("filesystem error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("database lock poisoned")]
     LockPoisoned,
+    #[error("bad request: {0}")]
+    BadRequest(String),
     #[error("not found: {0}")]
     NotFound(&'static str),
     #[error("stale revision (current: {current_rev})")]
@@ -39,12 +43,24 @@ impl SyncDb {
     pub fn open(path: Option<&Path>) -> Result<Self, DbError> {
         let conn = match path {
             Some(p) => {
-                if let Some(parent) = p.parent() {
+                let resolved = if p.is_relative() {
+                    std::env::current_dir()?.join(p)
+                } else {
+                    p.to_path_buf()
+                };
+                if let Some(parent) = resolved.parent() {
                     if !parent.as_os_str().is_empty() {
-                        let _ = std::fs::create_dir_all(parent);
+                        std::fs::create_dir_all(parent)?;
                     }
                 }
-                Connection::open(p)?
+                let conn = Connection::open(&resolved)?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let perms = std::fs::Permissions::from_mode(0o600);
+                    std::fs::set_permissions(&resolved, perms)?;
+                }
+                conn
             }
             None => Connection::open_in_memory()?,
         };
@@ -126,22 +142,31 @@ impl SyncDb {
     pub fn upsert_member(&self, member: &StaffMemberView, now: UnixMs) -> Result<(), DbError> {
         let json = serde_json::to_string(member)?;
         let watermark = now.0.max(member.updated_at.0);
+        let id_str = member.id.to_string();
+        let handle = member.handle.to_ascii_lowercase();
+        let email = member.email.to_ascii_lowercase();
         self.with_conn(|conn| {
+            let existing_owner: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM staff_member WHERE handle = ?1",
+                    params![handle],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(owner_id) = existing_owner {
+                if owner_id != id_str {
+                    return Err(DbError::Conflict { current_rev: 1 });
+                }
+            }
             conn.execute(
                 "INSERT INTO staff_member (id, handle, email, updated_at, payload_json)
                  VALUES (?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT(handle) DO UPDATE SET
-                    id = excluded.id,
+                 ON CONFLICT(id) DO UPDATE SET
+                    handle = excluded.handle,
                     email = excluded.email,
                     updated_at = excluded.updated_at,
                     payload_json = excluded.payload_json",
-                params![
-                    member.id.to_string(),
-                    member.handle.to_ascii_lowercase(),
-                    member.email.to_ascii_lowercase(),
-                    watermark,
-                    json,
-                ],
+                params![id_str, handle, email, watermark, json],
             )?;
             Ok(())
         })
