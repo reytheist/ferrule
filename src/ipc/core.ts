@@ -24,6 +24,7 @@ import type {
   CalendarRangeQuery,
   ConnectStaffWorkspaceInput,
   ContactId,
+  CoreEvent,
   CreateDraftInput,
   DiscordWebhookStatus,
   DraftId,
@@ -550,6 +551,14 @@ export async function onUpdateDownloadProgress(
 ): Promise<() => void> {
   if (!isTauriRuntime()) return mock.onUpdateDownloadProgress(handler);
   const unlisten = await listen<UpdateDownloadProgress>("app://update-progress", (event) => {
+    handler(event.payload);
+  });
+  return unlisten;
+}
+
+export async function onMailEvent(handler: (event: CoreEvent) => void): Promise<() => void> {
+  if (!isTauriRuntime()) return () => undefined;
+  const unlisten = await listen<CoreEvent>("mail://event", (event) => {
     handler(event.payload);
   });
   return unlisten;

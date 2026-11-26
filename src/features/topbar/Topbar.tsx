@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Moon, PenLine, Plus, RefreshCw, Search, Settings, Sun } from "lucide-react";
 import type { MailApp } from "../shell/useMailApp";
 import { FerruleGlyph } from "../ui/FerruleGlyph";
@@ -35,6 +36,13 @@ function syncLabel(app: MailApp): string {
 }
 
 export function Topbar({ app }: { app: MailApp }) {
+  const [, setClockTick] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockTick((n) => n + 1), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   return (
     <header className="topbar">
       <div className="brand-mark">
@@ -58,7 +66,7 @@ export function Topbar({ app }: { app: MailApp }) {
       </button>
 
       <div className="topbar-right">
-        <span className={`sync-pill${app.syncing ? " busy" : ""}`} title="Sync status">
+        <span className={`sync-pill${app.syncing ? " busy" : ""}`} title="Automatic sync every 2 min & on window focus">
           <i />
           {syncLabel(app)}
         </span>

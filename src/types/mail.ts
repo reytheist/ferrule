@@ -860,3 +860,15 @@ export interface UpdateDownloadProgress {
   totalBytes: number | null;
   percent: number | null;
 }
+
+// ── Core Domain Events (mail://event) ───────────────────────────────────────
+
+export type CoreEvent =
+  | { kind: "mailChanged"; accountId: AccountId; threadIds: ThreadId[] }
+  | { kind: "syncChanged"; accountId: AccountId; state: SyncState }
+  | { kind: "jobChanged"; job: JobView }
+  | { kind: "draftChanged"; draftId: DraftId }
+  | { kind: "attention"; alert: { kind: string } }
+  | { kind: "staffChanged" }
+  | { kind: "calendarChanged" }
+  | { kind: "resync" };

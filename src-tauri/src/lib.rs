@@ -4,6 +4,7 @@ mod updater;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use mail_core::types::SyncState;
 use mail_core::{CoreConfig, Host, MailCore};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
@@ -101,6 +102,34 @@ pub fn run() {
                 loop {
                     interval.tick().await;
                     let _ = sched_core.tick_scheduler().await;
+                }
+            });
+
+            // Automatic background sync for configured mail accounts (every 2 min)
+            // and enabled read-only personal .ics overlays (every ~14 min).
+            let sync_core = core.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                let mut cycle: u64 = 0;
+                let mut interval = tokio::time::interval(Duration::from_secs(120));
+                loop {
+                    interval.tick().await;
+                    if let Ok(accounts) = sync_core.list_accounts().await {
+                        for acct in accounts {
+                            if matches!(acct.sync, SyncState::Blocked { .. }) {
+                                continue;
+                            }
+                            let _ = sync_core.sync_account(acct.id).await;
+                        }
+                    }
+                    if cycle.is_multiple_of(7) {
+                        if let Ok(overlays) = sync_core.list_ics_overlays().await {
+                            for overlay in overlays.into_iter().filter(|o| o.enabled) {
+                                let _ = sync_core.refresh_ics_overlay(overlay.id).await;
+                            }
+                        }
+                    }
+                    cycle = cycle.wrapping_add(1);
                 }
             });
 

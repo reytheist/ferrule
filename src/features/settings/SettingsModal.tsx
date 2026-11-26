@@ -388,7 +388,7 @@ export function SettingsModal({ app }: { app: MailApp }) {
                           ? app.updater.state.message
                           : app.updater.state.kind === "error"
                             ? app.updater.state.message
-                            : "Checks GitHub Releases automatically on startup and every 4 hours."}
+                            : "Checks GitHub Releases automatically on sign-in and daily at 3:00 AM while open."}
                 </span>
               </div>
               <button

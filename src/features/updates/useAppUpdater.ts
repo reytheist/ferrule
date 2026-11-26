@@ -9,9 +9,33 @@ import type {
   UpdateReleaseInfo,
 } from "../../types/mail";
 
-const INITIAL_VERSION = "0.2.1";
+const INITIAL_VERSION = "0.3.1";
 const STARTUP_CHECK_DELAY_MS = 2_500;
-const PERIODIC_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+const DAILY_CHECK_HOUR = 3;
+const DAILY_DRIFT_POLL_MS = 60_000;
+
+export function localDateKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+export function msUntilNext3Am(now: Date): number {
+  const next = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    DAILY_CHECK_HOUR,
+    0,
+    0,
+    0,
+  );
+  if (next.getTime() <= now.getTime()) {
+    next.setDate(next.getDate() + 1);
+  }
+  return Math.max(1_000, next.getTime() - now.getTime());
+}
 
 export type UpdateDevPreset = "idle" | "checking" | "available" | "downloading" | "error";
 
@@ -290,19 +314,45 @@ export function useAppUpdater(showToast: (message: string) => void): AppUpdater 
     }
   }, []);
 
-  // Automatic non-blocking startup check + periodic background checks.
+  // Automatic non-blocking startup check + daily 3:00 AM local-time check while the window is open.
   useEffect(() => {
+    const startedAt = new Date();
+    let lastDailyCheckDate =
+      startedAt.getHours() >= DAILY_CHECK_HOUR ? localDateKey(startedAt) : "";
+    let next3AmTimer: number | null = null;
+
+    const triggerDaily3AmIfDue = (): void => {
+      const now = new Date();
+      const key = localDateKey(now);
+      if (now.getHours() >= DAILY_CHECK_HOUR && lastDailyCheckDate !== key) {
+        lastDailyCheckDate = key;
+        void checkForUpdates({ manual: false });
+      }
+    };
+
+    const scheduleNext3Am = (): void => {
+      const delay = msUntilNext3Am(new Date());
+      next3AmTimer = window.setTimeout(() => {
+        triggerDaily3AmIfDue();
+        scheduleNext3Am();
+      }, delay);
+    };
+
     const startupTimer = window.setTimeout(() => {
       void checkForUpdates({ manual: false });
     }, STARTUP_CHECK_DELAY_MS);
 
-    const periodicTimer = window.setInterval(() => {
-      void checkForUpdates({ manual: false });
-    }, PERIODIC_CHECK_INTERVAL_MS);
+    scheduleNext3Am();
+
+    // 60s drift guard handles OS sleep/hibernate or DST transitions across 3:00 AM.
+    const driftTimer = window.setInterval(() => {
+      triggerDaily3AmIfDue();
+    }, DAILY_DRIFT_POLL_MS);
 
     return () => {
       window.clearTimeout(startupTimer);
-      window.clearInterval(periodicTimer);
+      if (next3AmTimer !== null) window.clearTimeout(next3AmTimer);
+      window.clearInterval(driftTimer);
     };
   }, [checkForUpdates]);
 

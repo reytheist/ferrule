@@ -609,12 +609,27 @@
   white-space: nowrap;
 }
 
+.row-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 3px;
+  min-width: 0;
+}
+
 .row-badges {
   display: flex;
   align-items: center;
   gap: 4px;
   margin-top: 3px;
   flex-wrap: wrap;
+}
+
+.row-bottom .row-badges {
+  margin-top: 0;
+  flex: 1;
+  min-width: 0;
 }
 
 .badge {
@@ -651,23 +666,20 @@
 }
 
 .hover-actions {
-  position: absolute;
-  right: 6px;
-  top: 6px;
-  display: none;
+  display: inline-flex;
   align-items: center;
-  gap: 2px;
-  background: var(--app-surface);
-  border: 1px solid var(--app-border);
-  border-radius: 6px;
-  padding: 2px;
-  box-shadow: var(--shadow-row);
-  z-index: 2;
+  gap: 1px;
+  flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
 }
 
 .thread-row:hover .hover-actions,
-.thread-row.selected .hover-actions {
-  display: inline-flex;
+.thread-row.selected .hover-actions,
+.thread-row:focus-within .hover-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .icon-act {
@@ -675,8 +687,8 @@
   border: none;
   background: transparent;
   color: var(--app-ink-2);
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 4px;
   cursor: pointer;
   display: grid;
@@ -2787,19 +2799,29 @@
   flex: 1;
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 10px;
-  padding: 10px 12px 12px 0;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: 0;
   overflow: hidden;
+}
+
+.app-shell[data-layout="classic"] .calendar-workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-shell[data-layout="classic"] .calendar-workspace:not(.classic-reading) .calendar-read-col {
+  display: none;
+}
+
+.app-shell[data-layout="classic"] .calendar-workspace.classic-reading .calendar-main {
+  display: none;
 }
 
 .calendar-main {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background: var(--app-surface);
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius);
+  background: var(--app-bg);
+  border-right: 1px solid var(--app-border);
   overflow: hidden;
 }
 
@@ -3048,6 +3070,9 @@
 }
 
 .cal-overlay-block {
+  appearance: none;
+  width: 100%;
+  text-align: left;
   border: 1px dashed var(--app-border);
   background: repeating-linear-gradient(
     -45deg,
@@ -3063,6 +3088,14 @@
   gap: 5px;
   font-size: calc(10px * var(--chrome-font-scale));
   color: var(--app-muted);
+  cursor: pointer;
+}
+
+.cal-overlay-block:hover,
+.cal-overlay-block.selected {
+  border-color: var(--app-accent);
+  color: var(--app-ink);
+  box-shadow: 0 0 0 1px var(--app-accent);
 }
 
 .cal-overlay-title {
@@ -3367,13 +3400,36 @@
 
 /* ── Phase D: Action Items & Operations Workbook Import ────────────────── */
 
-.actions-shell {
+.actions-workspace {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  background: var(--app-surface);
   overflow: hidden;
+}
+
+.actions-shell {
+  width: 440px;
+  flex-shrink: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--app-bg);
+  border-right: 1px solid var(--app-border);
+  overflow: hidden;
+}
+
+.app-shell[data-layout="classic"] .actions-workspace:not(.classic-reading) .actions-shell {
+  width: auto;
+  flex: 1;
+  border-right: none;
+}
+
+.app-shell[data-layout="classic"] .actions-workspace:not(.classic-reading) .actions-read-col {
+  display: none;
+}
+
+.app-shell[data-layout="classic"] .actions-workspace.classic-reading .actions-shell {
+  display: none;
 }
 
 .actions-header {
@@ -3489,8 +3545,14 @@
   padding: 10px 12px;
   border: 1px solid var(--app-border-soft);
   border-radius: var(--app-radius);
-  background: var(--app-surface-2);
+  background: var(--app-surface);
+  cursor: pointer;
   transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.action-row.selected {
+  background: var(--app-active);
+  border-color: var(--app-accent);
 }
 
 .action-row:hover {
@@ -4381,4 +4443,118 @@
   .update-refresh-icon.spinning {
     animation-duration: 2.4s;
   }
+}
+
+
+/* ── Shared Reading Pane Utilities (Action Items, Calendar, Shared Drafts) ─ */
+
+.pane-badge-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.reader-prose {
+  font-size: calc(13px * var(--reader-font-scale));
+  line-height: 1.55;
+}
+
+.meeting-doc-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detail-grid-card,
+.detail-links-card,
+.shared-draft-reader-card {
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border-soft);
+  border-radius: var(--app-radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px 16px;
+}
+
+.detail-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.detail-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: calc(10px * var(--chrome-font-scale));
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--app-muted);
+}
+
+.detail-value {
+  font-size: calc(12.5px * var(--reader-font-scale));
+  color: var(--app-ink);
+  word-break: break-word;
+}
+
+.detail-value.overdue-text {
+  color: var(--app-followup);
+  font-weight: 600;
+}
+
+.detail-links-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.draft-recipients-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: calc(11.5px * var(--reader-font-scale));
+  color: var(--app-ink-2);
+}
+
+.shared-draft-reader-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--app-ink);
+  background: var(--app-surface);
+  border: 1px solid var(--app-border-soft);
+  border-radius: 6px;
+  padding: 14px 16px;
+  min-height: 160px;
+}
+
+.shared-draft-reader-editor {
+  min-height: 220px;
+  font-family: var(--font-body);
+}
+
+.shared-draft-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 6px;
+  padding: 36px 20px;
+  color: var(--app-muted);
+}
+
+.shared-draft-empty strong {
+  color: var(--app-ink);
+  font-size: calc(13px * var(--chrome-font-scale));
 }

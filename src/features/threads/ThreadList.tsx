@@ -87,52 +87,54 @@ function ThreadRow({ app, thread }: { app: MailApp; thread: ThreadSummary }) {
       </div>
       <div className="thread-subject">{thread.subject}</div>
       <div className="thread-snippet">{thread.snippet}</div>
-      <RowBadges thread={thread} />
+      <div className="row-bottom">
+        <RowBadges thread={thread} />
 
-      <div className="hover-actions">
-        <button
-          className="icon-act"
-          title="Archive (E)"
-          onClick={(event) => {
-            event.stopPropagation();
-            void app.archiveThread(thread.id);
-          }}
-        >
-          <Archive />
-        </button>
-        <button className="icon-act" title="Snooze (H)" onClick={snoozeAt}>
-          <Clock />
-        </button>
-        <button
-          className={`icon-act${thread.starred ? " starred" : ""}`}
-          title="Star (S)"
-          onClick={(event) => {
-            event.stopPropagation();
-            void app.starThread(thread.id);
-          }}
-        >
-          <Star />
-        </button>
-        <button
-          className="icon-act"
-          title="Report spam (!)"
-          onClick={(event) => {
-            event.stopPropagation();
-            void app.reportSpam(thread.id);
-          }}
-        >
-          <ShieldAlert />
-        </button>
-        <button
-          className="icon-act"
-          title="Delete (Del)"
-          onClick={(event) => {
-            event.stopPropagation();
-            void app.trashThread(thread.id);
-          }}
-        >
-          <Trash2 />
-        </button>
+        <div className="hover-actions">
+          <button
+            className="icon-act"
+            title="Archive (E)"
+            onClick={(event) => {
+              event.stopPropagation();
+              void app.archiveThread(thread.id);
+            }}
+          >
+            <Archive />
+          </button>
+          <button className="icon-act" title="Snooze (H)" onClick={snoozeAt}>
+            <Clock />
+          </button>
+          <button
+            className={`icon-act${thread.starred ? " starred" : ""}`}
+            title="Star (S)"
+            onClick={(event) => {
+              event.stopPropagation();
+              void app.starThread(thread.id);
+            }}
+          >
+            <Star />
+          </button>
+          <button
+            className="icon-act"
+            title="Report spam (!)"
+            onClick={(event) => {
+              event.stopPropagation();
+              void app.reportSpam(thread.id);
+            }}
+          >
+            <ShieldAlert />
+          </button>
+          <button
+            className="icon-act"
+            title="Delete (Del)"
+            onClick={(event) => {
+              event.stopPropagation();
+              void app.trashThread(thread.id);
+            }}
+          >
+            <Trash2 />
+          </button>
+        </div>
       </div>
     </div>
   );

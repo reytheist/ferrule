@@ -95,6 +95,7 @@ export function CalendarView({ app }: { app: MailApp }) {
   const [quickBusy, setQuickBusy] = useState(false);
   const [editorEvent, setEditorEvent] = useState<CalendarEventView | null | undefined>(undefined);
   const [overlaysOpen, setOverlaysOpen] = useState(false);
+  const [selectedOverlay, setSelectedOverlay] = useState<OverlayBusyBlock | null>(null);
   const quickRef = useRef<HTMLInputElement>(null);
 
   const range = useMemo(() => {
@@ -219,9 +220,11 @@ export function CalendarView({ app }: { app: MailApp }) {
   }
 
   const today = startOfDay(new Date());
+  const classicShowReader =
+    app.layout === "classic" && (app.selectedCalendarEvent !== null || selectedOverlay !== null);
 
   return (
-    <section className="calendar-workspace">
+    <section className={`calendar-workspace${classicShowReader ? " classic-reading" : ""}`}>
       <div className="calendar-main">
         <div className="calendar-toolbar">
           <div className="calendar-toolbar-left">
@@ -352,13 +355,17 @@ export function CalendarView({ app }: { app: MailApp }) {
                 <div className="cal-day-items">
                   {events.map((occ) => {
                     const ev = occ.event;
-                    const selected = app.selectedCalendarEvent?.id === ev.id;
+                    const selected =
+                      selectedOverlay === null && app.selectedCalendarEvent?.id === ev.id;
                     return (
                       <button
                         key={`${ev.id}-${occ.occurrenceStart}`}
                         type="button"
                         className={`cal-event-card ${deptColorClass(ev.department, ev.kind)}${selected ? " selected" : ""}`}
-                        onClick={() => void app.selectCalendarEvent(ev)}
+                        onClick={() => {
+                          setSelectedOverlay(null);
+                          void app.selectCalendarEvent(ev);
+                        }}
                       >
                         <div className="cal-event-top">
                           <span className="cal-event-time">
@@ -387,19 +394,28 @@ export function CalendarView({ app }: { app: MailApp }) {
                     );
                   })}
 
-                  {blocks.map((block) => (
-                    <div
-                      key={`${block.overlayId}-${block.uid}-${block.startAt}`}
-                      className="cal-overlay-block"
-                      title={`Private local-only overlay (${block.overlayName}) — never synced to Staff Sync`}
-                    >
-                      <span className="cal-event-time">
-                        {block.allDay ? "All day" : formatTimeShort(block.startAt)}
-                      </span>
-                      <span className="cal-overlay-title">{block.summary}</span>
-                      <span className="cal-overlay-tag">Private</span>
-                    </div>
-                  ))}
+                  {blocks.map((block) => {
+                    const isSelectedOverlay =
+                      selectedOverlay !== null &&
+                      selectedOverlay.overlayId === block.overlayId &&
+                      selectedOverlay.uid === block.uid &&
+                      selectedOverlay.startAt === block.startAt;
+                    return (
+                      <button
+                        key={`${block.overlayId}-${block.uid}-${block.startAt}`}
+                        type="button"
+                        className={`cal-overlay-block${isSelectedOverlay ? " selected" : ""}`}
+                        onClick={() => setSelectedOverlay(block)}
+                        title={`Private local-only overlay (${block.overlayName}) — click to read details`}
+                      >
+                        <span className="cal-event-time">
+                          {block.allDay ? "All day" : formatTimeShort(block.startAt)}
+                        </span>
+                        <span className="cal-overlay-title">{block.summary}</span>
+                        <span className="cal-overlay-tag">Private</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -409,6 +425,11 @@ export function CalendarView({ app }: { app: MailApp }) {
 
       <MeetingDocPanel
         app={app}
+        selectedOverlay={selectedOverlay}
+        onClearSelection={() => {
+          setSelectedOverlay(null);
+          void app.selectCalendarEvent(null);
+        }}
         onEditEvent={(ev) => setEditorEvent(ev)}
         onOpenOverlays={() => setOverlaysOpen(true)}
         onAfterMutate={() => void app.loadCalendarRange(range.start.getTime(), range.end.getTime())}
