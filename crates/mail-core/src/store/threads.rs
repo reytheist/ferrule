@@ -394,65 +394,6 @@ pub(crate) fn apply_mail_action(
     })
 }
 
-/// Build the `t.id IN (…)` search fragment: FTS5 MATCH first, LIKE fallback when FTS
-/// cannot serve the token shape (too short, or zero hits).
-fn search_fragment(conn: &mut Connection, text: &str) -> Result<(String, Vec<Value>), CoreError> {
-    let tokens: Vec<String> = text
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|t| !t.is_empty())
-        .take(12)
-        .map(|t| t.to_lowercase())
-        .collect();
-    if tokens.is_empty() {
-        return Ok(("0 = 1".to_string(), Vec::new()));
-    }
-
-    let fts_query = tokens
-        .iter()
-        .map(|t| format!("\"{t}\"*"))
-        .collect::<Vec<_>>()
-        .join(" AND ");
-
-    let fts_hit: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM message m WHERE m.rowid IN (
-                 SELECT rowid FROM message_fts WHERE message_fts MATCH ?1))",
-            params![fts_query],
-            |r| r.get(0),
-        )
-        .unwrap_or(false);
-
-    if fts_hit {
-        return Ok((
-            "t.id IN (SELECT m.thread_id FROM message m WHERE m.rowid IN (
-                 SELECT rowid FROM message_fts WHERE message_fts MATCH ?))"
-                .to_string(),
-            vec![Value::Text(fts_query)],
-        ));
-    }
-
-    // Partial / short tokens: substring match across thread and message text.
-    let mut conds = Vec::new();
-    let mut values = Vec::new();
-    for token in &tokens {
-        conds.push(
-            "(lower(m.subject) LIKE ? OR lower(m.from_email) LIKE ? OR lower(m.body_text) LIKE ?
-              OR lower(t.sender_name) LIKE ? OR lower(t.sender_email) LIKE ?)",
-        );
-        let pattern = Value::Text(format!("%{token}%"));
-        for _ in 0..5 {
-            values.push(pattern.clone());
-        }
-    }
-    Ok((
-        format!(
-            "t.id IN (SELECT m.thread_id FROM message m WHERE {})",
-            conds.join(" AND ")
-        ),
-        values,
-    ))
-}
-
 fn scope_clause(scope: &Scope) -> Result<(String, Vec<Value>), CoreError> {
     match scope {
         Scope::Unified => Ok(("1 = 1".to_string(), Vec::new())),
@@ -484,7 +425,7 @@ fn sent_clause(scope: &Scope) -> (String, Vec<Value>) {
 pub(crate) fn list_threads(
     conn: &mut Connection,
     query: &ThreadQuery,
-    _now: UnixMs,
+    now: UnixMs,
 ) -> Result<ThreadPage, CoreError> {
     if let Scope::Account { account_id } = &query.scope {
         if !account_exists(conn, *account_id)? {
@@ -552,15 +493,28 @@ pub(crate) fn list_threads(
         MailboxView::Trash => {
             wheres.push(("t.trashed = 1".to_string(), Vec::new()));
         }
-        MailboxView::Label { .. } => {
-            // Labels arrive with Gmail label sync (Phase 2); no label can exist yet.
-            return Err(CoreError::NotFound {
-                entity: "label".to_string(),
-            });
+        MailboxView::Label { label_id } => {
+            if !crate::store::label_exists(conn, *label_id)? {
+                return Err(CoreError::NotFound {
+                    entity: "label".to_string(),
+                });
+            }
+            wheres.push(("t.trashed = 0 AND t.spam = 0".to_string(), Vec::new()));
+            wheres.push((
+                "EXISTS (SELECT 1 FROM thread_label tl WHERE tl.thread_id = t.id AND tl.label_id = ?)"
+                    .to_string(),
+                vec![Value::Blob(id_to_blob(label_id.as_bytes()))],
+            ));
         }
         MailboxView::Search { text } => {
-            wheres.push(("t.trashed = 0 AND t.spam = 0".to_string(), Vec::new()));
-            wheres.push(search_fragment(conn, text)?);
+            if let Some(expr) = crate::search::parse_search_query(text, now) {
+                if !crate::search::includes_trashed_or_spam(&expr) {
+                    wheres.push(("t.trashed = 0 AND t.spam = 0".to_string(), Vec::new()));
+                }
+                wheres.push(crate::search::compile_search_sql(conn, &expr)?);
+            } else {
+                wheres.push(("0 = 1".to_string(), Vec::new()));
+            }
         }
     }
 
@@ -591,7 +545,8 @@ pub(crate) fn list_threads(
                 (SELECT MIN(j.due_at) FROM job j WHERE j.thread_id = t.id AND j.kind = 'follow_up'
                      AND j.live = 1 AND json_extract(j.state_json, '$.kind') IN ('armed','fired')) AS follow_up_due,
                 (SELECT MIN(j.due_at) FROM job j WHERE j.thread_id = t.id AND j.kind = 'send'
-                     AND j.live = 1 AND json_extract(j.state_json, '$.kind') IN ('scheduled','retryWait')) AS scheduled_at
+                     AND j.live = 1 AND json_extract(j.state_json, '$.kind') IN ('scheduled','retryWait')) AS scheduled_at,
+                EXISTS (SELECT 1 FROM vip_sender v WHERE v.address = lower(t.sender_email)) AS is_vip
          FROM thread t JOIN account a ON a.id = t.account_id
          WHERE {where_sql}
          ORDER BY {order} LIMIT ? OFFSET ?"
@@ -617,6 +572,7 @@ pub(crate) fn list_threads(
         account_email: String,
         snoozed_until: Option<i64>,
         follow_up_due: Option<i64>,
+        is_vip: i64,
     }
     let rows = stmt
         .query_map(params_from_iter(params.iter()), |row| {
@@ -639,14 +595,22 @@ pub(crate) fn list_threads(
                 account_email: row.get(15)?,
                 snoozed_until: row.get(16)?,
                 follow_up_due: row.get(17)?,
+                is_vip: row.get(19)?,
             })
         })
         .sq()?;
-    let mut items = Vec::new();
+    let mut raw_items = Vec::new();
     for row in rows {
-        let raw = row.sq()?;
+        raw_items.push(row.sq()?);
+    }
+    drop(stmt);
+
+    let mut items = Vec::with_capacity(raw_items.len());
+    for raw in raw_items {
+        let tid = blob_to_id(&raw.id, ThreadId::from_bytes)?;
+        let labels = crate::store::labels_for_thread(conn, tid)?;
         items.push(ThreadSummary {
-            id: blob_to_id(&raw.id, ThreadId::from_bytes)?,
+            id: tid,
             account_id: blob_to_id(&raw.account_id, AccountId::from_bytes)?,
             subject: raw.subject,
             snippet: raw.snippet,
@@ -664,7 +628,8 @@ pub(crate) fn list_threads(
             account_email: raw.account_email,
             snoozed_until: raw.snoozed_until.map(UnixMs),
             follow_up_due: raw.follow_up_due.map(UnixMs),
-            labels: Vec::new(),
+            labels,
+            is_vip: raw.is_vip != 0,
         });
     }
 
@@ -725,6 +690,13 @@ pub(crate) fn mailbox_counts(
             &scope_values,
             &format!("{inbox_base} AND t.category = 'newsletters'"),
         )?,
+        vip: count_where(
+            conn,
+            &scope_sql,
+            &scope_values,
+            &format!("{inbox_base} AND lower(t.sender_email) IN (SELECT address FROM vip_sender)"),
+        )?,
+        screener: crate::store::screener_pending_count(conn)?,
     })
 }
 
@@ -940,6 +912,13 @@ pub(crate) fn ingest_messages(
     let mut touched: Vec<ThreadId> = Vec::new();
     for incoming in messages {
         let date = incoming.date.unwrap_or(now);
+        let decision = crate::store::get_sender_decision(conn, &incoming.from_email)?;
+        let effective_category = match decision {
+            Some(crate::types::ScreenerDecision::Inbox) => InboxCategory::Primary,
+            Some(crate::types::ScreenerDecision::PaperTrail) => InboxCategory::Receipts,
+            Some(crate::types::ScreenerDecision::Feed) => InboxCategory::Newsletters,
+            _ => incoming.category,
+        };
         let thread_id = upsert_thread(
             conn,
             &NewThread {
@@ -951,9 +930,16 @@ pub(crate) fn ingest_messages(
                 sender_name: &incoming.from_name.clone().unwrap_or_default(),
                 sender_email: &incoming.from_email,
                 last_at: date,
-                category: incoming.category,
+                category: effective_category,
             },
         )?;
+        if matches!(decision, Some(crate::types::ScreenerDecision::Blocked)) {
+            conn.execute(
+                "UPDATE thread SET spam = 1, archived = 0, trashed = 0 WHERE id = ?1",
+                params![id_to_blob(thread_id.as_bytes())],
+            )
+            .sq()?;
+        }
         let msg_id = MessageId::fresh();
         let inserted = insert_message(
             conn,
@@ -1022,6 +1008,14 @@ pub(crate) fn ingest_messages(
                     crate::store::upsert_message_invite(conn, msg_id, &parsed)?;
                 }
             }
+            let eval_target = crate::rules::RuleEvalTarget {
+                from_email: &incoming.from_email,
+                from_name: incoming.from_name.as_deref(),
+                subject: &incoming.subject,
+                body_text: &incoming.body_text,
+                has_attachments: incoming.attachments.iter().any(|a| !a.is_inline),
+            };
+            crate::store::apply_enabled_rules_to_thread(conn, thread_id, &eval_target)?;
             if !touched.contains(&thread_id) {
                 touched.push(thread_id);
             }

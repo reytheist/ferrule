@@ -1887,3 +1887,186 @@ export async function deleteSignature(
   const idx = mockSignatures.findIndex((s) => s.id === signatureId);
   if (idx >= 0) mockSignatures.splice(idx, 1);
 }
+
+// ── Mock Phase 3: Saved Searches, Screener, VIP, Labels & Rules ─────────────
+
+const mockSavedSearches: import("../types/mail").SavedSearchView[] = [];
+const mockScreened = new Map<string, import("../types/mail").ScreenerDecision>();
+const mockVips: import("../types/mail").VipSenderView[] = [];
+const mockLabels: import("../types/mail").LabelView[] = [];
+const mockRules: import("../types/mail").MailRuleView[] = [];
+let mockPhase3Seq = 1;
+
+export async function listSavedSearches(): Promise<import("../types/mail").SavedSearchView[]> {
+  return [...mockSavedSearches];
+}
+
+export async function saveSavedSearch(
+  input: import("../types/mail").SaveSavedSearchInput,
+): Promise<import("../types/mail").SavedSearchView> {
+  const existing = input.id ? mockSavedSearches.find((s) => s.id === input.id) : undefined;
+  if (existing) {
+    existing.name = input.name.trim();
+    existing.query = input.query.trim();
+    return { ...existing };
+  }
+  const created: import("../types/mail").SavedSearchView = {
+    id: `ss-${mockPhase3Seq++}` as import("../types/mail").SavedSearchId,
+    name: input.name.trim(),
+    query: input.query.trim(),
+  };
+  mockSavedSearches.push(created);
+  return { ...created };
+}
+
+export async function deleteSavedSearch(
+  id: import("../types/mail").SavedSearchId,
+): Promise<void> {
+  const idx = mockSavedSearches.findIndex((s) => s.id === id);
+  if (idx >= 0) mockSavedSearches.splice(idx, 1);
+}
+
+export async function listScreenerSenders(): Promise<import("../types/mail").ScreenerSenderView[]> {
+  const byAddr = new Map<string, import("../types/mail").ScreenerSenderView>();
+  for (const t of state.threads) {
+    const addr = t.senderEmail.toLowerCase();
+    if (!addr || mockScreened.has(addr)) continue;
+    const prev = byAddr.get(addr);
+    if (!prev) {
+      byAddr.set(addr, {
+        address: addr,
+        displayName: t.senderName,
+        sampleSubject: t.subject,
+        threadCount: 1,
+        latestAt: t.messages[t.messages.length - 1]?.date ?? now(),
+      });
+    } else {
+      prev.threadCount += 1;
+    }
+  }
+  return Array.from(byAddr.values());
+}
+
+export async function screenSender(
+  address: string,
+  _displayName: string | null,
+  decision: import("../types/mail").ScreenerDecision,
+): Promise<number> {
+  const addr = address.toLowerCase();
+  mockScreened.set(addr, decision);
+  let count = 0;
+  for (const t of state.threads) {
+    if (t.senderEmail.toLowerCase() === addr) {
+      if (decision === "paperTrail") t.category = "receipts";
+      else if (decision === "feed") t.category = "newsletters";
+      else if (decision === "blocked") t.trashed = true;
+      else t.category = "primary";
+      count += 1;
+    }
+  }
+  return count;
+}
+
+export async function listVipSenders(): Promise<import("../types/mail").VipSenderView[]> {
+  return [...mockVips];
+}
+
+export async function addVipSender(
+  address: string,
+  displayName: string | null,
+): Promise<import("../types/mail").VipSenderView> {
+  const addr = address.toLowerCase();
+  const existing = mockVips.find((v) => v.address === addr);
+  if (existing) return { ...existing };
+  const created: import("../types/mail").VipSenderView = {
+    address: addr,
+    displayName,
+    addedAt: now(),
+  };
+  mockVips.push(created);
+  return { ...created };
+}
+
+export async function removeVipSender(address: string): Promise<void> {
+  const idx = mockVips.findIndex((v) => v.address === address.toLowerCase());
+  if (idx >= 0) mockVips.splice(idx, 1);
+}
+
+export async function listLabels(): Promise<import("../types/mail").LabelView[]> {
+  return [...mockLabels];
+}
+
+export async function saveLabel(
+  input: import("../types/mail").SaveLabelInput,
+): Promise<import("../types/mail").LabelView> {
+  const existing = input.id ? mockLabels.find((l) => l.id === input.id) : undefined;
+  if (existing) {
+    existing.name = input.name.trim();
+    existing.color = input.color;
+    return { ...existing };
+  }
+  const created: import("../types/mail").LabelView = {
+    id: `lbl-${mockPhase3Seq++}` as import("../types/mail").LabelId,
+    name: input.name.trim(),
+    color: input.color,
+    threadCount: 0,
+  };
+  mockLabels.push(created);
+  return { ...created };
+}
+
+export async function deleteLabel(id: import("../types/mail").LabelId): Promise<void> {
+  const idx = mockLabels.findIndex((l) => l.id === id);
+  if (idx >= 0) mockLabels.splice(idx, 1);
+}
+
+export async function labelThreads(
+  labelId: import("../types/mail").LabelId,
+  threadIds: import("../types/mail").ThreadId[],
+  add: boolean,
+): Promise<void> {
+  const lbl = mockLabels.find((l) => l.id === labelId);
+  if (!lbl) return;
+  for (const tid of threadIds) {
+    const t = state.threads.find((th) => th.id === tid);
+    if (!t) continue;
+    if (add && !t.labels.some((l) => l.id === labelId)) {
+      t.labels.push({ id: lbl.id, name: lbl.name });
+    } else if (!add) {
+      t.labels = t.labels.filter((l) => l.id !== labelId);
+    }
+  }
+}
+
+export async function listRules(): Promise<import("../types/mail").MailRuleView[]> {
+  return [...mockRules];
+}
+
+export async function saveRule(
+  input: import("../types/mail").SaveMailRuleInput,
+): Promise<import("../types/mail").MailRuleView> {
+  const existing = input.id ? mockRules.find((r) => r.id === input.id) : undefined;
+  if (existing) {
+    Object.assign(existing, input, { name: input.name.trim() });
+    return { ...existing };
+  }
+  const created: import("../types/mail").MailRuleView = {
+    id: `rule-${mockPhase3Seq++}` as import("../types/mail").RuleId,
+    name: input.name.trim(),
+    enabled: input.enabled,
+    matchAll: input.matchAll,
+    conditions: input.conditions,
+    actions: input.actions,
+  };
+  mockRules.push(created);
+  return { ...created };
+}
+
+export async function deleteRule(id: import("../types/mail").RuleId): Promise<void> {
+  const idx = mockRules.findIndex((r) => r.id === id);
+  if (idx >= 0) mockRules.splice(idx, 1);
+}
+
+export async function runRuleNow(id: import("../types/mail").RuleId): Promise<number> {
+  return mockRules.some((r) => r.id === id) ? 0 : 0;
+}

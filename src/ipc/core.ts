@@ -28,19 +28,30 @@ import type {
   IcsOverlayView,
   JobId,
   JobView,
+  LabelId,
+  LabelView,
   MailboxCounts,
   MailAction,
+  MailRuleView,
   NewAccountInput,
   OAuthSignInInput,
   OverlayBusyBlock,
   RemoteContent,
   RsvpInviteInput,
+  RuleId,
   SaveCalendarEventInput,
   SaveIcsOverlayInput,
+  SaveLabelInput,
+  SaveMailRuleInput,
+  SaveSavedSearchInput,
   SaveSignatureInput,
   SaveTemplateInput,
   SavedOAuthClients,
+  SavedSearchId,
+  SavedSearchView,
   Scope,
+  ScreenerDecision,
+  ScreenerSenderView,
   SendMode,
   SendReceipt,
   SignatureId,
@@ -53,6 +64,7 @@ import type {
   ThreadView,
   UndoOutcome,
   UpdateAccountInput,
+  VipSenderView,
 } from "../types/mail";
 
 export function isTauriRuntime(): boolean {
@@ -228,6 +240,99 @@ export async function saveSignature(input: SaveSignatureInput): Promise<Signatur
 export async function deleteSignature(signatureId: SignatureId): Promise<void> {
   if (!isTauriRuntime()) return mock.deleteSignature(signatureId);
   return invoke<void>("delete_signature", { signatureId });
+}
+
+// ── Phase 3: Saved Searches, Screener, VIP, Labels & Rules ──────────────────
+
+export async function listSavedSearches(): Promise<SavedSearchView[]> {
+  if (!isTauriRuntime()) return mock.listSavedSearches();
+  return invoke<SavedSearchView[]>("list_saved_searches");
+}
+
+export async function saveSavedSearch(input: SaveSavedSearchInput): Promise<SavedSearchView> {
+  if (!isTauriRuntime()) return mock.saveSavedSearch(input);
+  return invoke<SavedSearchView>("save_saved_search", { input });
+}
+
+export async function deleteSavedSearch(savedSearchId: SavedSearchId): Promise<void> {
+  if (!isTauriRuntime()) return mock.deleteSavedSearch(savedSearchId);
+  return invoke<void>("delete_saved_search", { savedSearchId });
+}
+
+export async function listScreenerSenders(): Promise<ScreenerSenderView[]> {
+  if (!isTauriRuntime()) return mock.listScreenerSenders();
+  return invoke<ScreenerSenderView[]>("list_screener_senders");
+}
+
+export async function screenSender(
+  address: string,
+  displayName: string | null,
+  decision: ScreenerDecision,
+): Promise<number> {
+  if (!isTauriRuntime()) return mock.screenSender(address, displayName, decision);
+  return invoke<number>("screen_sender", { address, displayName, decision });
+}
+
+export async function listVipSenders(): Promise<VipSenderView[]> {
+  if (!isTauriRuntime()) return mock.listVipSenders();
+  return invoke<VipSenderView[]>("list_vip_senders");
+}
+
+export async function addVipSender(
+  address: string,
+  displayName: string | null,
+): Promise<VipSenderView> {
+  if (!isTauriRuntime()) return mock.addVipSender(address, displayName);
+  return invoke<VipSenderView>("add_vip_sender", { address, displayName });
+}
+
+export async function removeVipSender(address: string): Promise<void> {
+  if (!isTauriRuntime()) return mock.removeVipSender(address);
+  return invoke<void>("remove_vip_sender", { address });
+}
+
+export async function listLabels(): Promise<LabelView[]> {
+  if (!isTauriRuntime()) return mock.listLabels();
+  return invoke<LabelView[]>("list_labels");
+}
+
+export async function saveLabel(input: SaveLabelInput): Promise<LabelView> {
+  if (!isTauriRuntime()) return mock.saveLabel(input);
+  return invoke<LabelView>("save_label", { input });
+}
+
+export async function deleteLabel(labelId: LabelId): Promise<void> {
+  if (!isTauriRuntime()) return mock.deleteLabel(labelId);
+  return invoke<void>("delete_label", { labelId });
+}
+
+export async function labelThreads(
+  labelId: LabelId,
+  threadIds: ThreadId[],
+  add: boolean,
+): Promise<void> {
+  if (!isTauriRuntime()) return mock.labelThreads(labelId, threadIds, add);
+  return invoke<void>("label_threads", { labelId, threadIds, add });
+}
+
+export async function listRules(): Promise<MailRuleView[]> {
+  if (!isTauriRuntime()) return mock.listRules();
+  return invoke<MailRuleView[]>("list_rules");
+}
+
+export async function saveRule(input: SaveMailRuleInput): Promise<MailRuleView> {
+  if (!isTauriRuntime()) return mock.saveRule(input);
+  return invoke<MailRuleView>("save_rule", { input });
+}
+
+export async function deleteRule(ruleId: RuleId): Promise<void> {
+  if (!isTauriRuntime()) return mock.deleteRule(ruleId);
+  return invoke<void>("delete_rule", { ruleId });
+}
+
+export async function runRuleNow(ruleId: RuleId): Promise<number> {
+  if (!isTauriRuntime()) return mock.runRuleNow(ruleId);
+  return invoke<number>("run_rule_now", { ruleId });
 }
 
 export async function tickScheduler(): Promise<void> {

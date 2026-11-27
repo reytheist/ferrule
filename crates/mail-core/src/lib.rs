@@ -5,8 +5,10 @@ pub mod error;
 pub mod events;
 pub mod host;
 pub mod ids;
+pub mod rules;
 pub mod sanitize;
 pub mod schedule;
+pub mod search;
 pub mod types;
 
 mod calendar_core;
@@ -28,7 +30,8 @@ use crate::error::CoreError;
 use crate::events::{Alert, CoreEvent};
 use crate::host::{Clock, OsKeychain, SystemClock};
 use crate::ids::{
-    AccountId, AgentId, AttachmentId, DraftId, JobId, SignatureId, TemplateId, ThreadId, UnixMs,
+    AccountId, AgentId, AttachmentId, DraftId, JobId, LabelId, RuleId, SavedSearchId, SignatureId,
+    TemplateId, ThreadId, UnixMs,
 };
 use crate::schedule::{
     step_follow_up, step_outbox, step_snooze, FollowUpEvent, FollowUpState, OutboxEffect,
@@ -1545,6 +1548,168 @@ impl MailCore {
             });
         }
         Ok(())
+    }
+
+    // ---------------------------------------------------------------- Phase 3: workflow
+
+    pub async fn list_saved_searches(&self) -> Result<Vec<SavedSearchView>, CoreError> {
+        self.inner.store.with_conn(store::list_saved_searches)
+    }
+
+    pub async fn save_saved_search(
+        &self,
+        input: SaveSavedSearchInput,
+    ) -> Result<SavedSearchView, CoreError> {
+        let now = self.now();
+        self.inner
+            .store
+            .with_conn(|conn| store::save_saved_search(conn, &input, now))
+    }
+
+    pub async fn delete_saved_search(&self, id: SavedSearchId) -> Result<(), CoreError> {
+        let deleted = self
+            .inner
+            .store
+            .with_conn(|conn| store::delete_saved_search(conn, id))?;
+        if !deleted {
+            return Err(CoreError::NotFound {
+                entity: "saved search".to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    pub async fn list_screener_senders(&self) -> Result<Vec<ScreenerSenderView>, CoreError> {
+        self.inner.store.with_conn(store::list_screener_senders)
+    }
+
+    pub async fn screen_sender(
+        &self,
+        address: String,
+        display_name: Option<String>,
+        decision: ScreenerDecision,
+    ) -> Result<u32, CoreError> {
+        let now = self.now();
+        let affected = self.inner.store.with_conn(|conn| {
+            store::screen_sender(conn, &address, display_name.as_deref(), decision, now)
+        })?;
+        self.emit(CoreEvent::Resync);
+        Ok(affected)
+    }
+
+    pub async fn list_vip_senders(&self) -> Result<Vec<VipSenderView>, CoreError> {
+        self.inner.store.with_conn(store::list_vip_senders)
+    }
+
+    pub async fn add_vip_sender(
+        &self,
+        address: String,
+        display_name: Option<String>,
+    ) -> Result<VipSenderView, CoreError> {
+        let now = self.now();
+        let view = self
+            .inner
+            .store
+            .with_conn(|conn| store::add_vip_sender(conn, &address, display_name.as_deref(), now))?;
+        self.emit(CoreEvent::Resync);
+        Ok(view)
+    }
+
+    pub async fn remove_vip_sender(&self, address: String) -> Result<(), CoreError> {
+        let removed = self
+            .inner
+            .store
+            .with_conn(|conn| store::remove_vip_sender(conn, &address))?;
+        if !removed {
+            return Err(CoreError::NotFound {
+                entity: "vip sender".to_string(),
+            });
+        }
+        self.emit(CoreEvent::Resync);
+        Ok(())
+    }
+
+    pub async fn list_labels(&self) -> Result<Vec<LabelView>, CoreError> {
+        self.inner.store.with_conn(store::list_labels)
+    }
+
+    pub async fn save_label(&self, input: SaveLabelInput) -> Result<LabelView, CoreError> {
+        let now = self.now();
+        let view = self
+            .inner
+            .store
+            .with_conn(|conn| store::save_label(conn, &input, now))?;
+        self.emit(CoreEvent::Resync);
+        Ok(view)
+    }
+
+    pub async fn delete_label(&self, label_id: LabelId) -> Result<(), CoreError> {
+        let deleted = self
+            .inner
+            .store
+            .with_conn(|conn| store::delete_label(conn, label_id))?;
+        if !deleted {
+            return Err(CoreError::NotFound {
+                entity: "label".to_string(),
+            });
+        }
+        self.emit(CoreEvent::Resync);
+        Ok(())
+    }
+
+    pub async fn label_threads(
+        &self,
+        label_id: LabelId,
+        thread_ids: Vec<ThreadId>,
+        add: bool,
+    ) -> Result<(), CoreError> {
+        self.inner.store.with_conn(|conn| {
+            if !store::label_exists(conn, label_id)? {
+                return Err(CoreError::NotFound {
+                    entity: "label".to_string(),
+                });
+            }
+            store::set_thread_label(conn, label_id, &thread_ids, add)
+        })?;
+        self.emit(CoreEvent::Resync);
+        Ok(())
+    }
+
+    pub async fn list_rules(&self) -> Result<Vec<MailRuleView>, CoreError> {
+        self.inner.store.with_conn(store::list_rules)
+    }
+
+    pub async fn save_rule(&self, input: SaveMailRuleInput) -> Result<MailRuleView, CoreError> {
+        let now = self.now();
+        self.inner
+            .store
+            .with_conn(|conn| store::save_rule(conn, &input, now))
+    }
+
+    pub async fn delete_rule(&self, rule_id: RuleId) -> Result<(), CoreError> {
+        let deleted = self
+            .inner
+            .store
+            .with_conn(|conn| store::delete_rule(conn, rule_id))?;
+        if !deleted {
+            return Err(CoreError::NotFound {
+                entity: "rule".to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    pub async fn run_rule_now(&self, rule_id: RuleId) -> Result<u32, CoreError> {
+        let matched = self.inner.store.with_conn(|conn| {
+            let rule = store::get_rule(conn, rule_id)?.ok_or_else(|| CoreError::NotFound {
+                entity: "rule".to_string(),
+            })?;
+            store::run_rule_retroactively(conn, &rule.conditions, rule.match_all, &rule.actions)
+        })?;
+        if matched > 0 {
+            self.emit(CoreEvent::Resync);
+        }
+        Ok(matched)
     }
 
     // ---------------------------------------------------------------- templates

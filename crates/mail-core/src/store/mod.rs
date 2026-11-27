@@ -10,6 +10,7 @@ mod jobs;
 mod signatures;
 mod templates;
 mod threads;
+mod workflow;
 
 pub(crate) use accounts::*;
 pub(crate) use actions::*;
@@ -21,6 +22,7 @@ pub(crate) use jobs::*;
 pub(crate) use signatures::*;
 pub(crate) use templates::*;
 pub(crate) use threads::*;
+pub(crate) use workflow::*;
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -52,6 +54,7 @@ DROP TABLE IF EXISTS meeting_doc;
 DROP TABLE IF EXISTS action_item;
 ";
 const MIGRATION_0010_PHASE2: &str = include_str!("0010_phase2_sync_attachments.sql");
+const MIGRATION_0011_PHASE3: &str = include_str!("0011_phase3_workflow.sql");
 
 pub(crate) struct Store {
     conn: Mutex<Connection>,
@@ -122,6 +125,10 @@ impl Store {
         conn.execute_batch(MIGRATION_0010_PHASE2)
             .map_err(|e| CoreError::Storage {
                 reason: format!("run migration 0010: {e}"),
+            })?;
+        conn.execute_batch(MIGRATION_0011_PHASE3)
+            .map_err(|e| CoreError::Storage {
+                reason: format!("run migration 0011: {e}"),
             })?;
         // Phase 2 additive columns on existing tables (idempotent).
         for (table, col, ddl) in [

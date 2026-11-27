@@ -8,15 +8,16 @@ use mail_core::calendar::{
 };
 use mail_core::error::CoreError;
 use mail_core::ids::{
-    AccountId, AttachmentId, CalendarEventId, DraftId, IcsOverlayId, JobId, SignatureId,
-    TemplateId, ThreadId, UnixMs,
+    AccountId, AttachmentId, CalendarEventId, DraftId, IcsOverlayId, JobId, LabelId, RuleId,
+    SavedSearchId, SignatureId, TemplateId, ThreadId, UnixMs,
 };
 use mail_core::types::{
     AccountView, ActionOutcome, AppSettings, AttachmentData, CreateDraftInput, DraftView, JobView,
-    MailAction, MailboxCounts, NewAccountInput, OAuthSignInInput, RemoteContent,
-    SaveSignatureInput, SaveTemplateInput, SavedOAuthClients, Scope, SendMode, SendReceipt,
-    SignatureView, TemplateView, ThreadPage, ThreadQuery, ThreadView, UndoOutcome,
-    UpdateAccountInput,
+    LabelView, MailAction, MailRuleView, MailboxCounts, NewAccountInput, OAuthSignInInput,
+    RemoteContent, SaveLabelInput, SaveMailRuleInput, SaveSavedSearchInput, SaveSignatureInput,
+    SaveTemplateInput, SavedOAuthClients, SavedSearchView, Scope, ScreenerDecision,
+    ScreenerSenderView, SendMode, SendReceipt, SignatureView, TemplateView, ThreadPage,
+    ThreadQuery, ThreadView, UndoOutcome, UpdateAccountInput, VipSenderView,
 };
 use mail_core::MailCore;
 use tauri::Manager;
@@ -279,6 +280,136 @@ pub async fn delete_signature(
     signature_id: SignatureId,
 ) -> Result<(), CoreError> {
     core.delete_signature(signature_id).await
+}
+
+// ---------------------------------------------------------------- Phase 3: Workflow
+
+#[tauri::command]
+pub async fn list_saved_searches(
+    core: tauri::State<'_, MailCore>,
+) -> Result<Vec<SavedSearchView>, CoreError> {
+    core.list_saved_searches().await
+}
+
+#[tauri::command]
+pub async fn save_saved_search(
+    core: tauri::State<'_, MailCore>,
+    input: SaveSavedSearchInput,
+) -> Result<SavedSearchView, CoreError> {
+    core.save_saved_search(input).await
+}
+
+#[tauri::command]
+pub async fn delete_saved_search(
+    core: tauri::State<'_, MailCore>,
+    saved_search_id: SavedSearchId,
+) -> Result<(), CoreError> {
+    core.delete_saved_search(saved_search_id).await
+}
+
+#[tauri::command]
+pub async fn list_screener_senders(
+    core: tauri::State<'_, MailCore>,
+) -> Result<Vec<ScreenerSenderView>, CoreError> {
+    core.list_screener_senders().await
+}
+
+#[tauri::command]
+pub async fn screen_sender(
+    core: tauri::State<'_, MailCore>,
+    address: String,
+    display_name: Option<String>,
+    decision: ScreenerDecision,
+) -> Result<u32, CoreError> {
+    core.screen_sender(address, display_name, decision).await
+}
+
+#[tauri::command]
+pub async fn list_vip_senders(
+    core: tauri::State<'_, MailCore>,
+) -> Result<Vec<VipSenderView>, CoreError> {
+    core.list_vip_senders().await
+}
+
+#[tauri::command]
+pub async fn add_vip_sender(
+    core: tauri::State<'_, MailCore>,
+    address: String,
+    display_name: Option<String>,
+) -> Result<VipSenderView, CoreError> {
+    core.add_vip_sender(address, display_name).await
+}
+
+#[tauri::command]
+pub async fn remove_vip_sender(
+    core: tauri::State<'_, MailCore>,
+    address: String,
+) -> Result<(), CoreError> {
+    core.remove_vip_sender(address).await
+}
+
+#[tauri::command]
+pub async fn list_labels(
+    core: tauri::State<'_, MailCore>,
+) -> Result<Vec<LabelView>, CoreError> {
+    core.list_labels().await
+}
+
+#[tauri::command]
+pub async fn save_label(
+    core: tauri::State<'_, MailCore>,
+    input: SaveLabelInput,
+) -> Result<LabelView, CoreError> {
+    core.save_label(input).await
+}
+
+#[tauri::command]
+pub async fn delete_label(
+    core: tauri::State<'_, MailCore>,
+    label_id: LabelId,
+) -> Result<(), CoreError> {
+    core.delete_label(label_id).await
+}
+
+#[tauri::command]
+pub async fn label_threads(
+    core: tauri::State<'_, MailCore>,
+    label_id: LabelId,
+    thread_ids: Vec<ThreadId>,
+    add: bool,
+) -> Result<(), CoreError> {
+    core.label_threads(label_id, thread_ids, add).await
+}
+
+#[tauri::command]
+pub async fn list_rules(
+    core: tauri::State<'_, MailCore>,
+) -> Result<Vec<MailRuleView>, CoreError> {
+    core.list_rules().await
+}
+
+#[tauri::command]
+pub async fn save_rule(
+    core: tauri::State<'_, MailCore>,
+    input: SaveMailRuleInput,
+) -> Result<MailRuleView, CoreError> {
+    core.save_rule(input).await
+}
+
+#[tauri::command]
+pub async fn delete_rule(
+    core: tauri::State<'_, MailCore>,
+    rule_id: RuleId,
+) -> Result<(), CoreError> {
+    core.delete_rule(rule_id).await
+}
+
+#[tauri::command]
+pub async fn run_rule_now(
+    core: tauri::State<'_, MailCore>,
+    rule_id: RuleId,
+) -> Result<u32, CoreError> {
+    core.run_rule_now(rule_id).await
 }
 
 #[tauri::command]

@@ -68,6 +68,8 @@ define_id!(JobId);
 define_id!(TemplateId);
 define_id!(SignatureId);
 define_id!(OfflineActionId);
+define_id!(SavedSearchId);
+define_id!(RuleId);
 define_id!(CalendarEventId);
 define_id!(IcsOverlayId);
 

@@ -2,9 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::{ProviderAuth, ProviderKind};
 use crate::ids::{
-    AccountId, AttachmentId, DraftId, IdentityId, JobId, LabelId, MessageId, SignatureId,
-    TemplateId, ThreadId, UnixMs,
+    AccountId, AttachmentId, DraftId, IdentityId, JobId, LabelId, MessageId, RuleId, SavedSearchId,
+    SignatureId, TemplateId, ThreadId, UnixMs,
 };
+use crate::rules::{RuleAction, RuleCondition};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -264,6 +265,8 @@ pub struct ThreadSummary {
     pub follow_up_due: Option<UnixMs>,
     pub trackers_blocked: u32,
     pub labels: Vec<LabelBadge>,
+    #[serde(default)]
+    pub is_vip: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -574,4 +577,110 @@ pub struct MailboxCounts {
     pub primary: u32,
     pub receipts: u32,
     pub newsletters: u32,
+    #[serde(default)]
+    pub vip: u32,
+    #[serde(default)]
+    pub screener: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedSearchView {
+    pub id: SavedSearchId,
+    pub name: String,
+    pub query: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveSavedSearchInput {
+    pub id: Option<SavedSearchId>,
+    pub name: String,
+    pub query: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ScreenerDecision {
+    Inbox,
+    PaperTrail,
+    Feed,
+    Blocked,
+}
+
+impl ScreenerDecision {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Inbox => "inbox",
+            Self::PaperTrail => "paper_trail",
+            Self::Feed => "feed",
+            Self::Blocked => "blocked",
+        }
+    }
+
+    pub fn from_db(raw: &str) -> Self {
+        match raw {
+            "paper_trail" => Self::PaperTrail,
+            "feed" => Self::Feed,
+            "blocked" => Self::Blocked,
+            _ => Self::Inbox,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenerSenderView {
+    pub address: String,
+    pub display_name: String,
+    pub sample_subject: String,
+    pub thread_count: u32,
+    pub latest_at: UnixMs,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VipSenderView {
+    pub address: String,
+    pub display_name: Option<String>,
+    pub added_at: UnixMs,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelView {
+    pub id: LabelId,
+    pub name: String,
+    pub color: SpaceColor,
+    pub thread_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveLabelInput {
+    pub id: Option<LabelId>,
+    pub name: String,
+    pub color: SpaceColor,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailRuleView {
+    pub id: RuleId,
+    pub name: String,
+    pub enabled: bool,
+    pub match_all: bool,
+    pub conditions: Vec<RuleCondition>,
+    pub actions: Vec<RuleAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveMailRuleInput {
+    pub id: Option<RuleId>,
+    pub name: String,
+    pub enabled: bool,
+    pub match_all: bool,
+    pub conditions: Vec<RuleCondition>,
+    pub actions: Vec<RuleAction>,
 }

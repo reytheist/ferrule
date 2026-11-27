@@ -4840,3 +4840,73 @@
   border: 1px solid var(--app-border);
   background: var(--app-surface-2);
 }
+
+/* ── Phase 3: Screener, VIP Split Inbox, Labels & Rules ────────────────── */
+
+.screener-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+.screener-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border);
+}
+
+.screener-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.screener-subject {
+  font-size: calc(12px * var(--chrome-font-scale));
+  color: var(--app-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.screener-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.split-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: calc(10px * var(--chrome-font-scale));
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--app-muted);
+  background: var(--app-surface-2);
+  border-bottom: 1px solid var(--app-border);
+}
+
+.split-section-header svg {
+  width: 11px;
+  height: 11px;
+  color: var(--space-amber);
+}
+
+.badge-vip {
+  background: color-mix(in srgb, var(--space-amber) 18%, transparent);
+  color: var(--space-amber);
+}
+
+.badge-label {
+  background: color-mix(in srgb, var(--app-accent) 15%, transparent);
+  color: var(--app-accent);
+}

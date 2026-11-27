@@ -1,4 +1,16 @@
-import { AlertTriangle, Archive, Clock, ExternalLink, Inbox, RefreshCw, ShieldAlert, Star, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Archive,
+  BookmarkPlus,
+  Clock,
+  Crown,
+  ExternalLink,
+  Inbox,
+  RefreshCw,
+  ShieldAlert,
+  Star,
+  Trash2,
+} from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import type { InboxCategory, ThreadSummary } from "../../types/mail";
 import type { MailApp } from "../shell/useMailApp";
@@ -44,6 +56,20 @@ function RowBadges({ thread }: { thread: ThreadSummary }) {
     badges.push(
       <span key="follow" className="badge badge-followup">
         Follow-up due
+      </span>,
+    );
+  }
+  if (thread.isVip) {
+    badges.push(
+      <span key="vip" className="badge badge-vip">
+        VIP
+      </span>,
+    );
+  }
+  for (const lbl of thread.labels) {
+    badges.push(
+      <span key={`lbl-${lbl.id}`} className="badge badge-label">
+        {lbl.name}
       </span>,
     );
   }
@@ -194,6 +220,25 @@ export function ThreadList({ app }: { app: MailApp }) {
       ) : (
         <div className="list-tabs">
           <span className="list-title">{viewTitle(app.view)}</span>
+          {app.view.kind === "search" && (
+            <button
+              type="button"
+              className="btn compact"
+              style={{ marginLeft: "auto" }}
+              onClick={() => {
+                if (app.view.kind !== "search") return;
+                const query = app.view.text;
+                const name = window.prompt("Name for saved search:", query);
+                if (name && name.trim()) {
+                  void app.persistSavedSearch({ id: null, name: name.trim(), query });
+                }
+              }}
+              title="Save this search to the sidebar"
+            >
+              <BookmarkPlus />
+              Save
+            </button>
+          )}
         </div>
       )}
 
@@ -242,6 +287,30 @@ export function ThreadList({ app }: { app: MailApp }) {
             <strong>{emptyTitle(app)}</strong>
             <span>{emptyHint(app)}</span>
           </div>
+        ) : inboxView && app.threads.some((t) => t.isVip) ? (
+          <>
+            <div className="split-section-header">
+              <Crown />
+              VIP ({app.threads.filter((t) => t.isVip).length})
+            </div>
+            {app.threads
+              .filter((t) => t.isVip)
+              .map((thread) => (
+                <ThreadRow key={thread.id} app={app} thread={thread} />
+              ))}
+            {app.threads.some((t) => !t.isVip) && (
+              <>
+                <div className="split-section-header">
+                  Everything else ({app.threads.filter((t) => !t.isVip).length})
+                </div>
+                {app.threads
+                  .filter((t) => !t.isVip)
+                  .map((thread) => (
+                    <ThreadRow key={thread.id} app={app} thread={thread} />
+                  ))}
+              </>
+            )}
+          </>
         ) : (
           app.threads.map((thread) => <ThreadRow key={thread.id} app={app} thread={thread} />)
         )}

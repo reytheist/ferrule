@@ -13,6 +13,8 @@ import { ThreadList } from "./features/threads/ThreadList";
 import { Topbar } from "./features/topbar/Topbar";
 import { TemplatesModal } from "./features/templates/TemplatesModal";
 import { FeatureTour } from "./features/tour/FeatureTour";
+import { RulesModal } from "./features/workflow/RulesModal";
+import { ScreenerModal } from "./features/workflow/ScreenerModal";
 import { FerruleGlyph } from "./features/ui/FerruleGlyph";
 import { SchedulePopover } from "./features/ui/SchedulePopover";
 import { UndoToast } from "./features/ui/UndoToast";
@@ -73,6 +75,8 @@ export function App() {
       {app.addAccountOpen && <AddAccountModal app={app} />}
       {app.templatesOpen && <TemplatesModal app={app} />}
       {app.settingsOpen && <SettingsModal app={app} />}
+      {app.screenerOpen && <ScreenerModal app={app} />}
+      {app.rulesOpen && <RulesModal app={app} />}
       <SchedulePopover app={app} />
       <UndoToast app={app} />
     </div>

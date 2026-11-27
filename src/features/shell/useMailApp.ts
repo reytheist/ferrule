@@ -3,24 +3,34 @@ import {
   actOnThreads,
   addAccount as addAccountCommand,
   addInviteToCalendar as addInviteToCalendarCommand,
+  addVipSender as addVipSenderCommand,
   cancelSend,
   createDraft,
   deleteCalendarEvent as deleteCalendarEventCommand,
   deleteIcsOverlay as deleteIcsOverlayCommand,
+  deleteLabel as deleteLabelCommand,
+  deleteRule as deleteRuleCommand,
+  deleteSavedSearch as deleteSavedSearchCommand,
   deleteSignature as deleteSignatureCommand,
   deleteTemplate,
   dismissFollowUp,
   downloadAttachment as downloadAttachmentCommand,
   getSettings,
   isTauriRuntime,
+  labelThreads as labelThreadsCommand,
   listAccounts,
   listCalendarEvents,
   listIcsOverlays,
   listJobs,
+  listLabels,
   listOverlayBusyBlocks,
+  listRules,
+  listSavedSearches,
+  listScreenerSenders,
   listSignatures,
   listTemplates,
   listThreads,
+  listVipSenders,
   mailboxCounts,
   oauthSignInAccount as oauthSignInAccountCommand,
   onMailEvent,
@@ -29,12 +39,18 @@ import {
   reauthOAuthAccount as reauthOAuthAccountCommand,
   refreshIcsOverlay as refreshIcsOverlayCommand,
   removeAccount as removeAccountCommand,
+  removeVipSender as removeVipSenderCommand,
   rsvpCalendarInvite as rsvpCalendarInviteCommand,
+  runRuleNow as runRuleNowCommand,
   saveCalendarEvent as saveCalendarEventCommand,
   saveIcsOverlay as saveIcsOverlayCommand,
+  saveLabel as saveLabelCommand,
+  saveRule as saveRuleCommand,
+  saveSavedSearch as saveSavedSearchCommand,
   saveSignature as saveSignatureCommand,
   saveTemplate as saveTemplateCommand,
   savedOAuthClients as savedOAuthClientsCommand,
+  screenSender as screenSenderCommand,
   sendDraft,
   setFollowUp,
   signalAppReady,
@@ -61,20 +77,31 @@ import type {
   InboxCategory,
   JobId,
   JobView,
+  LabelId,
+  LabelView,
   MailboxCounts,
   MailboxView,
+  MailRuleView,
   MessageId,
   NewAccountInput,
   OAuthSignInInput,
   OverlayBusyBlock,
   RemoteContent,
   RsvpInviteInput,
+  RuleId,
   SaveCalendarEventInput,
   SaveIcsOverlayInput,
+  SaveLabelInput,
+  SaveMailRuleInput,
+  SaveSavedSearchInput,
   SaveSignatureInput,
   SaveTemplateInput,
   SavedOAuthClients,
+  SavedSearchId,
+  SavedSearchView,
   Scope,
+  ScreenerDecision,
+  ScreenerSenderView,
   SendMode,
   SignatureId,
   SignatureView,
@@ -85,6 +112,7 @@ import type {
   ThreadView,
   UnixMs,
   UpdateAccountInput,
+  VipSenderView,
 } from "../../types/mail";
 import { formatDue } from "../ui/format";
 
@@ -201,6 +229,13 @@ export interface MailApp {
   jobs: JobView[];
   templates: TemplateView[];
   signatures: SignatureView[];
+  savedSearches: SavedSearchView[];
+  screenerSenders: ScreenerSenderView[];
+  vipSenders: VipSenderView[];
+  labels: LabelView[];
+  rules: MailRuleView[];
+  screenerOpen: boolean;
+  rulesOpen: boolean;
   scopeAccount: AccountId | null;
   view: MailboxView;
   selectedId: ThreadId | null;
@@ -267,6 +302,21 @@ export interface MailApp {
   closeTemplates(): void;
   openSettings(): void;
   closeSettings(): void;
+  openScreener(): void;
+  closeScreener(): void;
+  openRules(): void;
+  closeRules(): void;
+  persistSavedSearch(input: SaveSavedSearchInput): Promise<void>;
+  removeSavedSearch(id: SavedSearchId): Promise<void>;
+  screenSender(address: string, displayName: string | null, decision: ScreenerDecision): Promise<void>;
+  addVipSender(address: string, displayName: string | null): Promise<void>;
+  removeVipSender(address: string): Promise<void>;
+  persistLabel(input: SaveLabelInput): Promise<void>;
+  removeLabel(id: LabelId): Promise<void>;
+  labelThreads(labelId: LabelId, threadIds: ThreadId[], add: boolean): Promise<void>;
+  persistRule(input: SaveMailRuleInput): Promise<void>;
+  removeRule(id: RuleId): Promise<void>;
+  runRuleNow(id: RuleId): Promise<void>;
   setDeveloperToolsEnabled(enabled: boolean): Promise<void>;
   openCommand(): void;
   closeCommand(): void;
@@ -331,6 +381,13 @@ export function useMailApp(): MailApp {
   const [jobs, setJobs] = useState<JobView[]>([]);
   const [templates, setTemplates] = useState<TemplateView[]>([]);
   const [signatures, setSignatures] = useState<SignatureView[]>([]);
+  const [savedSearches, setSavedSearches] = useState<SavedSearchView[]>([]);
+  const [screenerSenders, setScreenerSenders] = useState<ScreenerSenderView[]>([]);
+  const [vipSenders, setVipSenders] = useState<VipSenderView[]>([]);
+  const [labels, setLabels] = useState<LabelView[]>([]);
+  const [rules, setRules] = useState<MailRuleView[]>([]);
+  const [screenerOpen, setScreenerOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [scopeAccount, setScopeAccount] = useState<AccountId | null>(null);
   const [view, setView] = useState<MailboxView>({ kind: "inbox", category: "primary" });
   const [selectedId, setSelectedId] = useState<ThreadId | null>(null);
@@ -419,19 +476,40 @@ export function useMailApp(): MailApp {
   }, []);
 
   const reloadMeta = useCallback(async () => {
-    const [nextAccounts, nextJobs, nextTemplates, nextSignatures, nextClients, nextSettings] =
-      await Promise.all([
-        listAccounts(),
-        listJobs(),
-        listTemplates(),
-        listSignatures(null),
-        savedOAuthClientsCommand(),
-        getSettings(),
-      ]);
+    const [
+      nextAccounts,
+      nextJobs,
+      nextTemplates,
+      nextSignatures,
+      nextSavedSearches,
+      nextScreener,
+      nextVips,
+      nextLabels,
+      nextRules,
+      nextClients,
+      nextSettings,
+    ] = await Promise.all([
+      listAccounts(),
+      listJobs(),
+      listTemplates(),
+      listSignatures(null),
+      listSavedSearches(),
+      listScreenerSenders(),
+      listVipSenders(),
+      listLabels(),
+      listRules(),
+      savedOAuthClientsCommand(),
+      getSettings(),
+    ]);
     setAccounts(nextAccounts);
     setJobs(nextJobs);
     setTemplates(nextTemplates);
     setSignatures(nextSignatures);
+    setSavedSearches(nextSavedSearches);
+    setScreenerSenders(nextScreener);
+    setVipSenders(nextVips);
+    setLabels(nextLabels);
+    setRules(nextRules);
     setSavedOAuthClients(nextClients);
     setSettings(nextSettings);
     jobsSignature.current = nextJobs.map((j) => `${j.id}:${j.state}`).join("|");
@@ -1167,6 +1245,120 @@ export function useMailApp(): MailApp {
     }
   }
 
+  async function persistSavedSearch(input: SaveSavedSearchInput): Promise<void> {
+    try {
+      await saveSavedSearchCommand(input);
+      await reloadMeta();
+      showToast(`Saved search “${input.name}”`);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function removeSavedSearch(id: SavedSearchId): Promise<void> {
+    try {
+      await deleteSavedSearchCommand(id);
+      await reloadMeta();
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function screenSender(
+    address: string,
+    displayName: string | null,
+    decision: ScreenerDecision,
+  ): Promise<void> {
+    try {
+      await screenSenderCommand(address, displayName, decision);
+      await Promise.all([reloadMeta(), reload(scope, view)]);
+      showToast(`Routed ${address} → ${decision}`);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function addVipSender(address: string, displayName: string | null): Promise<void> {
+    try {
+      await addVipSenderCommand(address, displayName);
+      await Promise.all([reloadMeta(), reload(scope, view)]);
+      showToast(`Added ${address} to VIP`);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function removeVipSender(address: string): Promise<void> {
+    try {
+      await removeVipSenderCommand(address);
+      await Promise.all([reloadMeta(), reload(scope, view)]);
+      showToast(`Removed ${address} from VIP`);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function persistLabel(input: SaveLabelInput): Promise<void> {
+    try {
+      await saveLabelCommand(input);
+      await reloadMeta();
+      showToast(`Saved label “${input.name}”`);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function removeLabel(id: LabelId): Promise<void> {
+    try {
+      await deleteLabelCommand(id);
+      await Promise.all([reloadMeta(), reload(scope, view)]);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function labelThreads(
+    labelId: LabelId,
+    threadIds: ThreadId[],
+    add: boolean,
+  ): Promise<void> {
+    try {
+      await labelThreadsCommand(labelId, threadIds, add);
+      await Promise.all([reloadMeta(), reload(scope, view)]);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function persistRule(input: SaveMailRuleInput): Promise<void> {
+    try {
+      await saveRuleCommand(input);
+      await reloadMeta();
+      showToast(`Saved rule “${input.name}”`);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function removeRule(id: RuleId): Promise<void> {
+    try {
+      await deleteRuleCommand(id);
+      await reloadMeta();
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function runRuleNow(id: RuleId): Promise<void> {
+    try {
+      const matched = await runRuleNowCommand(id);
+      await Promise.all([reloadMeta(), reload(scope, view)]);
+      showToast(`Rule applied to ${matched} ${matched === 1 ? "thread" : "threads"}`);
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
   async function addAccount(input: NewAccountInput): Promise<void> {
     try {
       const created = await addAccountCommand(input);
@@ -1526,6 +1718,13 @@ export function useMailApp(): MailApp {
     jobs,
     templates,
     signatures,
+    savedSearches,
+    screenerSenders,
+    vipSenders,
+    labels,
+    rules,
+    screenerOpen,
+    rulesOpen,
     scopeAccount,
     view,
     selectedId,
@@ -1594,6 +1793,21 @@ export function useMailApp(): MailApp {
     closeTemplates,
     openSettings,
     closeSettings,
+    openScreener: () => setScreenerOpen(true),
+    closeScreener: () => setScreenerOpen(false),
+    openRules: () => setRulesOpen(true),
+    closeRules: () => setRulesOpen(false),
+    persistSavedSearch,
+    removeSavedSearch,
+    screenSender,
+    addVipSender,
+    removeVipSender,
+    persistLabel,
+    removeLabel,
+    labelThreads,
+    persistRule,
+    removeRule,
+    runRuleNow,
     setDeveloperToolsEnabled,
     openCommand,
     closeCommand,

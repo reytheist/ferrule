@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronLeft,
   Clock,
+  Crown,
   Download,
   Eye,
   Flag,
@@ -489,6 +490,10 @@ export function ReadingPane({ app }: { app: MailApp }) {
   const earlier = thread.messages.slice(0, -1);
   const current = thread.messages[thread.messages.length - 1];
   const imagesAllowed = app.remoteContent !== "blockAll";
+  const latestSenderEmail = current?.fromEmail ?? "";
+  const isSenderVip =
+    latestSenderEmail !== "" &&
+    app.vipSenders.some((v) => v.address.toLowerCase() === latestSenderEmail.toLowerCase());
 
   return (
     <main className="read-col">
@@ -541,6 +546,20 @@ export function ReadingPane({ app }: { app: MailApp }) {
             <Star />
             Star <span className="k">S</span>
           </button>
+          {latestSenderEmail && (
+            <button
+              className={`t-btn${isSenderVip ? " on" : ""}`}
+              onClick={() =>
+                isSenderVip
+                  ? void app.removeVipSender(latestSenderEmail)
+                  : void app.addVipSender(latestSenderEmail, current?.fromName ?? null)
+              }
+              title={isSenderVip ? "Remove sender from VIP" : "Mark sender as VIP"}
+            >
+              <Crown />
+              {isSenderVip ? "VIP" : "Add VIP"}
+            </button>
+          )}
           <button
             className={`t-btn${imagesAllowed ? " on" : ""}`}
             onClick={app.toggleRemote}

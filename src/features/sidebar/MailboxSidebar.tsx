@@ -1,14 +1,18 @@
 import {
   Archive,
+  Bookmark,
   CalendarClock,
   CalendarDays,
   FileText,
+  Filter,
   Flag,
   Inbox,
   Send,
   ShieldAlert,
+  ShieldCheck,
   Sparkles,
   Star,
+  Tag,
   Trash2,
   Clock,
 } from "lucide-react";
@@ -143,11 +147,70 @@ export function MailboxSidebar({ app }: { app: MailApp }) {
       </button>
 
       <div className="sidebar-section">Library</div>
+      <button className="nav-item" onClick={app.openScreener} title="Sender Screener & VIPs">
+        <ShieldCheck />
+        <span className="nav-label">Screener &amp; VIP</span>
+        {app.screenerSenders.length > 0 && (
+          <span className="nav-count">{app.screenerSenders.length}</span>
+        )}
+      </button>
+      <button className="nav-item" onClick={app.openRules} title="Rules & Auto-Labeling">
+        <Filter />
+        <span className="nav-label">Rules &amp; Labels</span>
+        {app.rules.length > 0 && <span className="nav-count">{app.rules.length}</span>}
+      </button>
       <button className="nav-item" onClick={app.openTemplates} title="Templates">
         <FileText />
         <span className="nav-label">Templates</span>
         <span className="nav-count">{app.templates.length}</span>
       </button>
+
+      {app.savedSearches.length > 0 && (
+        <>
+          <div className="sidebar-section">Saved Searches</div>
+          {app.savedSearches.map((saved) => {
+            const active =
+              app.activeSection === "mail" &&
+              app.view.kind === "search" &&
+              app.view.text === saved.query;
+            return (
+              <button
+                key={saved.id}
+                className={`nav-item${active ? " active" : ""}`}
+                onClick={() => app.selectView({ kind: "search", text: saved.query })}
+                title={saved.query}
+              >
+                <Bookmark />
+                <span className="nav-label">{saved.name}</span>
+              </button>
+            );
+          })}
+        </>
+      )}
+
+      {app.labels.length > 0 && (
+        <>
+          <div className="sidebar-section">Labels</div>
+          {app.labels.map((label) => {
+            const active =
+              app.activeSection === "mail" &&
+              app.view.kind === "label" &&
+              app.view.labelId === label.id;
+            return (
+              <button
+                key={label.id}
+                className={`nav-item${active ? " active" : ""}`}
+                onClick={() => app.selectView({ kind: "label", labelId: label.id })}
+                title={label.name}
+              >
+                <Tag />
+                <span className="nav-label">{label.name}</span>
+                {label.threadCount > 0 && <span className="nav-count">{label.threadCount}</span>}
+              </button>
+            );
+          })}
+        </>
+      )}
 
       {app.settings.developerToolsEnabled && (
         <div className="sidebar-footer">

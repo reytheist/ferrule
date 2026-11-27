@@ -10,6 +10,8 @@ export type DraftId = Brand<string, "DraftId">;
 export type JobId = Brand<string, "JobId">;
 export type TemplateId = Brand<string, "TemplateId">;
 export type SignatureId = Brand<string, "SignatureId">;
+export type SavedSearchId = Brand<string, "SavedSearchId">;
+export type RuleId = Brand<string, "RuleId">;
 export type CalendarEventId = Brand<string, "CalendarEventId">;
 export type IcsOverlayId = Brand<string, "IcsOverlayId">;
 export type UnixMs = number;
@@ -161,6 +163,7 @@ export interface ThreadSummary {
   followUpDue: UnixMs | null;
   trackersBlocked: number;
   labels: LabelBadge[];
+  isVip?: boolean;
 }
 
 export interface ThreadPage {
@@ -376,6 +379,84 @@ export interface MailboxCounts {
   primary: number;
   receipts: number;
   newsletters: number;
+  vip?: number;
+  screener?: number;
+}
+
+// ── Phase 3: Saved Searches, Screener, VIP, Labels & Rules ──────────────────
+
+export interface SavedSearchView {
+  id: SavedSearchId;
+  name: string;
+  query: string;
+}
+
+export interface SaveSavedSearchInput {
+  id: SavedSearchId | null;
+  name: string;
+  query: string;
+}
+
+export type ScreenerDecision = "inbox" | "paperTrail" | "feed" | "blocked";
+
+export interface ScreenerSenderView {
+  address: string;
+  displayName: string;
+  sampleSubject: string;
+  threadCount: number;
+  latestAt: UnixMs;
+}
+
+export interface VipSenderView {
+  address: string;
+  displayName: string | null;
+  addedAt: UnixMs;
+}
+
+export interface LabelView {
+  id: LabelId;
+  name: string;
+  color: SpaceColor;
+  threadCount: number;
+}
+
+export interface SaveLabelInput {
+  id: LabelId | null;
+  name: string;
+  color: SpaceColor;
+}
+
+export type RuleCondition =
+  | { kind: "fromContains"; value: string }
+  | { kind: "domainEquals"; value: string }
+  | { kind: "subjectContains"; value: string }
+  | { kind: "bodyContains"; value: string }
+  | { kind: "hasAttachment" };
+
+export type RuleAction =
+  | { kind: "applyLabel"; labelId: LabelId }
+  | { kind: "archive" }
+  | { kind: "trash" }
+  | { kind: "markRead" }
+  | { kind: "star" }
+  | { kind: "setCategory"; category: InboxCategory };
+
+export interface MailRuleView {
+  id: RuleId;
+  name: string;
+  enabled: boolean;
+  matchAll: boolean;
+  conditions: RuleCondition[];
+  actions: RuleAction[];
+}
+
+export interface SaveMailRuleInput {
+  id: RuleId | null;
+  name: string;
+  enabled: boolean;
+  matchAll: boolean;
+  conditions: RuleCondition[];
+  actions: RuleAction[];
 }
 
 // ── Personal Calendar ───────────────────────────────────────────────────────
