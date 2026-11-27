@@ -158,30 +158,6 @@ pub struct IdentityView {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum SpaceKind {
-    #[default]
-    Personal,
-    PigmentStaff,
-}
-
-impl SpaceKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Personal => "personal",
-            Self::PigmentStaff => "pigment_staff",
-        }
-    }
-
-    pub fn from_db(raw: &str) -> Self {
-        match raw {
-            "pigment_staff" => Self::PigmentStaff,
-            _ => Self::Personal,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     #[serde(default)]
     pub developer_tools_enabled: bool,
@@ -198,7 +174,6 @@ pub struct AccountView {
     pub display_name: String,
     pub provider: ProviderKind,
     pub color: SpaceColor,
-    pub space_kind: SpaceKind,
     pub email: String,
     pub identities: Vec<IdentityView>,
     pub sync: SyncState,
@@ -211,8 +186,6 @@ pub struct AccountView {
 pub struct NewAccountInput {
     pub display_name: String,
     pub color: SpaceColor,
-    #[serde(default)]
-    pub space_kind: SpaceKind,
     pub auth: ProviderAuth,
     pub secret: Option<String>,
 }
@@ -231,8 +204,6 @@ pub struct OAuthSignInInput {
     pub display_name: Option<String>,
     #[serde(default)]
     pub color: Option<SpaceColor>,
-    #[serde(default)]
-    pub space_kind: SpaceKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -241,8 +212,6 @@ pub struct UpdateAccountInput {
     pub account_id: AccountId,
     pub display_name: String,
     pub color: SpaceColor,
-    #[serde(default)]
-    pub space_kind: Option<SpaceKind>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

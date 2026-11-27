@@ -7,16 +7,11 @@ pub mod host;
 pub mod ids;
 pub mod sanitize;
 pub mod schedule;
-pub mod staff;
 pub mod types;
-pub mod workbook;
 
 mod calendar_core;
-mod staff_core;
 mod store;
 mod sync;
-
-pub use crate::sync::staff::{parse_sse_frame, StaffSyncEvent, StaffSyncSnapshot, StaffTombstone};
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -86,18 +81,6 @@ struct MailCoreInner {
     host: Host,
     events: broadcast::Sender<CoreEvent>,
     token_cache: Mutex<HashMap<AccountId, CachedAccessToken>>,
-    staff_sse_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
-    staff_sync_lock: tokio::sync::Mutex<()>,
-}
-
-impl Drop for MailCoreInner {
-    fn drop(&mut self) {
-        if let Ok(mut guard) = self.staff_sse_task.lock() {
-            if let Some(handle) = guard.take() {
-                handle.abort();
-            }
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -140,8 +123,6 @@ impl MailCore {
                 host,
                 events,
                 token_cache: Mutex::new(HashMap::new()),
-                staff_sse_task: Mutex::new(None),
-                staff_sync_lock: tokio::sync::Mutex::new(()),
             }),
         })
     }
@@ -176,6 +157,24 @@ impl MailCore {
                 .map_err(|e| CoreError::Storage {
                     reason: e.to_string(),
                 })
+        })
+    }
+
+    /// Open an external `https://`, `http://`, or `mailto:` URL in the OS default handler.
+    pub fn open_external_url(&self, raw: &str) -> Result<(), CoreError> {
+        let trimmed = raw.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        let allowed = lower.starts_with("https://")
+            || lower.starts_with("http://")
+            || lower.starts_with("mailto:");
+        if !allowed {
+            return Err(CoreError::InvalidInput {
+                field: "url".to_string(),
+                reason: "only https://, http://, and mailto: URLs may be opened".to_string(),
+            });
+        }
+        open::that_detached(trimmed).map_err(|e| CoreError::Internal {
+            reason: format!("failed to open url: {e}"),
         })
     }
 
@@ -255,7 +254,6 @@ impl MailCore {
                 conn,
                 display_name,
                 input.color,
-                input.space_kind,
                 &input.auth,
                 &SyncState::Idle { last_ok: None },
                 now,
@@ -342,13 +340,7 @@ impl MailCore {
             });
         }
         let updated = self.inner.store.with_conn(|conn| {
-            store::update_account_meta(
-                conn,
-                input.account_id,
-                display_name,
-                input.color,
-                input.space_kind,
-            )
+            store::update_account_meta(conn, input.account_id, display_name, input.color)
         })?;
         if !updated {
             return Err(CoreError::NotFound {
@@ -548,7 +540,6 @@ impl MailCore {
             .add_account(NewAccountInput {
                 display_name,
                 color,
-                space_kind: input.space_kind,
                 auth,
                 secret: Some(refresh),
             })
@@ -699,9 +690,7 @@ impl MailCore {
         auth: &ProviderAuth,
     ) -> Result<Option<SecretString>, CoreError> {
         match auth.credential_kind() {
-            CredentialKind::Password
-            | CredentialKind::StaffSyncToken
-            | CredentialKind::DiscordWebhookUrl => self.secret_for(account_id, auth),
+            CredentialKind::Password => self.secret_for(account_id, auth),
             CredentialKind::OAuthRefreshToken | CredentialKind::OAuthClientSecret => {
                 let now = self.now();
                 if let Ok(cache) = self.inner.token_cache.lock() {

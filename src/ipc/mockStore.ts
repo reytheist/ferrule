@@ -4,33 +4,22 @@
 
 import {
   newAccountId,
-  newActionItemId,
   newAttachmentId,
   newCalendarEventId,
-  newCommentId,
-  newContactId,
   newDraftId,
   newIcsOverlayId,
   newIdentityId,
   newJobId,
   newLabelId,
   newMessageId,
-  newPinnedLinkId,
-  newSharedTemplateId,
-  newSharedThreadId,
-  newStaffMemberId,
   newTemplateId,
   newThreadId,
 } from "../types/ids";
 import type {
   AccountId,
   AccountView,
-  ActionItemId,
-  ActionItemStatus,
-  ActionItemView,
   ActionOutcome,
   AddInviteToCalendarInput,
-  AddSharedCommentInput,
   AppSettings,
   AttachmentMeta,
   AvailabilityQuery,
@@ -41,65 +30,38 @@ import type {
   CalendarInviteView,
   CalendarOccurrence,
   CalendarRangeQuery,
-  ConnectStaffWorkspaceInput,
-  ContactCategory,
-  ContactId,
   CreateDraftInput,
-  DiscordWebhookStatus,
   DraftId,
   DraftView,
   IcsOverlayId,
   IcsOverlayView,
   IdentityView,
-  ImportWorkbookInput,
   InboxCategory,
-  InstallUpdateInput,
-  InstallUpdateOutcome,
   JobId,
   JobView,
   LabelBadge,
   MailAction,
   MailboxCounts,
   MailboxView,
-  MeetingDocView,
   MessageId,
   MessageView,
   NewAccountInput,
   OAuthSignInInput,
   OverlayBusyBlock,
-  PinnedLinkId,
-  PinnedLinkView,
   PrivacyReport,
-  PromoteActionItemInput,
   ProviderKind,
   RecurrenceRule,
   RemoteContent,
   RemoteImagesStatus,
   RsvpInviteInput,
-  SaveActionItemInput,
   SaveCalendarEventInput,
   SaveIcsOverlayInput,
-  SavePinnedLinkInput,
-  SaveSharedTemplateInput,
-  SaveShowContactInput,
   SaveTemplateInput,
   SavedOAuthClients,
   Scope,
   SendMode,
   SendReceipt,
-  ShareThreadInput,
-  SharedCommentView,
-  SharedDraftView,
-  SharedTemplateId,
-  SharedTemplateView,
-  SharedThreadId,
-  SharedThreadSummary,
-  SharedThreadView,
-  ShowContactView,
   SpaceColor,
-  SpaceKind,
-  StaffMemberView,
-  StaffWorkspaceView,
   SyncState,
   TemplateId,
   TemplateView,
@@ -114,13 +76,6 @@ import type {
   UnixMs,
   UnsubscribeInfo,
   UpdateAccountInput,
-  UpdateCheckResult,
-  UpdateDownloadProgress,
-  UpdateHandoffInput,
-  UpdateMeetingDocInput,
-  UpdateSharedDraftInput,
-  WorkbookImportReport,
-  WorkbookPreviewRow,
 } from "../types/mail";
 
 const MINUTE = 60_000;
@@ -138,7 +93,6 @@ interface StoredAccount {
   displayName: string;
   provider: ProviderKind;
   color: SpaceColor;
-  spaceKind: SpaceKind;
   email: string;
   identities: IdentityView[];
   sync: SyncState;
@@ -206,28 +160,6 @@ interface MockState {
   jobs: StoredJob[];
   templates: TemplateView[];
   settings: AppSettings;
-  staffWorkspace: StaffWorkspaceView;
-  staffDirectory: StaffMemberView[];
-  sharedThreads: SharedThreadView[];
-  sharedTemplates: SharedTemplateView[];
-  showContacts: ShowContactView[];
-  pinnedLinks: PinnedLinkView[];
-}
-
-function emptyWorkspace(): StaffWorkspaceView {
-  return {
-    connected: false,
-    serverUrl: "",
-    staffName: "",
-    staffHandle: "",
-    staffEmail: "",
-    staffRole: "",
-    connectedAt: null,
-    lastSyncAt: null,
-    status: "disconnected",
-    lastError: null,
-    pendingOutboxCount: 0,
-  };
 }
 
 function emptyState(): MockState {
@@ -242,12 +174,6 @@ function emptyState(): MockState {
       onboardingCompleted: false,
       tourCompleted: false,
     },
-    staffWorkspace: emptyWorkspace(),
-    staffDirectory: [],
-    sharedThreads: [],
-    sharedTemplates: [],
-    showContacts: [],
-    pinnedLinks: [],
   };
 }
 
@@ -295,7 +221,6 @@ function accountView(account: StoredAccount): AccountView {
     displayName: account.displayName,
     provider: account.provider,
     color: account.color,
-    spaceKind: account.spaceKind,
     email: account.email,
     identities: account.identities,
     sync: account.sync,
@@ -531,7 +456,6 @@ function makeAccount(
   email: string,
   aliases: string[],
   position: number,
-  spaceKind: SpaceKind = "personal",
 ): StoredAccount {
   const primary: IdentityView = {
     id: newIdentityId(),
@@ -550,7 +474,6 @@ function makeAccount(
     displayName,
     provider,
     color,
-    spaceKind,
     email,
     identities: [primary, ...rest],
     sync: { kind: "idle", lastOk: now() - 4 * MINUTE },
@@ -1029,7 +952,6 @@ export async function addAccount(input: NewAccountInput): Promise<AccountView> {
     displayName: input.displayName,
     provider,
     color: input.color,
-    spaceKind: input.spaceKind ?? "personal",
     email: address,
     identities: [identity],
     sync: { kind: "idle", lastOk: null },
@@ -1082,7 +1004,6 @@ export async function oauthSignInAccount(input: OAuthSignInInput): Promise<Accou
     displayName,
     provider: input.provider,
     color,
-    spaceKind: input.spaceKind ?? "personal",
     email,
     identities: [identity],
     sync: { kind: "idle", lastOk: null },
@@ -1099,9 +1020,6 @@ export async function updateAccount(input: UpdateAccountInput): Promise<AccountV
   if (!name) throw new Error("Space name is required");
   account.displayName = name;
   account.color = input.color;
-  if (input.spaceKind !== undefined && input.spaceKind !== null) {
-    account.spaceKind = input.spaceKind;
-  }
   return accountView(account);
 }
 
@@ -1491,737 +1409,22 @@ export async function tickScheduler(): Promise<void> {
   state.jobs = state.jobs.filter((j) => j.state !== "cancelled");
 }
 
-// ── Phase B: Staff Sync & Collaboration mock backend ────────────────────────
-
-function normalizeHandle(raw: string): string {
-  return raw
-    .trim()
-    .replace(/^@+/, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]/g, "");
-}
-
-function extractMentions(body: string): string[] {
-  const found = new Set<string>();
-  const re = /(?:^|[^a-zA-Z0-9_.])@([a-zA-Z0-9_-]+)/g;
-  let match = re.exec(body);
-  while (match !== null) {
-    const h = match[1]?.toLowerCase();
-    if (h) found.add(h);
-    match = re.exec(body);
-  }
-  return Array.from(found);
-}
-
-function seedMockStaffDemo(): void {
-  if (state.staffDirectory.length > 0) return;
-  const t = now();
-  state.staffWorkspace = {
-    connected: true,
-    serverUrl: "local://pigment-demo",
-    staffName: "Reyth",
-    staffHandle: "reyth",
-    staffEmail: "info@pigmentshow.us",
-    staffRole: "Show Director",
-    connectedAt: t - 3 * DAY,
-    lastSyncAt: t - 2 * MINUTE,
-    status: "connected",
-    lastError: null,
-    pendingOutboxCount: 0,
-  };
-  state.staffDirectory = [
-    {
-      id: newStaffMemberId(),
-      name: "Reyth",
-      role: "Show Director",
-      handle: "reyth",
-      email: "info@pigmentshow.us",
-      department: "operations",
-      updatedAt: t,
-    },
-    {
-      id: newStaffMemberId(),
-      name: "Maya Chen",
-      role: "Sponsors Lead",
-      handle: "maya",
-      email: "sponsors@pigmentshow.us",
-      department: "sponsors",
-      updatedAt: t,
-    },
-    {
-      id: newStaffMemberId(),
-      name: "Devon Brooks",
-      role: "Exhibition Coordinator",
-      handle: "devon",
-      email: "exhibition@pigmentshow.us",
-      department: "exhibition",
-      updatedAt: t,
-    },
-    {
-      id: newStaffMemberId(),
-      name: "Tessa Morales",
-      role: "Marketing Lead",
-      handle: "tessa",
-      email: "marketing@pigmentshow.us",
-      department: "marketing",
-      updatedAt: t,
-    },
-    {
-      id: newStaffMemberId(),
-      name: "Sam Patel",
-      role: "Volunteer Coordinator",
-      handle: "sam",
-      email: "volunteers@pigmentshow.us",
-      department: "volunteers",
-      updatedAt: t,
-    },
-  ];
-  state.sharedTemplates = [
-    {
-      id: newSharedTemplateId(),
-      name: "Sponsor Prospectus Reply",
-      shortcut: "/sponsor",
-      category: "sponsors",
-      subject: "Pigment Miniatures Show 2027 — Sponsorship Prospectus",
-      bodyText:
-        "Hi there,\n\nThank you for your interest in sponsoring Pigment Miniatures Show 2027! I've attached our 2027 Sponsor Prospectus with booth dimensions, Gold/Silver/Bronze tiers, and print deadlines.\n\nWarmly,\nPigment Sponsors Team",
-      updatedBy: "maya",
-      updatedAt: t - DAY,
-    },
-    {
-      id: newSharedTemplateId(),
-      name: "Exhibitor Load-In FAQ",
-      shortcut: "/loadin",
-      category: "exhibitors",
-      subject: "Pigment 2027 — Exhibitor Load-In & Table Details",
-      bodyText:
-        "Hi,\n\nExhibitor load-in opens Friday at 1:00 PM via the East Loading Dock. Each 6ft table includes black draping, two chairs, and two staff badges.\n\nBest,\nPigment Exhibition Team",
-      updatedBy: "devon",
-      updatedAt: t - 2 * DAY,
-    },
-    {
-      id: newSharedTemplateId(),
-      name: "Volunteer Onboarding Welcome",
-      shortcut: "/vol",
-      category: "volunteers",
-      subject: "Welcome to the Pigment 2027 Volunteer Crew!",
-      bodyText:
-        "Hi,\n\nThank you for signing up to help run Pigment 2027! Volunteers who work two 4-hour shifts receive a full weekend badge and staff shirt.\n\nSee you at the show!\nPigment Volunteer Team",
-      updatedBy: "sam",
-      updatedAt: t - 4 * DAY,
-    },
-  ];
-  state.showContacts = [
-    {
-      id: newContactId(),
-      name: "Dana Okafor",
-      emails: ["dana@ferngate.co"],
-      category: "sponsor",
-      organization: "Ferngate Miniatures",
-      tier: "Gold Sponsor",
-      notes: "Returning 2026 sponsor; prefers corner booth near lighting demo tables.",
-      updatedAt: t - DAY,
-    },
-    {
-      id: newContactId(),
-      name: "Marco Bellini",
-      emails: ["marco@vallejo-atelier.example"],
-      category: "instructor",
-      organization: "Bellini Studio",
-      tier: "Keynote Workshop",
-      notes: "Teaching NMM & Skin Tones Saturday 10am–2pm. Needs overhead camera rig.",
-      updatedAt: t - 2 * DAY,
-    },
-    {
-      id: newContactId(),
-      name: "Priya Nair",
-      emails: ["priya@austinconvention.example"],
-      category: "venue",
-      organization: "Cedar Creek Event Center",
-      tier: "Venue Ops Lead",
-      notes: "Main hall A/V, loading dock schedule, and room keycard contact.",
-      updatedAt: t - 3 * DAY,
-    },
-  ];
-  state.pinnedLinks = [
-    {
-      id: newPinnedLinkId(),
-      title: "2027 Operations Workbook",
-      url: "https://docs.google.com/spreadsheets/d/pigment-2027-ops",
-      category: "operations",
-      description: "Master floor plan, vendor map/payment, and room supplies sheets",
-      position: 0,
-      updatedAt: t,
-    },
-    {
-      id: newPinnedLinkId(),
-      title: "Pigment Admin Portal",
-      url: "https://pigmentshow.us/admin",
-      category: "admin",
-      description: "Registrations, exhibitor badges, and ticket check-in",
-      position: 1,
-      updatedAt: t,
-    },
-    {
-      id: newPinnedLinkId(),
-      title: "Canva Marketing Assets",
-      url: "https://www.canva.com/folder/pigment-2027-marketing",
-      category: "marketing",
-      description: "Social graphics, badges, and print banners",
-      position: 2,
-      updatedAt: t,
-    },
-    {
-      id: newPinnedLinkId(),
-      title: "Staff Discord",
-      url: "https://discord.com/channels/@me",
-      category: "comms",
-      description: "Live staff chat and weekly planning voice channel",
-      position: 3,
-      updatedAt: t,
-    },
-  ];
-
-  // A thread shared by Maya from sponsors@ so Shared with Me works out of the box.
-  const sharedId = newSharedThreadId();
-  state.sharedThreads = [
-    {
-      id: sharedId,
-      sourceThreadId: null,
-      sourceAccountId: null,
-      ownerEmail: "sponsors@pigmentshow.us",
-      ownerName: "Maya Chen",
-      subject: "Gold Sponsor corner booth + lighting drop request",
-      snippet: "Could we reserve Corner Booth A1 again and add a 20A power drop?",
-      participants: ["dana@ferngate.co", "sponsors@pigmentshow.us"],
-      messages: [
-        {
-          id: "snap-1",
-          fromName: "Dana Okafor",
-          fromEmail: "dana@ferngate.co",
-          to: ["sponsors@pigmentshow.us"],
-          cc: [],
-          date: t - 3 * HOUR,
-          snippet: "Could we reserve Corner Booth A1 again and add a 20A power drop?",
-          bodyText:
-            "Hi Maya,\n\nWe'd love to return as a Gold Sponsor for Pigment 2027! Could we reserve Corner Booth A1 again and add a 20A power drop for our airbrush demo station?\n\nBest,\nDana",
-          bodySrcdoc:
-            "<!doctype html><html><body style='font-family:Inter,sans-serif;font-size:13px;line-height:1.55;margin:0;color:inherit'><p>Hi Maya,</p><p>We'd love to return as a <strong>Gold Sponsor</strong> for Pigment 2027! Could we reserve Corner Booth A1 again and add a 20A power drop for our airbrush demo station?</p><p>Best,<br/>Dana</p></body></html>",
-        },
-      ],
-      visibility: "allStaff",
-      invitedHandles: [],
-      assigneeHandle: "reyth",
-      status: "open",
-      comments: [
-        {
-          id: newCommentId(),
-          sharedThreadId: sharedId,
-          authorHandle: "maya",
-          authorName: "Maya Chen",
-          bodyText:
-            "Hey @reyth and @devon — confirming whether Corner Booth A1 has a 20A drop on the 2027 venue map before I lock in the invoice.",
-          mentions: ["reyth", "devon"],
-          createdAt: t - 2 * HOUR,
-        },
-      ],
-      draft: {
-        sharedThreadId: sharedId,
-        subject: "Re: Gold Sponsor corner booth + lighting drop request",
-        to: ["dana@ferngate.co"],
-        cc: [],
-        bodyText:
-          "Hi Dana,\n\nThrilled to have Ferngate back as a Gold Sponsor! Corner Booth A1 is yours and we've noted the 20A power drop with the venue ops team.\n\nWarmly,\nMaya",
-        editorHandle: null,
-        editorName: null,
-        lockState: "reviewRequested",
-        reviewRequestedBy: "maya",
-        approvedBy: null,
-        approvedAt: null,
-        rev: 2,
-        updatedAt: t - HOUR,
-      },
-      sharedAt: t - 2 * HOUR,
-      updatedAt: t - HOUR,
-    },
-  ];
-}
-
-function summarizeShared(t: SharedThreadView): SharedThreadSummary {
-  return {
-    id: t.id,
-    sourceThreadId: t.sourceThreadId,
-    sourceAccountId: t.sourceAccountId,
-    ownerEmail: t.ownerEmail,
-    ownerName: t.ownerName,
-    subject: t.subject,
-    snippet: t.snippet,
-    participants: t.participants.slice(),
-    messageCount: t.messages.length,
-    visibility: t.visibility,
-    invitedHandles: t.invitedHandles.slice(),
-    assigneeHandle: t.assigneeHandle,
-    status: t.status,
-    commentCount: t.comments.length,
-    hasDraft: Boolean(t.draft && t.draft.bodyText.trim().length > 0),
-    draftLockState: t.draft?.lockState ?? "unlocked",
-    draftEditorName: t.draft?.editorName ?? null,
-    sharedAt: t.sharedAt,
-    updatedAt: t.updatedAt,
-  };
-}
-
-export async function getStaffWorkspace(): Promise<StaffWorkspaceView> {
-  seedMockStaffDemo();
-  return { ...state.staffWorkspace };
-}
-
-export async function connectStaffWorkspace(
-  input: ConnectStaffWorkspaceInput,
-): Promise<StaffWorkspaceView> {
-  const url = input.serverUrl.trim();
-  if (!/^(https?:|local:)\/\//i.test(url)) {
-    throw new Error("Server URL must start with https://, http://, or local://");
-  }
-  if (!input.token.trim()) throw new Error("Staff token is required");
-  const handle = normalizeHandle(input.staffHandle);
-  if (!handle) throw new Error("A valid @handle is required");
-  const t = now();
-  state.staffWorkspace = {
-    connected: true,
-    serverUrl: url,
-    staffName: input.staffName.trim() || "Staff Member",
-    staffHandle: handle,
-    staffEmail: input.staffEmail.trim().toLowerCase(),
-    staffRole: input.staffRole.trim() || "Pigment Staff",
-    connectedAt: t,
-    lastSyncAt: t,
-    status: "connected",
-    lastError: null,
-    pendingOutboxCount: 0,
-  };
-  if (!state.staffDirectory.some((m) => m.handle === handle)) {
-    state.staffDirectory.push({
-      id: newStaffMemberId(),
-      name: state.staffWorkspace.staffName,
-      role: state.staffWorkspace.staffRole,
-      handle,
-      email: state.staffWorkspace.staffEmail,
-      department: null,
-      updatedAt: t,
-    });
-  }
-  return { ...state.staffWorkspace };
-}
-
-export async function disconnectStaffWorkspace(): Promise<void> {
-  state.staffWorkspace = emptyWorkspace();
-}
-
-export async function syncStaffWorkspace(): Promise<StaffWorkspaceView> {
-  if (!state.staffWorkspace.connected) {
-    throw new Error("Staff Sync workspace is not connected");
-  }
-  state.staffWorkspace = {
-    ...state.staffWorkspace,
-    lastSyncAt: now(),
-    status: "connected",
-    lastError: null,
-    pendingOutboxCount: 0,
-  };
-  return { ...state.staffWorkspace };
-}
-
-export async function pendingStaffOutboxCount(): Promise<number> {
-  seedMockStaffDemo();
-  return state.staffWorkspace.pendingOutboxCount;
-}
-
-export async function listStaffDirectory(): Promise<StaffMemberView[]> {
-  seedMockStaffDemo();
-  return state.staffDirectory.slice();
-}
-
-export async function listSharedThreads(): Promise<SharedThreadSummary[]> {
-  seedMockStaffDemo();
-  return state.sharedThreads
-    .slice()
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .map(summarizeShared);
-}
-
-export async function openSharedThread(
-  sharedThreadId: SharedThreadId,
-): Promise<SharedThreadView> {
-  seedMockStaffDemo();
-  const found = state.sharedThreads.find((t) => t.id === sharedThreadId);
-  if (!found) throw new Error("Shared thread not found");
-  return structuredClone(found);
-}
-
-export async function findSharedThreadForLocal(
-  threadId: ThreadId,
-): Promise<SharedThreadView | null> {
-  seedMockStaffDemo();
-  const found = state.sharedThreads.find((t) => t.sourceThreadId === threadId);
-  return found ? structuredClone(found) : null;
-}
-
-export async function shareThread(input: ShareThreadInput): Promise<SharedThreadView> {
-  seedMockStaffDemo();
-  if (!state.staffWorkspace.connected) {
-    throw new Error("Connect to Pigment Staff Sync in Settings first.");
-  }
-  const thread = threadById(input.threadId);
-  if (!thread) throw new Error("Thread not found");
-  const account = accountById(thread.accountId);
-  if (!account) throw new Error("Account not found");
-  if (account.spaceKind !== "pigmentStaff") {
-    throw new Error(
-      "Staff Sharing is disabled for Personal spaces — switch this account to Pigment Staff to share threads.",
-    );
-  }
-  const t = now();
-  const existing = state.sharedThreads.find((s) => s.sourceThreadId === thread.id);
-  const sharedId = existing?.id ?? newSharedThreadId();
-  const participants = Array.from(
-    new Set(thread.messages.flatMap((m) => [m.fromEmail, ...m.to, ...m.cc]).filter(Boolean)),
-  );
-  const invitedHandles =
-    input.visibility === "allStaff"
-      ? []
-      : Array.from(new Set(input.invitedHandles.map(normalizeHandle).filter(Boolean)));
-  if (input.visibility === "specific" && invitedHandles.length === 0) {
-    throw new Error("Select at least one staff member or choose All Staff");
-  }
-  const view: SharedThreadView = {
-    id: sharedId,
-    sourceThreadId: thread.id,
-    sourceAccountId: account.id,
-    ownerEmail: account.email,
-    ownerName: state.staffWorkspace.staffName,
-    subject: thread.subject,
-    snippet: lastMessage(thread)?.snippet ?? "",
-    participants,
-    messages: thread.messages.map((m) => ({
-      id: m.id,
-      fromName: m.fromName,
-      fromEmail: m.fromEmail,
-      to: m.to.slice(),
-      cc: m.cc.slice(),
-      date: m.date,
-      snippet: m.snippet,
-      bodyText: m.bodyText,
-      bodySrcdoc: messageView(m, "blockAll").bodySrcdoc,
-    })),
-    visibility: input.visibility,
-    invitedHandles,
-    assigneeHandle: input.assigneeHandle ? normalizeHandle(input.assigneeHandle) : null,
-    status: existing?.status ?? "open",
-    comments: existing?.comments ?? [],
-    draft: existing?.draft ?? null,
-    sharedAt: existing?.sharedAt ?? t,
-    updatedAt: t,
-  };
-  if (input.initialNote?.trim()) {
-    const body = input.initialNote.trim();
-    view.comments.push({
-      id: newCommentId(),
-      sharedThreadId: sharedId,
-      authorHandle: state.staffWorkspace.staffHandle,
-      authorName: state.staffWorkspace.staffName,
-      bodyText: body,
-      mentions: extractMentions(body),
-      createdAt: t,
-    });
-  }
-  if (existing) {
-    Object.assign(existing, view);
-  } else {
-    state.sharedThreads.unshift(view);
-  }
-  return structuredClone(view);
-}
-
-export async function updateSharedHandoff(
-  input: UpdateHandoffInput,
-): Promise<SharedThreadView> {
-  const found = state.sharedThreads.find((t) => t.id === input.sharedThreadId);
-  if (!found) throw new Error("Shared thread not found");
-  found.assigneeHandle = input.assigneeHandle ? normalizeHandle(input.assigneeHandle) : null;
-  found.status = input.status;
-  found.updatedAt = now();
-  return structuredClone(found);
-}
-
-export async function addSharedComment(
-  input: AddSharedCommentInput,
-): Promise<SharedCommentView> {
-  if (!state.staffWorkspace.connected) {
-    throw new Error("Connect to Pigment Staff Sync first.");
-  }
-  const found = state.sharedThreads.find((t) => t.id === input.sharedThreadId);
-  if (!found) throw new Error("Shared thread not found");
-  const body = input.bodyText.trim();
-  if (!body) throw new Error("Comment cannot be empty");
-  const comment: SharedCommentView = {
-    id: newCommentId(),
-    sharedThreadId: found.id,
-    authorHandle: state.staffWorkspace.staffHandle,
-    authorName: state.staffWorkspace.staffName,
-    bodyText: body,
-    mentions: extractMentions(body),
-    createdAt: now(),
-  };
-  found.comments.push(comment);
-  found.updatedAt = comment.createdAt;
-  return { ...comment };
-}
-
-export async function updateSharedDraft(
-  input: UpdateSharedDraftInput,
-): Promise<SharedDraftView> {
-  if (!state.staffWorkspace.connected) {
-    throw new Error("Connect to Pigment Staff Sync first.");
-  }
-  const found = state.sharedThreads.find((t) => t.id === input.sharedThreadId);
-  if (!found) throw new Error("Shared thread not found");
-  const t = now();
-  const me = state.staffWorkspace.staffHandle;
-  const myName = state.staffWorkspace.staffName;
-  const last = found.messages[found.messages.length - 1];
-  const draft: SharedDraftView = found.draft ?? {
-    sharedThreadId: found.id,
-    subject: /^re:/i.test(found.subject) ? found.subject : `Re: ${found.subject}`,
-    to: last ? [last.fromEmail] : [],
-    cc: [],
-    bodyText: "",
-    editorHandle: null,
-    editorName: null,
-    lockState: "unlocked",
-    reviewRequestedBy: null,
-    approvedBy: null,
-    approvedAt: null,
-    rev: 1,
-    updatedAt: t,
-  };
-
-  const action = input.action;
-  if (action.kind === "claim") {
-    if (draft.lockState === "editing" && draft.editorHandle !== me) {
-      throw new Error(`Draft is currently locked by ${draft.editorName ?? draft.editorHandle}`);
-    }
-    draft.lockState = "editing";
-    draft.editorHandle = me;
-    draft.editorName = myName;
-  } else if (action.kind === "takeOver") {
-    draft.lockState = "editing";
-    draft.editorHandle = me;
-    draft.editorName = myName;
-    draft.approvedBy = null;
-    draft.approvedAt = null;
-  } else if (action.kind === "save") {
-    if (draft.lockState !== "editing" || draft.editorHandle !== me) {
-      throw new Error("Claim or take over the draft lock before saving");
-    }
-    draft.subject = action.subject;
-    draft.to = action.to;
-    draft.cc = action.cc;
-    draft.bodyText = action.bodyText;
-  } else if (action.kind === "requestReview") {
-    draft.lockState = "reviewRequested";
-    draft.editorHandle = null;
-    draft.editorName = null;
-    draft.reviewRequestedBy = me;
-    draft.approvedBy = null;
-    draft.approvedAt = null;
-    const handles = action.reviewerHandles.map(normalizeHandle).filter(Boolean);
-    const ping =
-      handles.length > 0
-        ? `Requested review on the shared reply draft (${handles.map((h) => `@${h}`).join(" ")}).`
-        : "Requested review on the shared reply draft.";
-    const full = action.note?.trim() ? `${ping} ${action.note.trim()}` : ping;
-    found.comments.push({
-      id: newCommentId(),
-      sharedThreadId: found.id,
-      authorHandle: me,
-      authorName: myName,
-      bodyText: full,
-      mentions: extractMentions(full),
-      createdAt: t,
-    });
-  } else if (action.kind === "approve") {
-    draft.lockState = "approved";
-    draft.editorHandle = null;
-    draft.editorName = null;
-    draft.approvedBy = me;
-    draft.approvedAt = t;
-  } else if (action.kind === "release") {
-    draft.lockState = "unlocked";
-    draft.editorHandle = null;
-    draft.editorName = null;
-  }
-  draft.rev += 1;
-  draft.updatedAt = t;
-  found.draft = draft;
-  found.updatedAt = t;
-  return structuredClone(draft);
-}
-
-export async function listSharedTemplates(): Promise<SharedTemplateView[]> {
-  seedMockStaffDemo();
-  return state.sharedTemplates.slice();
-}
-
-export async function saveSharedTemplate(
-  input: SaveSharedTemplateInput,
-): Promise<SharedTemplateView> {
-  seedMockStaffDemo();
-  const t = now();
-  const actor = state.staffWorkspace.connected ? state.staffWorkspace.staffHandle : "staff";
-  const existing = input.id ? state.sharedTemplates.find((s) => s.id === input.id) : undefined;
-  if (existing) {
-    existing.name = input.name.trim();
-    existing.shortcut = input.shortcut?.trim() || null;
-    existing.category = input.category.trim() || "general";
-    existing.subject = input.subject;
-    existing.bodyText = input.bodyText;
-    existing.updatedBy = actor;
-    existing.updatedAt = t;
-    return { ...existing };
-  }
-  const created: SharedTemplateView = {
-    id: newSharedTemplateId(),
-    name: input.name.trim(),
-    shortcut: input.shortcut?.trim() || null,
-    category: input.category.trim() || "general",
-    subject: input.subject,
-    bodyText: input.bodyText,
-    updatedBy: actor,
-    updatedAt: t,
-  };
-  state.sharedTemplates.push(created);
-  return { ...created };
-}
-
-export async function deleteSharedTemplate(templateId: SharedTemplateId): Promise<void> {
-  state.sharedTemplates = state.sharedTemplates.filter((t) => t.id !== templateId);
-}
-
-export async function listShowContacts(): Promise<ShowContactView[]> {
-  seedMockStaffDemo();
-  return state.showContacts.slice();
-}
-
-export async function findContactByEmail(email: string): Promise<ShowContactView | null> {
-  seedMockStaffDemo();
-  const target = email.trim().toLowerCase();
-  const found = state.showContacts.find((c) => c.emails.some((e) => e.toLowerCase() === target));
-  return found ? { ...found, emails: found.emails.slice() } : null;
-}
-
-export async function saveShowContact(
-  input: SaveShowContactInput,
-): Promise<ShowContactView> {
-  seedMockStaffDemo();
-  const t = now();
-  const emails = Array.from(
-    new Set(
-      input.emails
-        .map((e) => e.trim().toLowerCase())
-        .filter((e) => e.includes("@") && e.length >= 3),
-    ),
-  );
-  if (emails.length === 0) throw new Error("At least one valid email address is required");
-  const existing = input.id ? state.showContacts.find((c) => c.id === input.id) : undefined;
-  if (existing) {
-    existing.name = input.name.trim();
-    existing.emails = emails;
-    existing.category = input.category;
-    existing.organization = input.organization?.trim() || null;
-    existing.tier = input.tier?.trim() || null;
-    existing.notes = input.notes.trim();
-    existing.updatedAt = t;
-    return { ...existing, emails: existing.emails.slice() };
-  }
-  const created: ShowContactView = {
-    id: newContactId(),
-    name: input.name.trim(),
-    emails,
-    category: input.category,
-    organization: input.organization?.trim() || null,
-    tier: input.tier?.trim() || null,
-    notes: input.notes.trim(),
-    updatedAt: t,
-  };
-  state.showContacts.push(created);
-  return { ...created, emails: created.emails.slice() };
-}
-
-export async function deleteShowContact(contactId: ContactId): Promise<void> {
-  state.showContacts = state.showContacts.filter((c) => c.id !== contactId);
-}
-
-export async function listPinnedLinks(): Promise<PinnedLinkView[]> {
-  seedMockStaffDemo();
-  return state.pinnedLinks.slice().sort((a, b) => a.position - b.position);
-}
-
-export async function savePinnedLink(input: SavePinnedLinkInput): Promise<PinnedLinkView> {
-  seedMockStaffDemo();
-  const url = input.url.trim();
-  if (!/^(https?:|discord:)\/\//i.test(url)) {
-    throw new Error("URL must start with https://, http://, or discord://");
-  }
-  const t = now();
-  const existing = input.id ? state.pinnedLinks.find((l) => l.id === input.id) : undefined;
-  if (existing) {
-    existing.title = input.title.trim();
-    existing.url = url;
-    existing.category = input.category.trim() || "operations";
-    existing.description = input.description?.trim() || null;
-    existing.updatedAt = t;
-    return { ...existing };
-  }
-  const created: PinnedLinkView = {
-    id: newPinnedLinkId(),
-    title: input.title.trim(),
-    url,
-    category: input.category.trim() || "operations",
-    description: input.description?.trim() || null,
-    position: state.pinnedLinks.length,
-    updatedAt: t,
-  };
-  state.pinnedLinks.push(created);
-  return { ...created };
-}
-
-export async function deletePinnedLink(linkId: PinnedLinkId): Promise<void> {
-  state.pinnedLinks = state.pinnedLinks.filter((l) => l.id !== linkId);
-}
-
-// ── Phase C: Calendar & Meetings Mock Backend ───────────────────────────────
+// ── Personal Calendar Mock Backend ──────────────────────────────────────────
 
 interface MockCalendarState {
   seeded: boolean;
   events: CalendarEventView[];
-  meetingDocs: Map<CalendarEventId, MeetingDocView>;
-  actionItems: ActionItemView[];
   invites: Map<string, CalendarInviteView>;
   overlays: IcsOverlayView[];
   overlayBlocks: OverlayBusyBlock[];
-  discordWebhookConfigured: boolean;
 }
 
 const calState: MockCalendarState = {
   seeded: false,
   events: [],
-  meetingDocs: new Map(),
-  actionItems: [],
   invites: new Map(),
   overlays: [],
   overlayBlocks: [],
-  discordWebhookConfigured: false,
 };
 
 function startOfTodayLocal(): number {
@@ -2235,239 +1438,6 @@ function seedMockCalendarDemo(): void {
   calState.seeded = true;
   const base = startOfTodayLocal();
   const t = now();
-  const series = "series-pigment-weekly-staff";
-
-  const prevSyncId = newCalendarEventId();
-  const thisSyncId = newCalendarEventId();
-  const sponsorId = newCalendarEventId();
-  const roomId = newCalendarEventId();
-  const workshopId = newCalendarEventId();
-
-  calState.events = [
-    {
-      id: prevSyncId,
-      seriesId: series,
-      title: "Pigment Weekly Staff Sync",
-      description: "Previous week's staff operations sync.",
-      startAt: base - 7 * DAY + 19 * HOUR,
-      endAt: base - 7 * DAY + 20 * HOUR,
-      allDay: false,
-      kind: "meeting",
-      department: "operations",
-      location: "Discord #staff-voice",
-      recurrence: "none",
-      discordUrl: "https://discord.com/channels/pigment-staff/staff-voice",
-      attendees: ["reyth", "elena", "marcus", "priya"],
-      sourceIcsUid: null,
-      createdBy: "reyth",
-      updatedAt: t,
-    },
-    {
-      id: thisSyncId,
-      seriesId: series,
-      title: "Pigment Weekly Staff Sync",
-      description: "Weekly operations, sponsor, and exhibition check-in.",
-      startAt: base + DAY + 19 * HOUR,
-      endAt: base + DAY + 20 * HOUR,
-      allDay: false,
-      kind: "meeting",
-      department: "operations",
-      location: "Discord #staff-voice",
-      recurrence: "weekly",
-      discordUrl: "https://discord.com/channels/pigment-staff/staff-voice",
-      attendees: ["reyth", "elena", "marcus", "priya"],
-      sourceIcsUid: null,
-      createdBy: "reyth",
-      updatedAt: t,
-    },
-    {
-      id: sponsorId,
-      seriesId: null,
-      title: "Gold Sponsor Deposit Deadline",
-      description: "Confirm Monument Hobbies & Vallejo booth deposits and logo assets.",
-      startAt: base + 3 * DAY + 17 * HOUR,
-      endAt: base + 3 * DAY + 18 * HOUR,
-      allDay: false,
-      kind: "deadline",
-      department: "sponsors",
-      location: null,
-      recurrence: "none",
-      discordUrl: null,
-      attendees: ["elena", "reyth"],
-      sourceIcsUid: null,
-      createdBy: "elena",
-      updatedAt: t,
-    },
-    {
-      id: roomId,
-      seriesId: null,
-      title: "Ballroom A & Paint Lab AV Walkthrough",
-      description: "Verify power drops, display case lighting rigs, and judging table layout.",
-      startAt: base + 2 * DAY + 14 * HOUR,
-      endAt: base + 2 * DAY + 15.5 * HOUR,
-      allDay: false,
-      kind: "roomSchedule",
-      department: "exhibition",
-      location: "Ballroom A",
-      recurrence: "none",
-      discordUrl: null,
-      attendees: ["marcus", "reyth"],
-      sourceIcsUid: null,
-      createdBy: "marcus",
-      updatedAt: t,
-    },
-    {
-      id: workshopId,
-      seriesId: null,
-      title: "Airbrush Workshop Prep Check-in",
-      description: "Confirm compressor count and booth ventilation with instructors.",
-      startAt: base + 4 * DAY + 11 * HOUR,
-      endAt: base + 4 * DAY + 12 * HOUR,
-      allDay: false,
-      kind: "meeting",
-      department: "workshops",
-      location: "Paint Lab 2",
-      recurrence: "none",
-      discordUrl: "https://discord.com/channels/pigment-staff/workshops",
-      attendees: ["marcus", "priya"],
-      sourceIcsUid: null,
-      createdBy: "marcus",
-      updatedAt: t,
-    },
-  ];
-
-  const carryoverItem: ActionItemView = {
-    id: newActionItemId(),
-    title: "Confirm Ballroom A power drop map with hotel AV",
-    department: "operations",
-    milestone: "PMS 2027",
-    assigneeHandle: "marcus",
-    status: "open",
-    dueAt: base + 2 * DAY,
-    startTime: "14:00",
-    endTime: "15:30",
-    location: "Ballroom A",
-    costNote: "$450 AV drop",
-    calendarEventId: roomId,
-    sourceEventId: prevSyncId,
-    sourceSeriesId: series,
-    sourceThreadId: null,
-    createdBy: "reyth",
-    createdAt: base - 7 * DAY,
-    updatedAt: t,
-  };
-  calState.actionItems.push(
-    carryoverItem,
-    {
-      id: newActionItemId(),
-      title: "Collect Gold Sponsor logos for program print",
-      department: "sponsors",
-      milestone: "PMS 2027",
-      assigneeHandle: "maya",
-      status: "open",
-      dueAt: base + 3 * DAY,
-      startTime: null,
-      endTime: null,
-      location: null,
-      costNote: null,
-      calendarEventId: sponsorId,
-      sourceEventId: thisSyncId,
-      sourceSeriesId: series,
-      sourceThreadId: null,
-      createdBy: "reyth",
-      createdAt: base - 2 * DAY,
-      updatedAt: t,
-    },
-    {
-      id: newActionItemId(),
-      title: "Order 24 acrylic display plinths & velvet risers",
-      department: "shopping-list",
-      milestone: "PMS 2027",
-      assigneeHandle: null,
-      status: "open",
-      dueAt: base - DAY,
-      startTime: null,
-      endTime: null,
-      location: "Exhibition Hall",
-      costNote: "$680",
-      calendarEventId: null,
-      sourceEventId: null,
-      sourceSeriesId: null,
-      sourceThreadId: null,
-      createdBy: "reyth",
-      createdAt: base - 5 * DAY,
-      updatedAt: t,
-    },
-    {
-      id: newActionItemId(),
-      title: "Publish workshop registration banner & Discord announcement",
-      department: "marketing",
-      milestone: "PMS 2027",
-      assigneeHandle: "reyth",
-      status: "open",
-      dueAt: base + 5 * DAY,
-      startTime: "10:00",
-      endTime: "11:00",
-      location: null,
-      costNote: null,
-      calendarEventId: null,
-      sourceEventId: null,
-      sourceSeriesId: null,
-      sourceThreadId: null,
-      createdBy: "reyth",
-      createdAt: base - 3 * DAY,
-      updatedAt: t,
-    },
-    {
-      id: newActionItemId(),
-      title: "Book promo table & badges for ReaperCon outreach",
-      department: "marketing",
-      milestone: "ReaperCon 2027",
-      assigneeHandle: "tessa",
-      status: "done",
-      dueAt: base - 4 * DAY,
-      startTime: null,
-      endTime: null,
-      location: "Denton Convention Center",
-      costNote: "$250",
-      calendarEventId: null,
-      sourceEventId: null,
-      sourceSeriesId: null,
-      sourceThreadId: null,
-      createdBy: "reyth",
-      createdAt: base - 10 * DAY,
-      updatedAt: t,
-    },
-  );
-
-  calState.meetingDocs.set(thisSyncId, {
-    eventId: thisSyncId,
-    seriesId: series,
-    agenda: [
-      {
-        id: "ag-1",
-        text: "Review Monument Hobbies & Vallejo booth deposits",
-        checked: false,
-        addedBy: "elena",
-        promotedActionId: null,
-      },
-      {
-        id: "ag-2",
-        text: "Finalize volunteer shift schedule for Friday setup",
-        checked: false,
-        addedBy: "priya",
-        promotedActionId: null,
-      },
-    ],
-    notesMarkdown:
-      "## Quick Updates\n- Exhibition display cases confirmed for Ballroom A.\n- Workshop registration opens next Monday.",
-    notesEditorHandle: null,
-    notesEditorName: null,
-    rev: 1,
-    updatedAt: t,
-    actionItems: [],
-    carryoverItems: [],
-  });
 
   const personalOverlayId = newIcsOverlayId();
   calState.overlays.push({
@@ -2506,37 +1476,7 @@ function seedMockCalendarDemo(): void {
 
 function mockInvitesForMessage(message: StoredMessage): CalendarInviteView[] {
   seedMockCalendarDemo();
-  // Surface a realistic .ics invite on the first message of the first Pigment Staff thread
-  // (or any thread mentioning "booth" / "walkthrough" / "invoice").
-  const existing = Array.from(calState.invites.values()).filter(
-    (inv) => inv.messageId === message.id,
-  );
-  if (existing.length > 0) return existing;
-
-  const subjectMatch =
-    /booth|sponsor|venue|walkthrough|retainer|pigment/i.test(message.snippet) ||
-    /monument|pigment|ferngate/i.test(message.fromEmail);
-  if (subjectMatch && calState.invites.size === 0) {
-    const base = startOfTodayLocal();
-    const uid = `ics-${message.id}`;
-    const inv: CalendarInviteView = {
-      messageId: message.id,
-      uid,
-      summary: "Pigment 2027 Sponsor & Booth Floor Walkthrough",
-      description: "Quick walkthrough of Gold Sponsor booth placement and electrical drops.",
-      location: "Ballroom A · Conference Line",
-      organizerName: message.fromName,
-      organizerEmail: message.fromEmail,
-      startAt: base + 2 * DAY + 11 * HOUR,
-      endAt: base + 2 * DAY + 12 * HOUR,
-      allDay: false,
-      rsvpStatus: "needsAction",
-      addedEventId: null,
-    };
-    calState.invites.set(`${message.id}:${uid}`, inv);
-    return [inv];
-  }
-  return [];
+  return Array.from(calState.invites.values()).filter((inv) => inv.messageId === message.id);
 }
 
 function expandMockOccurrences(
@@ -2599,8 +1539,7 @@ export async function saveCalendarEvent(
   const t = now();
   const id = input.id ?? newCalendarEventId();
   const seriesId =
-    input.seriesId?.trim() ||
-    (input.recurrence !== "none" ? `series-${id}` : null);
+    input.seriesId?.trim() || (input.recurrence !== "none" ? `series-${id}` : null);
   const view: CalendarEventView = {
     id,
     seriesId,
@@ -2616,7 +1555,7 @@ export async function saveCalendarEvent(
     discordUrl: input.discordUrl?.trim() || null,
     attendees: input.attendees,
     sourceIcsUid: input.sourceIcsUid ?? null,
-    createdBy: state.staffWorkspace.staffHandle || "reyth",
+    createdBy: "me",
     updatedAt: t,
   };
   const idx = calState.events.findIndex((e) => e.id === id);
@@ -2628,7 +1567,7 @@ export async function saveCalendarEvent(
 export async function quickAddCalendarEvent(text: string): Promise<CalendarEventView> {
   seedMockCalendarDemo();
   const trimmed = text.trim();
-  if (!trimmed) throw new Error('Enter an event like "Staff sync Thu 7pm #operations"');
+  if (!trimmed) throw new Error('Enter an event like "Dentist Thu 2pm @Downtown"');
   const d = new Date();
   let hour = 10;
   let minute = 0;
@@ -2707,7 +1646,7 @@ export async function quickAddCalendarEvent(text: string): Promise<CalendarEvent
   const startAt = d.getTime();
   return saveCalendarEvent({
     id: null,
-    title: titleTokens.join(" ") || "Staff Event",
+    title: titleTokens.join(" ") || "Calendar Event",
     description: "",
     startAt,
     endAt: startAt + durationMins * MINUTE,
@@ -2724,125 +1663,6 @@ export async function quickAddCalendarEvent(text: string): Promise<CalendarEvent
 export async function deleteCalendarEvent(eventId: CalendarEventId): Promise<void> {
   seedMockCalendarDemo();
   calState.events = calState.events.filter((e) => e.id !== eventId);
-  calState.meetingDocs.delete(eventId);
-}
-
-export async function getMeetingDoc(eventId: CalendarEventId): Promise<MeetingDocView> {
-  seedMockCalendarDemo();
-  const ev = calState.events.find((e) => e.id === eventId);
-  if (!ev) throw new Error("Calendar event not found");
-  const existing = calState.meetingDocs.get(eventId) ?? {
-    eventId,
-    seriesId: ev.seriesId,
-    agenda: [],
-    notesMarkdown: "",
-    notesEditorHandle: null,
-    notesEditorName: null,
-    rev: 1,
-    updatedAt: now(),
-    actionItems: [],
-    carryoverItems: [],
-  };
-  const actionItems = calState.actionItems.filter((a) => a.sourceEventId === eventId);
-  const carryoverItems = ev.seriesId
-    ? calState.actionItems.filter(
-        (a) =>
-          a.sourceSeriesId === ev.seriesId &&
-          a.status === "open" &&
-          a.sourceEventId !== eventId,
-      )
-    : [];
-  return {
-    ...existing,
-    seriesId: ev.seriesId,
-    agenda: existing.agenda.map((a) => ({ ...a })),
-    actionItems,
-    carryoverItems,
-  };
-}
-
-export async function updateMeetingDoc(input: UpdateMeetingDocInput): Promise<MeetingDocView> {
-  const doc = await getMeetingDoc(input.eventId);
-  const actorHandle = state.staffWorkspace.staffHandle || "reyth";
-  const actorName = state.staffWorkspace.staffName || "Reyth";
-  if (input.action.kind === "updateAgenda") {
-    doc.agenda = input.action.agenda;
-  } else if (input.action.kind === "claimNotesLock") {
-    doc.notesEditorHandle = actorHandle;
-    doc.notesEditorName = actorName;
-  } else if (input.action.kind === "saveNotes") {
-    doc.notesMarkdown = input.action.notesMarkdown;
-    if (input.action.releaseLock) {
-      doc.notesEditorHandle = null;
-      doc.notesEditorName = null;
-    } else {
-      doc.notesEditorHandle = actorHandle;
-      doc.notesEditorName = actorName;
-    }
-  } else if (input.action.kind === "releaseNotesLock") {
-    doc.notesEditorHandle = null;
-    doc.notesEditorName = null;
-  }
-  doc.rev += 1;
-  doc.updatedAt = now();
-  calState.meetingDocs.set(input.eventId, doc);
-  return getMeetingDoc(input.eventId);
-}
-
-export async function promoteToActionItem(
-  input: PromoteActionItemInput,
-): Promise<ActionItemView> {
-  seedMockCalendarDemo();
-  const ev = calState.events.find((e) => e.id === input.eventId);
-  if (!ev) throw new Error("Calendar event not found");
-  const t = now();
-  const item: ActionItemView = {
-    id: newActionItemId(),
-    title: input.title.trim(),
-    department: input.department ?? ev.department,
-    milestone: "PMS 2027",
-    assigneeHandle: input.assigneeHandle?.trim().replace(/^@/, "") || null,
-    status: "open",
-    dueAt: input.dueAt,
-    startTime: null,
-    endTime: null,
-    location: ev.location,
-    costNote: null,
-    calendarEventId: null,
-    sourceEventId: ev.id,
-    sourceSeriesId: ev.seriesId,
-    sourceThreadId: null,
-    createdBy: state.staffWorkspace.staffHandle || "reyth",
-    createdAt: t,
-    updatedAt: t,
-  };
-  calState.actionItems.push(item);
-  if (input.agendaItemId) {
-    const doc = await getMeetingDoc(input.eventId);
-    const bullet = doc.agenda.find((a) => a.id === input.agendaItemId);
-    if (bullet) {
-      bullet.promotedActionId = item.id;
-      calState.meetingDocs.set(input.eventId, doc);
-    }
-  }
-  return item;
-}
-
-export async function toggleActionItem(
-  actionItemId: ActionItemId,
-  status: ActionItemStatus,
-): Promise<ActionItemView> {
-  seedMockCalendarDemo();
-  const item = calState.actionItems.find((a) => a.id === actionItemId);
-  if (!item) throw new Error("Action item not found");
-  item.status = status;
-  item.updatedAt = now();
-  return { ...item };
-}
-
-export async function listActionItems(): Promise<ActionItemView[]> {
-  seedMockCalendarDemo();
-  return calState.actionItems.slice();
 }
 
 export async function rsvpCalendarInvite(input: RsvpInviteInput): Promise<CalendarInviteView> {
@@ -2854,7 +1674,7 @@ export async function rsvpCalendarInvite(input: RsvpInviteInput): Promise<Calend
   return { ...inv };
 }
 
-export async function addInviteToPigmentCalendar(
+export async function addInviteToCalendar(
   input: AddInviteToCalendarInput,
 ): Promise<CalendarEventView> {
   seedMockCalendarDemo();
@@ -2995,528 +1815,4 @@ export async function findAvailabilitySlots(
     day.setDate(day.getDate() + 1);
   }
   return slots;
-}
-
-export async function getDiscordWebhookStatus(): Promise<DiscordWebhookStatus> {
-  return { configured: calState.discordWebhookConfigured };
-}
-
-export async function setDiscordWebhook(url: string | null): Promise<DiscordWebhookStatus> {
-  const cleaned = url?.trim() ?? "";
-  if (!cleaned) {
-    calState.discordWebhookConfigured = false;
-    return { configured: false };
-  }
-  if (!/^https:\/\/(ptb\.|canary\.)?discord(app)?\.com\/api\/webhooks\//i.test(cleaned)) {
-    throw new Error("Discord webhook URL must start with https://discord.com/api/webhooks/");
-  }
-  calState.discordWebhookConfigured = true;
-  return { configured: true };
-}
-
-export async function formatMeetingRecap(eventId: CalendarEventId): Promise<string> {
-  const ev = calState.events.find((e) => e.id === eventId);
-  if (!ev) throw new Error("Calendar event not found");
-  const doc = await getMeetingDoc(eventId);
-  const when = new Date(ev.startAt).toLocaleString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  const lines = [`**Meeting Recap: ${ev.title}**`];
-  const meta = [when];
-  if (ev.department) meta.push(`#${ev.department}`);
-  if (ev.location) meta.push(`📍 ${ev.location}`);
-  lines.push(`_${meta.join(" · ")}_`);
-  if (doc.notesMarkdown.trim()) {
-    lines.push("", "**Notes**", doc.notesMarkdown.trim());
-  }
-  if (doc.agenda.length > 0) {
-    lines.push("", "**Agenda**");
-    for (const a of doc.agenda) lines.push(`- [${a.checked ? "x" : " "}] ${a.text}`);
-  }
-  const allActions = [...doc.actionItems, ...doc.carryoverItems];
-  if (allActions.length > 0) {
-    lines.push("", "**Action Items**");
-    for (const item of allActions) {
-      const owner = item.assigneeHandle ? ` (@${item.assigneeHandle})` : "";
-      lines.push(`- ${item.status === "done" ? "✅" : "⬜"} ${item.title}${owner}`);
-    }
-  }
-  return lines.join("\n");
-}
-
-export async function postMeetingRecapToDiscord(
-  eventId: CalendarEventId,
-  customMarkdown: string | null,
-): Promise<void> {
-  if (!calState.discordWebhookConfigured) {
-    throw new Error("Configure a Discord webhook URL first.");
-  }
-  if (!customMarkdown?.trim()) {
-    await formatMeetingRecap(eventId);
-  }
-}
-
-// ── Phase D: Action Items CRUD & Operations Workbook CSV Import/Export ──────
-
-function parseMockHhmm(raw: string | null): [number, number] | null {
-  if (!raw?.trim()) return null;
-  const m = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i.exec(raw.trim());
-  if (!m) return null;
-  let h = Number(m[1]);
-  const mins = Number(m[2] ?? "0");
-  const mer = m[3]?.toLowerCase();
-  if (mer === "pm" && h !== 12) h += 12;
-  if (mer === "am" && h === 12) h = 0;
-  if (h < 0 || h > 23 || mins < 0 || mins > 59) return null;
-  return [h, mins];
-}
-
-export async function saveActionItem(input: SaveActionItemInput): Promise<ActionItemView> {
-  seedMockCalendarDemo();
-  const title = input.title.trim();
-  if (!title) throw new Error("Action item title is required.");
-  const t = now();
-  const existingIdx = input.id ? calState.actionItems.findIndex((a) => a.id === input.id) : -1;
-  const existing = existingIdx >= 0 ? calState.actionItems[existingIdx] : undefined;
-  let calendarEventId = existing?.calendarEventId ?? null;
-
-  if (input.syncToCalendar && input.dueAt !== null) {
-    const baseDay = new Date(input.dueAt);
-    baseDay.setHours(0, 0, 0, 0);
-    const startParsed = parseMockHhmm(input.startTime);
-    const endParsed = parseMockHhmm(input.endTime);
-    let startAt = baseDay.getTime();
-    let endAt = startAt + DAY;
-    let allDay = true;
-    if (startParsed) {
-      startAt = baseDay.getTime() + (startParsed[0] * 60 + startParsed[1]) * MINUTE;
-      endAt = endParsed
-        ? Math.max(startAt + HOUR, baseDay.getTime() + (endParsed[0] * 60 + endParsed[1]) * MINUTE)
-        : startAt + HOUR;
-      allDay = false;
-    }
-    const ev = await saveCalendarEvent({
-      id: calendarEventId,
-      title,
-      description: input.milestone
-        ? `Event / Milestone: ${input.milestone}\nSynced from Pigment Action Items`
-        : "Synced from Pigment Action Items",
-      startAt,
-      endAt,
-      allDay,
-      kind: input.location && startParsed ? "roomSchedule" : "milestone",
-      department: input.department?.trim().replace(/^#/, "").toLowerCase() || null,
-      location: input.location?.trim() || null,
-      recurrence: "none",
-      discordUrl: null,
-      attendees: input.assigneeHandle ? [normalizeHandle(input.assigneeHandle)] : [],
-    });
-    calendarEventId = ev.id;
-  }
-
-  const saved: ActionItemView = {
-    id: existing?.id ?? newActionItemId(),
-    title,
-    department: input.department?.trim().replace(/^#/, "").toLowerCase() || null,
-    milestone: input.milestone?.trim() || null,
-    assigneeHandle: input.assigneeHandle ? normalizeHandle(input.assigneeHandle) || null : null,
-    status: input.status,
-    dueAt: input.dueAt,
-    startTime: input.startTime?.trim() || null,
-    endTime: input.endTime?.trim() || null,
-    location: input.location?.trim() || null,
-    costNote: input.costNote?.trim() || null,
-    calendarEventId,
-    sourceEventId: input.sourceEventId ?? existing?.sourceEventId ?? null,
-    sourceSeriesId: input.sourceSeriesId ?? existing?.sourceSeriesId ?? null,
-    sourceThreadId: input.sourceThreadId ?? existing?.sourceThreadId ?? null,
-    createdBy: existing?.createdBy ?? (state.staffWorkspace.staffHandle || "reyth"),
-    createdAt: existing?.createdAt ?? t,
-    updatedAt: t,
-  };
-
-  if (existingIdx >= 0) calState.actionItems[existingIdx] = saved;
-  else calState.actionItems.unshift(saved);
-  return { ...saved };
-}
-
-export async function deleteActionItem(actionItemId: ActionItemId): Promise<void> {
-  seedMockCalendarDemo();
-  calState.actionItems = calState.actionItems.filter((a) => a.id !== actionItemId);
-}
-
-function parseMockCsv(raw: string): string[][] {
-  const text = raw.replace(/^\uFEFF/, "");
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let inQuotes = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i]!;
-    if (inQuotes) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') {
-          cell += '"';
-          i += 1;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        cell += ch;
-      }
-    } else if (ch === '"' && cell.length === 0) {
-      inQuotes = true;
-    } else if (ch === ",") {
-      row.push(cell);
-      cell = "";
-    } else if (ch === "\r" || ch === "\n") {
-      if (ch === "\r" && text[i + 1] === "\n") i += 1;
-      row.push(cell);
-      cell = "";
-      if (row.some((c) => c.trim().length > 0)) rows.push(row);
-      row = [];
-    } else {
-      cell += ch;
-    }
-  }
-  if (cell.length > 0 || row.length > 0) {
-    row.push(cell);
-    if (row.some((c) => c.trim().length > 0)) rows.push(row);
-  }
-  return rows;
-}
-
-function csvEscapeCell(val: string): string {
-  if (/[",\r\n]/.test(val)) return `"${val.replace(/"/g, '""')}"`;
-  return val;
-}
-
-export async function exportActionItemsCsv(): Promise<string> {
-  seedMockCalendarDemo();
-  const header = "Dept.,What,Title / Task,Assignee,Done,Date,Start Time,End Time,Where,$$$,Source";
-  const lines = [header];
-  for (const item of calState.actionItems) {
-    const due = item.dueAt ? new Date(item.dueAt).toISOString().slice(0, 10) : "";
-    const source = item.sourceThreadId ? "email" : item.sourceEventId ? "meeting" : "";
-    lines.push(
-      [
-        item.department ?? "",
-        item.milestone ?? "",
-        item.title,
-        item.assigneeHandle ? `@${item.assigneeHandle}` : "",
-        item.status === "done" ? "TRUE" : "FALSE",
-        due,
-        item.startTime ?? "",
-        item.endTime ?? "",
-        item.location ?? "",
-        item.costNote ?? "",
-        source,
-      ]
-        .map(csvEscapeCell)
-        .join(","),
-    );
-  }
-  return `${lines.join("\r\n")}\r\n`;
-}
-
-export async function exportShowContactsCsv(): Promise<string> {
-  seedMockStaffDemo();
-  const lines = ["Name,Category,Organization,Tier,Emails,Notes"];
-  for (const c of state.showContacts) {
-    lines.push(
-      [
-        c.name,
-        c.category,
-        c.organization ?? "",
-        c.tier ?? "",
-        c.emails.join("; "),
-        c.notes,
-      ]
-        .map(csvEscapeCell)
-        .join(","),
-    );
-  }
-  return `${lines.join("\r\n")}\r\n`;
-}
-
-export async function importOperationsWorkbook(
-  input: ImportWorkbookInput,
-): Promise<WorkbookImportReport> {
-  seedMockCalendarDemo();
-  seedMockStaffDemo();
-  const lowerName = input.filename.toLowerCase();
-  if (!lowerName.endsWith(".csv") && !lowerName.endsWith(".txt")) {
-    throw new Error(
-      "Browser preview supports CSV import. Use the Ferrule desktop app for native .xlsx Operations Workbook import.",
-    );
-  }
-  const binary = atob(input.dataBase64);
-  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-  const text = new TextDecoder("utf-8").decode(bytes);
-  const rows = parseMockCsv(text);
-  const report: WorkbookImportReport = {
-    dryRun: input.dryRun,
-    actionItemsCreated: 0,
-    actionItemsUpdated: 0,
-    actionItemsSkipped: 0,
-    calendarEventsCreated: 0,
-    contactsCreated: 0,
-    contactsUpdated: 0,
-    contactsSkipped: 0,
-    skippedSheets: [],
-    warnings: [],
-    previewRows: [],
-  };
-  if (rows.length < 2) return report;
-
-  const headers = rows[0]!.map((h) => h.toLowerCase().replace(/[^a-z0-9$]/g, ""));
-  const findCol = (names: string[]): number => {
-    for (const n of names) {
-      const exact = headers.indexOf(n);
-      if (exact >= 0) return exact;
-    }
-    for (const n of names) {
-      const partial = headers.findIndex((h) => h.includes(n));
-      if (partial >= 0) return partial;
-    }
-    return -1;
-  };
-
-  const hasEmail = findCol(["emails", "email", "emailaddress"]) >= 0;
-  const hasTask = findCol(["titletask", "task", "title", "actionitem", "dept", "department"]) >= 0;
-  const mode =
-    input.target === "contacts" || (input.target === "auto" && hasEmail && !hasTask)
-      ? "contacts"
-      : "actionItems";
-
-  const sheetName = input.filename.replace(/\.csv$/i, "");
-  if (mode === "contacts") {
-    const cName = findCol(["name", "contact", "fullname"]);
-    const cEmail = findCol(["emails", "email", "emailaddress"]);
-    const cCat = findCol(["category", "type", "role"]);
-    const cOrg = findCol(["organization", "company", "studio"]);
-    const cTier = findCol(["tier", "level", "booth"]);
-    const cNotes = findCol(["notes", "note"]);
-    for (const r of rows.slice(1)) {
-      const name = (r[cName] ?? "").trim();
-      const emails = (r[cEmail] ?? "")
-        .split(/[;,\s]+/)
-        .map((e) => e.trim().toLowerCase())
-        .filter((e) => e.includes("@"));
-      if (!name || emails.length === 0) {
-        report.contactsSkipped += 1;
-        continue;
-      }
-      const existing = state.showContacts.find(
-        (c) =>
-          c.emails.some((e) => emails.includes(e.toLowerCase())) ||
-          c.name.toLowerCase() === name.toLowerCase(),
-      );
-      const rawCat = (r[cCat] ?? "").toLowerCase();
-      const category: ContactCategory = rawCat.includes("sponsor")
-        ? "sponsor"
-        : rawCat.includes("vendor")
-          ? "vendor"
-          : rawCat.includes("instructor")
-            ? "instructor"
-            : rawCat.includes("vip")
-              ? "vip"
-              : rawCat.includes("volunteer")
-                ? "volunteer"
-                : rawCat.includes("venue")
-                  ? "venue"
-                  : "other";
-      if (existing) report.contactsUpdated += 1;
-      else report.contactsCreated += 1;
-      if (!input.dryRun) {
-        await saveShowContact({
-          id: existing?.id ?? null,
-          name,
-          emails: Array.from(new Set([...(existing?.emails ?? []), ...emails])),
-          category,
-          organization: (r[cOrg] ?? "").trim() || existing?.organization || null,
-          tier: (r[cTier] ?? "").trim() || existing?.tier || null,
-          notes: (r[cNotes] ?? "").trim() || existing?.notes || "",
-        });
-      }
-      if (report.previewRows.length < 50) {
-        const preview: WorkbookPreviewRow = {
-          kind: "contact",
-          sheet: sheetName,
-          title: name,
-          detail: `${category} · ${emails.join(", ")}`,
-          status: existing ? "update" : "create",
-        };
-        report.previewRows.push(preview);
-      }
-    }
-    return report;
-  }
-
-  const cTitle = findCol(["titletask", "task", "title", "actionitem", "item"]);
-  const cDept = findCol(["dept", "department", "team"]);
-  const cWhat = findCol(["what", "event", "milestone"]);
-  const cWho = findCol(["assignee", "owner", "who"]);
-  const cDone = findCol(["done", "status", "complete"]);
-  const cDate = findCol(["date", "duedate", "due"]);
-  const cStart = findCol(["starttime", "start"]);
-  const cEnd = findCol(["endtime", "end"]);
-  const cWhere = findCol(["where", "location", "room"]);
-  const cCost = findCol(["$$$", "$$", "$", "cost", "budget"]);
-
-  for (const r of rows.slice(1)) {
-    const title = (r[cTitle] ?? "").trim();
-    if (!title) {
-      report.actionItemsSkipped += 1;
-      continue;
-    }
-    const dept = (r[cDept] ?? "").trim().toLowerCase().replace(/[\s_]+/g, "-") || null;
-    const milestone = (r[cWhat] ?? "").trim() || null;
-    const assigneeHandle = normalizeHandle(r[cWho] ?? "") || null;
-    const doneRaw = (r[cDone] ?? "").trim().toLowerCase();
-    const status: ActionItemStatus = ["true", "yes", "1", "x", "done", "complete"].includes(doneRaw)
-      ? "done"
-      : "open";
-    const dateRaw = (r[cDate] ?? "").trim();
-    const parsedDate = dateRaw ? Date.parse(dateRaw) : Number.NaN;
-    const dueAt = Number.isFinite(parsedDate) ? parsedDate : null;
-    const startTime = (r[cStart] ?? "").trim() || null;
-    const endTime = (r[cEnd] ?? "").trim() || null;
-    const location = (r[cWhere] ?? "").trim() || null;
-    const costNote = (r[cCost] ?? "").trim() || null;
-
-    const existing = calState.actionItems.find(
-      (a) =>
-        a.title.toLowerCase() === title.toLowerCase() &&
-        (a.milestone ?? "").toLowerCase() === (milestone ?? "").toLowerCase() &&
-        (a.department ?? "").toLowerCase() === (dept ?? "").toLowerCase(),
-    );
-    if (existing) report.actionItemsUpdated += 1;
-    else report.actionItemsCreated += 1;
-    if (input.syncToCalendar && dueAt !== null && !existing?.calendarEventId) {
-      report.calendarEventsCreated += 1;
-    }
-
-    if (!input.dryRun) {
-      await saveActionItem({
-        id: existing?.id ?? null,
-        title,
-        department: dept,
-        milestone,
-        assigneeHandle,
-        status,
-        dueAt,
-        startTime,
-        endTime,
-        location,
-        costNote,
-        sourceEventId: existing?.sourceEventId ?? null,
-        sourceSeriesId: existing?.sourceSeriesId ?? null,
-        sourceThreadId: existing?.sourceThreadId ?? null,
-        syncToCalendar: input.syncToCalendar,
-      });
-    }
-    if (report.previewRows.length < 50) {
-      report.previewRows.push({
-        kind: "actionItem",
-        sheet: sheetName,
-        title,
-        detail: [dept ? `#${dept}` : "", milestone ?? "", assigneeHandle ? `@${assigneeHandle}` : ""]
-          .filter(Boolean)
-          .join(" · "),
-        status: existing ? "update" : "create",
-      });
-    }
-  }
-  return report;
-}
-
-// ── In-App Updates (browser preview / dev mock) ─────────────────────────────
-
-const MOCK_CURRENT_VERSION = "0.3.2";
-const MOCK_LATEST_VERSION = "0.3.3";
-const mockProgressListeners = new Set<(progress: UpdateDownloadProgress) => void>();
-
-function readMockUpdateMode(): "available" | "upToDate" | "error" {
-  if (typeof window === "undefined") return "available";
-  const params = new URLSearchParams(window.location.search);
-  const raw = params.get("updateMock");
-  if (raw === "upToDate" || raw === "error" || raw === "available") return raw;
-  return "available";
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
-export async function checkForUpdates(): Promise<UpdateCheckResult> {
-  await delay(420);
-  const mode = readMockUpdateMode();
-  if (mode === "error") {
-    throw { kind: "network", reason: "Simulated update check network failure", retryable: true };
-  }
-  if (mode === "upToDate") {
-    return {
-      currentVersion: MOCK_CURRENT_VERSION,
-      latestVersion: MOCK_CURRENT_VERSION,
-      updateAvailable: false,
-      release: null,
-    };
-  }
-  return {
-    currentVersion: MOCK_CURRENT_VERSION,
-    latestVersion: MOCK_LATEST_VERSION,
-    updateAvailable: true,
-    release: {
-      version: MOCK_LATEST_VERSION,
-      tagName: `v${MOCK_LATEST_VERSION}`,
-      name: `Ferrule v${MOCK_LATEST_VERSION}`,
-      notes: "Includes faster mailbox sync and one-click in-app upgrades.",
-      releaseUrl: `https://github.com/reytheist/ferrule/releases/tag/v${MOCK_LATEST_VERSION}`,
-      publishedAt: new Date().toISOString(),
-      asset: {
-        name: `Ferrule_${MOCK_LATEST_VERSION}_x64-setup.exe`,
-        downloadUrl: `https://github.com/reytheist/ferrule/releases/download/v${MOCK_LATEST_VERSION}/Ferrule_${MOCK_LATEST_VERSION}_x64-setup.exe`,
-        sizeBytes: 12_400_000,
-      },
-    },
-  };
-}
-
-export async function downloadAndInstallUpdate(
-  input: InstallUpdateInput,
-): Promise<InstallUpdateOutcome> {
-  const totalBytes = 12_400_000;
-  const steps = [0, 18, 42, 68, 89, 100];
-  for (const pct of steps) {
-    const progress: UpdateDownloadProgress = {
-      version: input.version,
-      downloadedBytes: Math.round((totalBytes * pct) / 100),
-      totalBytes,
-      percent: pct,
-    };
-    for (const listener of mockProgressListeners) {
-      listener(progress);
-    }
-    await delay(220);
-  }
-  return {
-    kind: "installerLaunched",
-    filePath: `/tmp/ferrule-updates/${input.assetName ?? `Ferrule_${input.version}_x64-setup.exe`}`,
-  };
-}
-
-export async function onUpdateDownloadProgress(
-  handler: (progress: UpdateDownloadProgress) => void,
-): Promise<() => void> {
-  mockProgressListeners.add(handler);
-  return () => {
-    mockProgressListeners.delete(handler);
-  };
 }

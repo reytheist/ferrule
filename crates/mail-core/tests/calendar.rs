@@ -1,14 +1,12 @@
-//! Integration tests for Phase C: Pigment Shared Calendar, .ics invites,
-//! read-only personal .ics overlays, availability slots, Meeting Docs with
-//! recurring carryover, and Discord integration (SecretStore webhook isolation).
+//! Integration tests for personal Calendar, .ics invites,
+//! read-only personal .ics overlays, and availability slots.
 
 use std::sync::Arc;
 
-use mail_core::auth::{MemorySecretStore, SecretKey, SecretStore};
+use mail_core::auth::MemorySecretStore;
 use mail_core::calendar::{
-    parse_ics, parse_quick_add, ActionItemStatus, AgendaItem, AvailabilityQuery,
-    CalendarEventKind, CalendarRangeQuery, MeetingDocAction, PromoteActionItemInput,
-    RecurrenceRule, SaveCalendarEventInput, SaveIcsOverlayInput, UpdateMeetingDocInput,
+    parse_ics, parse_quick_add, AvailabilityQuery, CalendarEventKind, CalendarRangeQuery,
+    RecurrenceRule, SaveCalendarEventInput, SaveIcsOverlayInput,
 };
 use mail_core::host::ManualClock;
 use mail_core::ids::UnixMs;
@@ -279,109 +277,7 @@ fn parses_natural_language_quick_add() {
 }
 
 #[tokio::test]
-async fn recurring_meeting_carries_over_unfinished_action_items_and_formats_recap() {
-    let (core, _) = test_core();
-
-    let series = "series-ops-sync".to_string();
-    let week1 = core
-        .save_calendar_event(SaveCalendarEventInput {
-            id: None,
-            series_id: Some(series.clone()),
-            title: "Ops Weekly".to_string(),
-            description: String::new(),
-            start_at: UnixMs(BASE_MS - 7 * DAY + 19 * HOUR),
-            end_at: UnixMs(BASE_MS - 7 * DAY + 20 * HOUR),
-            all_day: false,
-            kind: CalendarEventKind::Meeting,
-            department: Some("operations".to_string()),
-            location: Some("Discord #ops".to_string()),
-            recurrence: RecurrenceRule::None,
-            discord_url: Some("discord://discord.com/channels/1/2".to_string()),
-            attendees: vec!["reyth".to_string()],
-            source_ics_uid: None,
-        })
-        .await
-        .expect("save week 1");
-
-    let week2 = core
-        .save_calendar_event(SaveCalendarEventInput {
-            id: None,
-            series_id: Some(series.clone()),
-            title: "Ops Weekly".to_string(),
-            description: String::new(),
-            start_at: UnixMs(BASE_MS + 19 * HOUR),
-            end_at: UnixMs(BASE_MS + 20 * HOUR),
-            all_day: false,
-            kind: CalendarEventKind::Meeting,
-            department: Some("operations".to_string()),
-            location: Some("Discord #ops".to_string()),
-            recurrence: RecurrenceRule::Weekly,
-            discord_url: Some("discord://discord.com/channels/1/2".to_string()),
-            attendees: vec!["reyth".to_string()],
-            source_ics_uid: None,
-        })
-        .await
-        .expect("save week 2");
-
-    // Promote an action item on week 1 and leave it open.
-    let item1 = core
-        .promote_to_action_item(PromoteActionItemInput {
-            event_id: week1.id,
-            agenda_item_id: None,
-            title: "Order display plinths".to_string(),
-            department: Some("operations".to_string()),
-            assignee_handle: Some("marcus".to_string()),
-            due_at: None,
-        })
-        .await
-        .expect("promote item");
-
-    // Week 2's Meeting Doc automatically carries over week 1's unfinished item!
-    let doc2 = core.get_meeting_doc(week2.id).await.expect("get doc2");
-    assert_eq!(doc2.carryover_items.len(), 1);
-    assert_eq!(doc2.carryover_items[0].id, item1.id);
-
-    // Add agenda + notes to week 2 and verify Discord recap output.
-    core.update_meeting_doc(UpdateMeetingDocInput {
-        event_id: week2.id,
-        action: MeetingDocAction::UpdateAgenda {
-            agenda: vec![AgendaItem {
-                id: "a1".to_string(),
-                text: "Sign venue addendum".to_string(),
-                checked: true,
-                added_by: "reyth".to_string(),
-                promoted_action_id: None,
-            }],
-        },
-    })
-    .await
-    .expect("update agenda");
-
-    core.update_meeting_doc(UpdateMeetingDocInput {
-        event_id: week2.id,
-        action: MeetingDocAction::SaveNotes {
-            notes_markdown: "Confirmed hotel block rates.".to_string(),
-            release_lock: true,
-        },
-    })
-    .await
-    .expect("save notes");
-
-    let recap = core.format_meeting_recap(week2.id).await.expect("recap");
-    assert!(recap.contains("**Meeting Recap: Ops Weekly**"));
-    assert!(recap.contains("Confirmed hotel block rates."));
-    assert!(recap.contains("Order display plinths (@marcus)"));
-
-    // Completing item1 removes it from carryover on week 2.
-    core.toggle_action_item(item1.id, ActionItemStatus::Done)
-        .await
-        .expect("mark done");
-    let doc2_after = core.get_meeting_doc(week2.id).await.expect("get doc2 after");
-    assert!(doc2_after.carryover_items.is_empty());
-}
-
-#[tokio::test]
-async fn availability_respects_pigment_events_and_local_ics_overlays() {
+async fn availability_respects_calendar_events_and_local_ics_overlays() {
     let (core, _) = test_core();
 
     // Pigment event: tomorrow 10:00–11:00 UTC
@@ -446,39 +342,6 @@ async fn availability_respects_pigment_events_and_local_ics_overlays() {
         .await
         .expect("list occurrences");
     assert_eq!(occs.len(), 1);
-}
-
-#[tokio::test]
-async fn discord_webhook_lives_strictly_in_secret_store() {
-    let (core, secrets) = test_core();
-
-    let initial = core.get_discord_webhook_status().await.expect("status");
-    assert!(!initial.configured);
-
-    let bad = core
-        .set_discord_webhook(Some("https://evil.example/hook".to_string()))
-        .await;
-    assert!(bad.is_err());
-
-    let url = "https://discord.com/api/webhooks/12345/secret-token".to_string();
-    let status = core
-        .set_discord_webhook(Some(url.clone()))
-        .await
-        .expect("set webhook");
-    assert!(status.configured);
-
-    let stored = secrets
-        .get(&SecretKey::discord_webhook_url())
-        .expect("get secret")
-        .expect("present");
-    assert_eq!(stored.expose(), url);
-
-    let cleared = core.set_discord_webhook(None).await.expect("clear");
-    assert!(!cleared.configured);
-    assert!(secrets
-        .get(&SecretKey::discord_webhook_url())
-        .expect("get secret")
-        .is_none());
 }
 
 #[tokio::test]

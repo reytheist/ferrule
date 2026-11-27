@@ -5,10 +5,11 @@ import {
   ChevronRight,
   Layers,
   MapPin,
-  MessageSquare,
+  Pencil,
   Plus,
   Repeat,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import type {
   CalendarEventView,
@@ -18,7 +19,6 @@ import type {
 import type { MailApp } from "../shell/useMailApp";
 import { EventEditorModal } from "./EventEditorModal";
 import { IcsOverlaysModal } from "./IcsOverlaysModal";
-import { MeetingDocPanel } from "./MeetingDocPanel";
 
 export type CalendarMode = "day" | "week" | "month";
 
@@ -279,7 +279,7 @@ export function CalendarView({ app }: { app: MailApp }) {
               type="button"
               className="t-btn"
               onClick={() => setOverlaysOpen(true)}
-              title="Manage read-only Personal .ics Overlays & Discord Webhook"
+              title="Manage read-only Personal .ics Overlays"
             >
               <Layers />
               Overlays ({app.icsOverlays.filter((o) => o.enabled).length})
@@ -300,7 +300,7 @@ export function CalendarView({ app }: { app: MailApp }) {
           <input
             ref={quickRef}
             className="calendar-quickadd-input"
-            placeholder='Quick add: "Staff sync Thu 7pm #operations @Ballroom A weekly" (press n to focus, Enter to add)'
+            placeholder='Quick add: "Dentist Thu 2pm @Downtown" or "Weekly review Fri 10am weekly" (press n to focus)'
             value={quickText}
             disabled={quickBusy}
             onChange={(event) => setQuickText(event.target.value)}
@@ -374,9 +374,6 @@ export function CalendarView({ app }: { app: MailApp }) {
                           {ev.recurrence !== "none" && (
                             <Repeat style={{ width: 10, height: 10, opacity: 0.8 }} />
                           )}
-                          {ev.discordUrl && (
-                            <MessageSquare style={{ width: 10, height: 10, opacity: 0.85 }} />
-                          )}
                         </div>
                         <div className="cal-event-title">{ev.title}</div>
                         {(ev.location || ev.department) && (
@@ -423,17 +420,100 @@ export function CalendarView({ app }: { app: MailApp }) {
         </div>
       </div>
 
-      <MeetingDocPanel
-        app={app}
-        selectedOverlay={selectedOverlay}
-        onClearSelection={() => {
-          setSelectedOverlay(null);
-          void app.selectCalendarEvent(null);
-        }}
-        onEditEvent={(ev) => setEditorEvent(ev)}
-        onOpenOverlays={() => setOverlaysOpen(true)}
-        onAfterMutate={() => void app.loadCalendarRange(range.start.getTime(), range.end.getTime())}
-      />
+      <aside className="meeting-doc-panel">
+        {selectedOverlay ? (
+          <div className="meeting-doc-body">
+            <div className="meeting-doc-head">
+              {app.layout === "classic" && (
+                <button
+                  type="button"
+                  className="t-btn"
+                  onClick={() => setSelectedOverlay(null)}
+                >
+                  <ChevronLeft />
+                  Calendar
+                </button>
+              )}
+              <div style={{ flex: 1 }}>
+                <h3>{selectedOverlay.summary}</h3>
+                <span className="hint-text">
+                  {selectedOverlay.overlayName} ·{" "}
+                  {selectedOverlay.allDay
+                    ? "All day"
+                    : `${formatTimeShort(selectedOverlay.startAt)} – ${formatTimeShort(selectedOverlay.endAt)}`}
+                </span>
+              </div>
+            </div>
+            <p className="hint-text">Read-only local .ics overlay block.</p>
+          </div>
+        ) : app.selectedCalendarEvent ? (
+          <div className="meeting-doc-body">
+            <div className="meeting-doc-head">
+              {app.layout === "classic" && (
+                <button
+                  type="button"
+                  className="t-btn"
+                  onClick={() => void app.selectCalendarEvent(null)}
+                >
+                  <ChevronLeft />
+                  Calendar
+                </button>
+              )}
+              <div style={{ flex: 1 }}>
+                <h3>{app.selectedCalendarEvent.title}</h3>
+                <span className="hint-text">
+                  {app.selectedCalendarEvent.allDay
+                    ? "All day"
+                    : `${formatTimeShort(app.selectedCalendarEvent.startAt)} – ${formatTimeShort(app.selectedCalendarEvent.endAt)}`}
+                  {app.selectedCalendarEvent.location
+                    ? ` · ${app.selectedCalendarEvent.location}`
+                    : ""}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="icon-btn"
+                title="Edit event"
+                onClick={() => setEditorEvent(app.selectedCalendarEvent)}
+              >
+                <Pencil />
+              </button>
+              <button
+                type="button"
+                className="icon-btn"
+                title="Delete event"
+                onClick={() => {
+                  const id = app.selectedCalendarEvent?.id;
+                  if (!id) return;
+                  void app.removeCalendarEvent(id).then(() => {
+                    void app.loadCalendarRange(range.start.getTime(), range.end.getTime());
+                  });
+                }}
+              >
+                <Trash2 />
+              </button>
+            </div>
+            {app.selectedCalendarEvent.description && (
+              <p style={{ whiteSpace: "pre-wrap", fontSize: 13 }}>
+                {app.selectedCalendarEvent.description}
+              </p>
+            )}
+            {app.selectedCalendarEvent.attendees.length > 0 && (
+              <div className="hint-text">
+                Attendees: {app.selectedCalendarEvent.attendees.join(", ")}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="meeting-doc-empty">
+            <CalendarDays style={{ width: 24, height: 24, opacity: 0.4 }} />
+            <strong>Select an event</strong>
+            <span className="hint-text">
+              Click any event or overlay block to inspect details, or use quick-add above.
+            </span>
+          </div>
+        )}
+      </aside>
 
       {editorEvent !== undefined && (
         <EventEditorModal

@@ -1,7 +1,4 @@
 import { AddAccountModal } from "./features/accounts/AddAccountModal";
-import { ActionItemModal } from "./features/actions/ActionItemModal";
-import { ActionItemsView } from "./features/actions/ActionItemsView";
-import { WorkbookImportModal } from "./features/actions/WorkbookImportModal";
 import { CalendarView } from "./features/calendar/CalendarView";
 import { CommandBar } from "./features/command-bar/CommandBar";
 import { ComposeModal } from "./features/compose/ComposeModal";
@@ -12,13 +9,6 @@ import { SettingsModal } from "./features/settings/SettingsModal";
 import { MailboxSidebar } from "./features/sidebar/MailboxSidebar";
 import { SpaceSwitcher } from "./features/spaces/SpaceSwitcher";
 import { useMailApp } from "./features/shell/useMailApp";
-import { ContactsModal } from "./features/staff/ContactsModal";
-import { PinnedLinksModal } from "./features/staff/PinnedLinksModal";
-import {
-  SharedThreadReadingPane,
-  SharedThreadsList,
-} from "./features/staff/SharedThreadsList";
-import { ShareThreadModal } from "./features/staff/ShareThreadModal";
 import { ThreadList } from "./features/threads/ThreadList";
 import { Topbar } from "./features/topbar/Topbar";
 import { TemplatesModal } from "./features/templates/TemplatesModal";
@@ -64,15 +54,8 @@ export function App() {
       <SpaceSwitcher app={app} />
       <div className="workspace">
         <MailboxSidebar app={app} />
-        {app.activeSection === "actions" ? (
-          <ActionItemsView app={app} />
-        ) : app.activeSection === "calendar" ? (
+        {app.activeSection === "calendar" ? (
           <CalendarView app={app} />
-        ) : app.activeSection === "shared" ? (
-          <>
-            <SharedThreadsList app={app} />
-            <SharedThreadReadingPane app={app} />
-          </>
         ) : app.accounts.length === 0 ? (
           <EmptyWorkspace app={app} />
         ) : (
@@ -90,24 +73,6 @@ export function App() {
       {app.addAccountOpen && <AddAccountModal app={app} />}
       {app.templatesOpen && <TemplatesModal app={app} />}
       {app.settingsOpen && <SettingsModal app={app} />}
-      {app.shareModalOpen && <ShareThreadModal app={app} />}
-      {app.contactsOpen && <ContactsModal app={app} />}
-      {app.pinnedLinksOpen && <PinnedLinksModal app={app} />}
-      {app.actionItemModalSeed !== null && (
-        <ActionItemModal
-          app={app}
-          initial={null}
-          seed={app.actionItemModalSeed}
-          onClose={app.closeNewActionItemModal}
-        />
-      )}
-      {app.workbookImportOpen && (
-        <WorkbookImportModal
-          app={app}
-          initialTarget={app.workbookImportTarget}
-          onClose={app.closeWorkbookImport}
-        />
-      )}
       <SchedulePopover app={app} />
       <UndoToast app={app} />
     </div>

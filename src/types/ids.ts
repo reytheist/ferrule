@@ -1,20 +1,13 @@
 import type {
   AccountId,
-  ActionItemId,
   AttachmentId,
   CalendarEventId,
-  CommentId,
-  ContactId,
   DraftId,
   IcsOverlayId,
   IdentityId,
   JobId,
   LabelId,
   MessageId,
-  PinnedLinkId,
-  SharedTemplateId,
-  SharedThreadId,
-  StaffMemberId,
   TemplateId,
   ThreadId,
 } from "./mail";
@@ -39,14 +32,7 @@ const isDraftId = (v: string): v is DraftId => v.startsWith("drf_");
 const isJobId = (v: string): v is JobId => v.startsWith("job_");
 const isTemplateId = (v: string): v is TemplateId => v.startsWith("tpl_");
 const isLabelId = (v: string): v is LabelId => v.startsWith("lbl_");
-const isStaffMemberId = (v: string): v is StaffMemberId => v.startsWith("stf_");
-const isSharedThreadId = (v: string): v is SharedThreadId => v.startsWith("sht_");
-const isCommentId = (v: string): v is CommentId => v.startsWith("cmt_");
-const isSharedTemplateId = (v: string): v is SharedTemplateId => v.startsWith("stp_");
-const isContactId = (v: string): v is ContactId => v.startsWith("cnt_");
-const isPinnedLinkId = (v: string): v is PinnedLinkId => v.startsWith("lnk_");
 const isCalendarEventId = (v: string): v is CalendarEventId => v.startsWith("cev_");
-const isActionItemId = (v: string): v is ActionItemId => v.startsWith("act_");
 const isIcsOverlayId = (v: string): v is IcsOverlayId => v.startsWith("ics_");
 
 export const newAccountId = (): AccountId => makeId("acc", isAccountId);
@@ -58,12 +44,5 @@ export const newDraftId = (): DraftId => makeId("drf", isDraftId);
 export const newJobId = (): JobId => makeId("job", isJobId);
 export const newTemplateId = (): TemplateId => makeId("tpl", isTemplateId);
 export const newLabelId = (): LabelId => makeId("lbl", isLabelId);
-export const newStaffMemberId = (): StaffMemberId => makeId("stf", isStaffMemberId);
-export const newSharedThreadId = (): SharedThreadId => makeId("sht", isSharedThreadId);
-export const newCommentId = (): CommentId => makeId("cmt", isCommentId);
-export const newSharedTemplateId = (): SharedTemplateId => makeId("stp", isSharedTemplateId);
-export const newContactId = (): ContactId => makeId("cnt", isContactId);
-export const newPinnedLinkId = (): PinnedLinkId => makeId("lnk", isPinnedLinkId);
 export const newCalendarEventId = (): CalendarEventId => makeId("cev", isCalendarEventId);
-export const newActionItemId = (): ActionItemId => makeId("act", isActionItemId);
 export const newIcsOverlayId = (): IcsOverlayId => makeId("ics", isIcsOverlayId);

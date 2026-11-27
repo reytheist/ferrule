@@ -85,8 +85,6 @@ pub enum CredentialKind {
     Password,
     OAuthRefreshToken,
     OAuthClientSecret,
-    StaffSyncToken,
-    DiscordWebhookUrl,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -211,35 +209,11 @@ pub struct SecretKey {
 }
 
 impl SecretKey {
-    pub fn staff_sync_token() -> Self {
-        let workspace_id = AccountId::derive(
-            uuid::Uuid::NAMESPACE_URL,
-            b"ferrule:staff-sync:workspace-token",
-        );
-        Self {
-            account_id: workspace_id,
-            kind: CredentialKind::StaffSyncToken,
-        }
-    }
-
-    pub fn discord_webhook_url() -> Self {
-        let workspace_id = AccountId::derive(
-            uuid::Uuid::NAMESPACE_URL,
-            b"ferrule:staff-sync:discord-webhook",
-        );
-        Self {
-            account_id: workspace_id,
-            kind: CredentialKind::DiscordWebhookUrl,
-        }
-    }
-
     pub fn storage_id(&self) -> String {
         let suffix = match self.kind {
             CredentialKind::Password => "password",
             CredentialKind::OAuthRefreshToken => "oauth-refresh",
             CredentialKind::OAuthClientSecret => "oauth-client-secret",
-            CredentialKind::StaffSyncToken => "staff-sync-token",
-            CredentialKind::DiscordWebhookUrl => "discord-webhook-url",
         };
         format!("ferrule:v1:{}:{suffix}", self.account_id)
     }

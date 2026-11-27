@@ -1,6 +1,6 @@
 # Ferrule
 
-MIT-licensed low-memory Windows + Linux desktop email client (Tauri v2 + Rust `crates/mail-core` + SQLite/FTS5 + OS keychain + Mosaic React/TS UI).
+MIT-licensed low-memory personal Windows + Linux desktop email and calendar client (Tauri v2 + Rust `crates/mail-core` + SQLite/FTS5 + OS keychain + Mosaic React/TS UI), designed for power-user email workflows and integration with a Hermes-like personal AI agent system.
 
 ship-target: commit locally on master (push to origin when approved)
 
@@ -12,13 +12,14 @@ ship-target: commit locally on master (push to origin when approved)
   - `pnpm typecheck`
   - `pnpm lint` (zero warnings)
   - `pnpm build`
-- Local release builds: `pnpm build:server` (`staff-sync-server`) and `pnpm tauri build` (desktop installer)
+- Local desktop build: `pnpm tauri build` (or `pnpm tauri dev` for development)
 
 ## Invariants
 
-- Never store passwords, refresh tokens, or OAuth client secrets in SQLite or `localStorage`; all secrets go strictly through `SecretStore` (OS keychain).
+- Never store passwords, refresh tokens, API keys, webhook secrets, or OAuth client secrets in SQLite or `localStorage`; all secrets go strictly through `SecretStore` (OS keychain).
 - Keep `keyring = "3"` native features (`windows-native`, `sync-secret-service`, `crypto-rust`, `apple-native`).
 - Keep Vite ignores for `**/target/**`, `**/src-tauri/**`, `**/crates/**` in `vite.config.ts` to prevent Windows `EBUSY` errors during `pnpm tauri dev`.
+- Keep all IMAP/SMTP provider presets (iCloud, Yahoo, Fastmail, Zoho, GMX, IONOS, custom) in `src/features/accounts/imapPresets.ts`.
 
 ## Agent skills
 

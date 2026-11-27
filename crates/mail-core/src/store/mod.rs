@@ -5,7 +5,6 @@ mod calendar;
 mod demo;
 mod drafts;
 mod jobs;
-mod staff;
 mod templates;
 mod threads;
 
@@ -14,7 +13,6 @@ pub(crate) use calendar::*;
 pub(crate) use demo::*;
 pub(crate) use drafts::*;
 pub(crate) use jobs::*;
-pub(crate) use staff::*;
 pub(crate) use templates::*;
 pub(crate) use threads::*;
 
@@ -28,16 +26,25 @@ use serde::Serialize;
 use crate::error::CoreError;
 
 const MIGRATION_0001: &str = include_str!("0001_init.sql");
-/// Adds `space_kind` to existing `account` tables so Pigment Staff spaces are distinguished
-/// from personal spaces (which have Staff Sharing disabled by default).
-const MIGRATION_0003_ACCOUNT_SPACE_KIND: &str =
-    "ALTER TABLE account ADD COLUMN space_kind TEXT NOT NULL DEFAULT 'personal' CHECK (space_kind IN ('personal', 'pigment_staff'));";
-const MIGRATION_0004_STAFF_COLLAB: &str = include_str!("0002_staff_collab.sql");
-const MIGRATION_0005_CALENDAR_MEETINGS: &str = include_str!("0003_calendar_meetings.sql");
-const MIGRATION_0007_STAFF_OUTBOX: &str = include_str!("0004_staff_outbox.sql");
+const MIGRATION_0005_CALENDAR: &str = include_str!("0003_calendar_meetings.sql");
 /// Adds `spam` flag to `thread` for Report Spam / Spam mailbox view.
 const MIGRATION_0008_THREAD_SPAM: &str =
     "ALTER TABLE thread ADD COLUMN spam INTEGER NOT NULL DEFAULT 0 CHECK (spam IN (0, 1));";
+/// Forward-compatible cleanup dropping legacy team collaboration tables while
+/// preserving accounts, synced mail, templates, and personal calendar events.
+const MIGRATION_0009_DROP_STAFF: &str = "
+DROP TABLE IF EXISTS staff_outbox;
+DROP TABLE IF EXISTS shared_comment;
+DROP TABLE IF EXISTS shared_draft;
+DROP TABLE IF EXISTS shared_thread;
+DROP TABLE IF EXISTS shared_template;
+DROP TABLE IF EXISTS show_contact;
+DROP TABLE IF EXISTS pinned_link;
+DROP TABLE IF EXISTS staff_member;
+DROP TABLE IF EXISTS staff_workspace;
+DROP TABLE IF EXISTS meeting_doc;
+DROP TABLE IF EXISTS action_item;
+";
 
 pub(crate) struct Store {
     conn: Mutex<Connection>,
@@ -91,51 +98,9 @@ impl Store {
                 reason: format!("commit migration 0002 tx: {e}"),
             })?;
         }
-        if !column_exists(&conn, "account", "space_kind")? {
-            conn.execute_batch(MIGRATION_0003_ACCOUNT_SPACE_KIND)
-                .map_err(|e| CoreError::Storage {
-                    reason: format!("run migration 0003: {e}"),
-                })?;
-        }
-        conn.execute_batch(MIGRATION_0004_STAFF_COLLAB)
-            .map_err(|e| CoreError::Storage {
-                reason: format!("run migration 0004: {e}"),
-            })?;
-        conn.execute_batch(MIGRATION_0005_CALENDAR_MEETINGS)
+        conn.execute_batch(MIGRATION_0005_CALENDAR)
             .map_err(|e| CoreError::Storage {
                 reason: format!("run migration 0005: {e}"),
-            })?;
-        {
-            let tx = conn.transaction().map_err(|e| CoreError::Storage {
-                reason: format!("begin migration 0006 tx: {e}"),
-            })?;
-            if !column_exists(&tx, "action_item", "start_time")? {
-                tx.execute_batch("ALTER TABLE action_item ADD COLUMN start_time TEXT;")
-                    .map_err(|e| CoreError::Storage {
-                        reason: format!("run migration 0006 (start_time): {e}"),
-                    })?;
-            }
-            if !column_exists(&tx, "action_item", "end_time")? {
-                tx.execute_batch("ALTER TABLE action_item ADD COLUMN end_time TEXT;")
-                    .map_err(|e| CoreError::Storage {
-                        reason: format!("run migration 0006 (end_time): {e}"),
-                    })?;
-            }
-            if !column_exists(&tx, "action_item", "calendar_event_id")? {
-                tx.execute_batch(
-                    "ALTER TABLE action_item ADD COLUMN calendar_event_id BLOB REFERENCES calendar_event(id) ON DELETE SET NULL;",
-                )
-                .map_err(|e| CoreError::Storage {
-                    reason: format!("run migration 0006 (calendar_event_id): {e}"),
-                })?;
-            }
-            tx.commit().map_err(|e| CoreError::Storage {
-                reason: format!("commit migration 0006 tx: {e}"),
-            })?;
-        }
-        conn.execute_batch(MIGRATION_0007_STAFF_OUTBOX)
-            .map_err(|e| CoreError::Storage {
-                reason: format!("run migration 0007: {e}"),
             })?;
         if !column_exists(&conn, "thread", "spam")? {
             conn.execute_batch(MIGRATION_0008_THREAD_SPAM)
@@ -143,6 +108,10 @@ impl Store {
                     reason: format!("run migration 0008: {e}"),
                 })?;
         }
+        conn.execute_batch(MIGRATION_0009_DROP_STAFF)
+            .map_err(|e| CoreError::Storage {
+                reason: format!("run migration 0009: {e}"),
+            })?;
         purge_legacy_demo_data(&mut conn)?;
         Ok(Self {
             conn: Mutex::new(conn),

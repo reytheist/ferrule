@@ -2,133 +2,73 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   actOnThreads,
   addAccount as addAccountCommand,
-  addInviteToPigmentCalendar as addInviteToPigmentCalendarCommand,
-  addSharedComment as addSharedCommentCommand,
+  addInviteToCalendar as addInviteToCalendarCommand,
   cancelSend,
-  connectStaffWorkspace as connectStaffWorkspaceCommand,
   createDraft,
-  deleteActionItem as deleteActionItemCommand,
   deleteCalendarEvent as deleteCalendarEventCommand,
   deleteIcsOverlay as deleteIcsOverlayCommand,
-  deletePinnedLink as deletePinnedLinkCommand,
-  deleteSharedTemplate as deleteSharedTemplateCommand,
-  deleteShowContact as deleteShowContactCommand,
   deleteTemplate,
-  disconnectStaffWorkspace as disconnectStaffWorkspaceCommand,
   dismissFollowUp,
-  exportActionItemsCsv,
-  exportShowContactsCsv,
-  findSharedThreadForLocal,
-  formatMeetingRecap as formatMeetingRecapCommand,
-  getDiscordWebhookStatus,
-  getMeetingDoc as getMeetingDocCommand,
   getSettings,
-  getStaffWorkspace,
-  importOperationsWorkbook as importOperationsWorkbookCommand,
   isTauriRuntime,
   listAccounts,
-  listActionItems,
   listCalendarEvents,
   listIcsOverlays,
   listJobs,
   listOverlayBusyBlocks,
-  listPinnedLinks,
-  listSharedTemplates,
-  listSharedThreads,
-  listShowContacts,
-  listStaffDirectory,
   listTemplates,
   listThreads,
   mailboxCounts,
   oauthSignInAccount as oauthSignInAccountCommand,
   onMailEvent,
-  openExternalUrl,
-  openSharedThread as openSharedThreadCommand,
   openThread as openThreadCommand,
-  postMeetingRecapToDiscord as postMeetingRecapToDiscordCommand,
-  promoteToActionItem as promoteToActionItemCommand,
   quickAddCalendarEvent as quickAddCalendarEventCommand,
   reauthOAuthAccount as reauthOAuthAccountCommand,
   refreshIcsOverlay as refreshIcsOverlayCommand,
   removeAccount as removeAccountCommand,
   rsvpCalendarInvite as rsvpCalendarInviteCommand,
-  saveActionItem as saveActionItemCommand,
   saveCalendarEvent as saveCalendarEventCommand,
   saveIcsOverlay as saveIcsOverlayCommand,
-  savePinnedLink as savePinnedLinkCommand,
-  saveSharedTemplate as saveSharedTemplateCommand,
-  saveShowContact as saveShowContactCommand,
   saveTemplate as saveTemplateCommand,
   savedOAuthClients as savedOAuthClientsCommand,
   sendDraft,
-  setDiscordWebhook as setDiscordWebhookCommand,
   setFollowUp,
-  shareThread as shareThreadCommand,
   signalAppReady,
   snoozeThread as snoozeThreadCommand,
   syncAccount,
-  syncStaffWorkspace as syncStaffWorkspaceCommand,
   tickScheduler,
-  toggleActionItem as toggleActionItemCommand,
   unsnoozeThread,
   updateAccount as updateAccountCommand,
-  updateMeetingDoc as updateMeetingDocCommand,
   updateSettings as updateSettingsCommand,
-  updateSharedDraft as updateSharedDraftCommand,
-  updateSharedHandoff as updateSharedHandoffCommand,
 } from "../../ipc/core";
 import type {
   AccountId,
   AccountView,
-  ActionItemId,
-  ActionItemStatus,
-  ActionItemView,
   AddInviteToCalendarInput,
-  AddSharedCommentInput,
   AppSettings,
   CalendarEventId,
   CalendarEventView,
   CalendarOccurrence,
-  ConnectStaffWorkspaceInput,
-  ContactId,
   CreateDraftInput,
   IcsOverlayId,
   IcsOverlayView,
-  ImportWorkbookInput,
   InboxCategory,
   JobId,
   JobView,
   MailboxCounts,
   MailboxView,
-  MeetingDocView,
   MessageId,
   NewAccountInput,
   OAuthSignInInput,
   OverlayBusyBlock,
-  PinnedLinkId,
-  PinnedLinkView,
-  PromoteActionItemInput,
   RemoteContent,
   RsvpInviteInput,
-  SaveActionItemInput,
   SaveCalendarEventInput,
   SaveIcsOverlayInput,
-  SavePinnedLinkInput,
-  SaveSharedTemplateInput,
-  SaveShowContactInput,
   SaveTemplateInput,
   SavedOAuthClients,
   Scope,
   SendMode,
-  ShareThreadInput,
-  SharedTemplateId,
-  SharedTemplateView,
-  SharedThreadId,
-  SharedThreadSummary,
-  SharedThreadView,
-  ShowContactView,
-  StaffMemberView,
-  StaffWorkspaceView,
   TemplateId,
   TemplateView,
   ThreadId,
@@ -136,14 +76,7 @@ import type {
   ThreadView,
   UnixMs,
   UpdateAccountInput,
-  UpdateHandoffInput,
-  UpdateMeetingDocInput,
-  UpdateSharedDraftInput,
-  WorkbookImportReport,
-  WorkbookImportTarget,
 } from "../../types/mail";
-import type { ActionItemDraftSeed } from "../actions/ActionItemModal";
-import { useAppUpdater, type AppUpdater } from "../updates/useAppUpdater";
 import { formatDue } from "../ui/format";
 
 export type Theme = "dark" | "light";
@@ -151,23 +84,7 @@ export type Layout = "split" | "classic";
 export type TextSize = "small" | "medium" | "large";
 export type Stage = "list" | "thread";
 export type PopoverMode = "snooze" | "followUp" | "sendLater";
-export type ActiveSection = "mail" | "shared" | "calendar" | "actions";
-export type SharedListTab = "all" | "drafts";
-export type SharedPaneTab = "thread" | "draft";
-
-const EMPTY_STAFF_WORKSPACE: StaffWorkspaceView = {
-  connected: false,
-  serverUrl: "",
-  staffName: "",
-  staffHandle: "",
-  staffEmail: "",
-  staffRole: "",
-  connectedAt: null,
-  lastSyncAt: null,
-  status: "disconnected",
-  lastError: null,
-  pendingOutboxCount: 0,
-};
+export type ActiveSection = "mail" | "calendar";
 
 export interface Anchor {
   x: number;
@@ -292,38 +209,18 @@ export interface MailApp {
   onboardingOpen: boolean;
   tourOpen: boolean;
   tourStep: number;
-  shareModalOpen: boolean;
-  contactsOpen: boolean;
-  pinnedLinksOpen: boolean;
   popover: PopoverState | null;
   replyText: string;
   replyNonce: number;
   expanded: ReadonlySet<MessageId>;
   remoteContent: RemoteContent;
   syncing: boolean;
-  updater: AppUpdater;
   composeInsert: { nonce: number; body: string } | null;
   activeSection: ActiveSection;
-  staffWorkspace: StaffWorkspaceView;
-  staffDirectory: StaffMemberView[];
-  sharedThreads: SharedThreadSummary[];
-  sharedTemplates: SharedTemplateView[];
-  showContacts: ShowContactView[];
-  pinnedLinks: PinnedLinkView[];
-  selectedSharedId: SharedThreadId | null;
-  activeSharedThread: SharedThreadView | null;
-  sharedListTab: SharedListTab;
-  sharedPaneTab: SharedPaneTab;
   calendarOccurrences: CalendarOccurrence[];
   icsOverlays: IcsOverlayView[];
   overlayBusyBlocks: OverlayBusyBlock[];
   selectedCalendarEvent: CalendarEventView | null;
-  activeMeetingDoc: MeetingDocView | null;
-  discordWebhookConfigured: boolean;
-  actionItems: ActionItemView[];
-  actionItemModalSeed: ActionItemDraftSeed | null;
-  workbookImportOpen: boolean;
-  workbookImportTarget: WorkbookImportTarget;
 
   toggleTheme(): void;
   setTheme(next: Theme): void;
@@ -386,60 +283,18 @@ export interface MailApp {
   updateAccount(input: UpdateAccountInput): Promise<AccountView>;
   reauthAccount(id: AccountId): Promise<void>;
   removeAccount(id: AccountId): Promise<void>;
-  openSharedSection(): void;
-  openSharedThread(id: SharedThreadId, initialTab?: SharedPaneTab): Promise<void>;
-  setSharedListTab(tab: SharedListTab): void;
-  setSharedPaneTab(tab: SharedPaneTab): void;
-  openShareModal(): void;
-  closeShareModal(): void;
-  openContacts(): void;
-  closeContacts(): void;
-  openPinnedLinks(): void;
-  closePinnedLinks(): void;
-  connectStaffWorkspace(input: ConnectStaffWorkspaceInput): Promise<StaffWorkspaceView>;
-  disconnectStaffWorkspace(): Promise<void>;
-  syncStaffWorkspace(): Promise<void>;
-  shareThread(input: ShareThreadInput): Promise<SharedThreadView>;
-  updateHandoff(input: UpdateHandoffInput): Promise<void>;
-  postSharedComment(input: AddSharedCommentInput): Promise<void>;
-  mutateSharedDraft(input: UpdateSharedDraftInput): Promise<void>;
-  loadApprovedDraftToReply(bodyText: string): void;
   insertTextSnippet(bodyText: string): void;
-  persistSharedTemplate(input: SaveSharedTemplateInput): Promise<void>;
-  removeSharedTemplate(id: SharedTemplateId): Promise<void>;
-  persistShowContact(input: SaveShowContactInput): Promise<void>;
-  removeShowContact(id: ContactId): Promise<void>;
-  persistPinnedLink(input: SavePinnedLinkInput): Promise<void>;
-  removePinnedLink(id: PinnedLinkId): Promise<void>;
-  launchPinnedLink(url: string): Promise<void>;
   openCalendarSection(): void;
   loadCalendarRange(rangeStart: UnixMs, rangeEnd: UnixMs): Promise<void>;
   selectCalendarEvent(event: CalendarEventView | null): Promise<void>;
   persistCalendarEvent(input: SaveCalendarEventInput): Promise<CalendarEventView>;
   quickAddEvent(text: string): Promise<CalendarEventView>;
   removeCalendarEvent(id: CalendarEventId): Promise<void>;
-  mutateMeetingDoc(input: UpdateMeetingDocInput): Promise<void>;
-  promoteAgendaToAction(input: PromoteActionItemInput): Promise<void>;
-  setActionItemStatus(id: ActionItemId, status: ActionItemStatus): Promise<void>;
   rsvpInvite(input: RsvpInviteInput): Promise<void>;
   addInviteToCalendar(input: AddInviteToCalendarInput): Promise<void>;
   persistIcsOverlay(input: SaveIcsOverlayInput): Promise<IcsOverlayView>;
   removeIcsOverlay(id: IcsOverlayId): Promise<void>;
   syncIcsOverlay(id: IcsOverlayId): Promise<void>;
-  saveDiscordWebhook(url: string | null): Promise<void>;
-  copyDiscordRecap(eventId: CalendarEventId): Promise<void>;
-  postDiscordRecap(eventId: CalendarEventId): Promise<void>;
-  openActionsSection(): void;
-  openNewActionItemModal(seed?: ActionItemDraftSeed): void;
-  closeNewActionItemModal(): void;
-  openWorkbookImport(target?: WorkbookImportTarget): void;
-  closeWorkbookImport(): void;
-  persistActionItem(input: SaveActionItemInput): Promise<ActionItemView>;
-  removeActionItem(id: ActionItemId): Promise<void>;
-  jumpToCalendarEvent(eventId: CalendarEventId): Promise<void>;
-  importWorkbook(input: ImportWorkbookInput): Promise<WorkbookImportReport>;
-  downloadActionItemsCsv(): Promise<void>;
-  downloadShowContactsCsv(): Promise<void>;
 }
 
 export function useMailApp(): MailApp {
@@ -485,9 +340,6 @@ export function useMailApp(): MailApp {
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
   const [tourStep, setTourStep] = useState(0);
-  const [shareModalOpen, setShareModalOpen] = useState(false);
-  const [contactsOpen, setContactsOpen] = useState(false);
-  const [pinnedLinksOpen, setPinnedLinksOpen] = useState(false);
   const [popover, setPopover] = useState<PopoverState | null>(null);
   const [replyText, setReplyText] = useState("");
   const [replyNonce, setReplyNonce] = useState(0);
@@ -495,28 +347,12 @@ export function useMailApp(): MailApp {
   const [syncing, setSyncing] = useState(false);
   const [composeInsert, setComposeInsert] = useState<{ nonce: number; body: string } | null>(null);
   const [activeSection, setActiveSection] = useState<ActiveSection>("mail");
-  const [staffWorkspace, setStaffWorkspace] = useState<StaffWorkspaceView>(EMPTY_STAFF_WORKSPACE);
-  const [staffDirectory, setStaffDirectory] = useState<StaffMemberView[]>([]);
-  const [sharedThreads, setSharedThreads] = useState<SharedThreadSummary[]>([]);
-  const [sharedTemplates, setSharedTemplates] = useState<SharedTemplateView[]>([]);
-  const [showContacts, setShowContacts] = useState<ShowContactView[]>([]);
-  const [pinnedLinks, setPinnedLinks] = useState<PinnedLinkView[]>([]);
-  const [selectedSharedId, setSelectedSharedId] = useState<SharedThreadId | null>(null);
-  const [activeSharedThread, setActiveSharedThread] = useState<SharedThreadView | null>(null);
-  const [sharedListTab, setSharedListTab] = useState<SharedListTab>("all");
-  const [sharedPaneTab, setSharedPaneTab] = useState<SharedPaneTab>("thread");
   const [calendarOccurrences, setCalendarOccurrences] = useState<CalendarOccurrence[]>([]);
   const [icsOverlays, setIcsOverlays] = useState<IcsOverlayView[]>([]);
   const [overlayBusyBlocks, setOverlayBusyBlocks] = useState<OverlayBusyBlock[]>([]);
   const [selectedCalendarEvent, setSelectedCalendarEvent] = useState<CalendarEventView | null>(
     null,
   );
-  const [activeMeetingDoc, setActiveMeetingDoc] = useState<MeetingDocView | null>(null);
-  const [discordWebhookConfigured, setDiscordWebhookConfigured] = useState(false);
-  const [actionItems, setActionItems] = useState<ActionItemView[]>([]);
-  const [actionItemModalSeed, setActionItemModalSeed] = useState<ActionItemDraftSeed | null>(null);
-  const [workbookImportOpen, setWorkbookImportOpen] = useState(false);
-  const [workbookImportTarget, setWorkbookImportTarget] = useState<WorkbookImportTarget>("auto");
 
   const toastSeq = useRef(0);
   const insertSeq = useRef(0);
@@ -526,9 +362,6 @@ export function useMailApp(): MailApp {
   const threadRef = useRef<ThreadView | null>(thread);
   const keyHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
   const accountsRef = useRef<AccountView[]>(accounts);
-  const staffWorkspaceRef = useRef<StaffWorkspaceView>(staffWorkspace);
-  const activeSharedRef = useRef<SharedThreadView | null>(activeSharedThread);
-  const selectedCalEventRef = useRef<CalendarEventView | null>(selectedCalendarEvent);
   const syncInFlightRef = useRef(false);
   const lastAutoSyncAtRef = useRef(0);
 
@@ -548,7 +381,6 @@ export function useMailApp(): MailApp {
   }, []);
 
   const dismissToast = useCallback(() => setToast(null), []);
-  const updater = useAppUpdater(showToast);
 
   const reload = useCallback(async (targetScope: Scope, targetView: MailboxView) => {
     const [nextCounts, page] = await Promise.all([
@@ -559,34 +391,17 @@ export function useMailApp(): MailApp {
     setThreads(page.items);
   }, []);
 
-  const reloadStaff = useCallback(async () => {
+  const reloadCalendarMeta = useCallback(async () => {
     const nowMs = Date.now();
-    const [ws, dir, shared, sharedTpls, contacts, links, overlays, webhook, upcoming, actions] =
-      await Promise.all([
-        getStaffWorkspace(),
-        listStaffDirectory(),
-        listSharedThreads(),
-        listSharedTemplates(),
-        listShowContacts(),
-        listPinnedLinks(),
-        listIcsOverlays(),
-        getDiscordWebhookStatus(),
-        listCalendarEvents({
-          rangeStart: nowMs - 7 * 86_400_000,
-          rangeEnd: nowMs + 30 * 86_400_000,
-        }),
-        listActionItems(),
-      ]);
-    setStaffWorkspace(ws);
-    setStaffDirectory(dir);
-    setSharedThreads(shared);
-    setSharedTemplates(sharedTpls);
-    setShowContacts(contacts);
-    setPinnedLinks(links);
+    const [overlays, upcoming] = await Promise.all([
+      listIcsOverlays(),
+      listCalendarEvents({
+        rangeStart: nowMs - 7 * 86_400_000,
+        rangeEnd: nowMs + 30 * 86_400_000,
+      }),
+    ]);
     setIcsOverlays(overlays);
-    setDiscordWebhookConfigured(webhook.configured);
     setCalendarOccurrences(upcoming);
-    setActionItems(actions);
   }, []);
 
   const reloadMeta = useCallback(async () => {
@@ -603,9 +418,9 @@ export function useMailApp(): MailApp {
     setSavedOAuthClients(nextClients);
     setSettings(nextSettings);
     jobsSignature.current = nextJobs.map((j) => `${j.id}:${j.state}`).join("|");
-    await reloadStaff();
+    await reloadCalendarMeta();
     return { accounts: nextAccounts, settings: nextSettings };
-  }, [reloadStaff]);
+  }, [reloadCalendarMeta]);
 
   // Theme & layout persistence + accent wiring.
   useEffect(() => {
@@ -649,9 +464,6 @@ export function useMailApp(): MailApp {
     replyTextRef.current = replyText;
     threadRef.current = thread;
     accountsRef.current = accounts;
-    staffWorkspaceRef.current = staffWorkspace;
-    activeSharedRef.current = activeSharedThread;
-    selectedCalEventRef.current = selectedCalendarEvent;
   });
 
   useEffect(() => {
@@ -704,11 +516,6 @@ export function useMailApp(): MailApp {
       .then((next) => {
         if (cancelled || requestTheme !== themeRef.current) return;
         setThread(next);
-        void findSharedThreadForLocal(next.id)
-          .then((shared) => {
-            if (!cancelled) setActiveSharedThread(shared);
-          })
-          .catch(() => undefined);
         void reload(scope, view).catch(() => undefined);
         void reloadMeta().catch(() => undefined);
       })
@@ -748,7 +555,7 @@ export function useMailApp(): MailApp {
     let disposed = false;
     let unlisten: (() => void) | null = null;
     let mailRefreshTimer: number | null = null;
-    let staffRefreshTimer: number | null = null;
+    let calendarRefreshTimer: number | null = null;
 
     const scheduleMailRefresh = (): void => {
       if (mailRefreshTimer !== null) return;
@@ -764,28 +571,12 @@ export function useMailApp(): MailApp {
       }, 250);
     };
 
-    const scheduleStaffRefresh = (): void => {
-      if (staffRefreshTimer !== null) return;
-      staffRefreshTimer = window.setTimeout(() => {
-        staffRefreshTimer = null;
+    const scheduleCalendarRefresh = (): void => {
+      if (calendarRefreshTimer !== null) return;
+      calendarRefreshTimer = window.setTimeout(() => {
+        calendarRefreshTimer = null;
         if (disposed) return;
-        void (async () => {
-          try {
-            await reloadStaff();
-            const openShared = activeSharedRef.current;
-            if (openShared) {
-              const refreshed = await openSharedThreadCommand(openShared.id).catch(() => null);
-              if (!disposed && refreshed) setActiveSharedThread(refreshed);
-            }
-            const openEvent = selectedCalEventRef.current;
-            if (openEvent) {
-              const refreshedDoc = await getMeetingDocCommand(openEvent.id).catch(() => null);
-              if (!disposed && refreshedDoc) setActiveMeetingDoc(refreshedDoc);
-            }
-          } catch {
-            // Transient refresh failures recover on next event.
-          }
-        })();
+        void reloadCalendarMeta().catch(() => undefined);
       }, 250);
     };
 
@@ -803,8 +594,8 @@ export function useMailApp(): MailApp {
         }
       } else if (event.kind === "mailChanged" || event.kind === "resync") {
         scheduleMailRefresh();
-      } else if (event.kind === "staffChanged" || event.kind === "calendarChanged") {
-        scheduleStaffRefresh();
+      } else if (event.kind === "calendarChanged") {
+        scheduleCalendarRefresh();
       }
     }).then((fn) => {
       if (disposed) fn();
@@ -814,10 +605,10 @@ export function useMailApp(): MailApp {
     return () => {
       disposed = true;
       if (mailRefreshTimer !== null) window.clearTimeout(mailRefreshTimer);
-      if (staffRefreshTimer !== null) window.clearTimeout(staffRefreshTimer);
+      if (calendarRefreshTimer !== null) window.clearTimeout(calendarRefreshTimer);
       unlisten?.();
     };
-  }, [scope, view, reload, reloadStaff]);
+  }, [scope, view, reload, reloadCalendarMeta]);
 
   // Silent automatic background sync on window focus/visibility restore (if stale > 60s)
   // plus periodic 2-minute sync in browser preview mode (in Tauri desktop, Rust drives
@@ -826,27 +617,16 @@ export function useMailApp(): MailApp {
     const runSilentAutoSync = async (): Promise<void> => {
       if (syncInFlightRef.current) return;
       const targets = accountsRef.current.filter((a) => a.sync.kind !== "blocked");
-      const staffConnected = staffWorkspaceRef.current.connected;
-      if (targets.length === 0 && !staffConnected) return;
+      if (targets.length === 0) return;
 
       syncInFlightRef.current = true;
       lastAutoSyncAtRef.current = Date.now();
       try {
-        if (targets.length > 0) {
-          await Promise.allSettled(targets.map((a) => syncAccount(a.id)));
-        }
-        if (staffConnected) {
-          await syncStaffWorkspaceCommand().catch(() => undefined);
-        }
+        await Promise.allSettled(targets.map((a) => syncAccount(a.id)));
         await reloadMeta();
         await reload(scope, view);
-        const openShared = activeSharedRef.current;
-        if (openShared) {
-          const refreshed = await openSharedThreadCommand(openShared.id).catch(() => null);
-          if (refreshed) setActiveSharedThread(refreshed);
-        }
       } catch {
-        // Silent background sync; errors are reflected in account/workspace sync status.
+        // Silent background sync; errors are reflected in account sync status.
       } finally {
         syncInFlightRef.current = false;
       }
@@ -876,8 +656,6 @@ export function useMailApp(): MailApp {
 
   function openThread(id: ThreadId): void {
     setActiveSection("mail");
-    setSelectedSharedId(null);
-    setActiveSharedThread(null);
     setSelectedId(id);
     setExpanded(new Set());
     setReplyText("");
@@ -891,54 +669,17 @@ export function useMailApp(): MailApp {
 
   function selectSpace(id: AccountId | null): void {
     setActiveSection("mail");
-    setSelectedSharedId(null);
-    setActiveSharedThread(null);
     setScopeAccount(id);
   }
 
   function selectView(next: MailboxView): void {
     setActiveSection("mail");
-    setSelectedSharedId(null);
-    setActiveSharedThread(null);
     setView(next);
   }
 
   function selectCategory(category: InboxCategory): void {
     setActiveSection("mail");
-    setSelectedSharedId(null);
-    setActiveSharedThread(null);
     setView({ kind: "inbox", category });
-  }
-
-  function openSharedSection(): void {
-    setActiveSection("shared");
-    setSelectedId(null);
-    setThread(null);
-    setSelectedSharedId(null);
-    setActiveSharedThread(null);
-    if (layout === "classic") setStage("list");
-    void reloadStaff().catch(() => undefined);
-  }
-
-  async function openSharedThread(id: SharedThreadId, initialTab?: SharedPaneTab): Promise<void> {
-    try {
-      setActiveSection("shared");
-      setSelectedId(null);
-      setThread(null);
-      setSelectedSharedId(id);
-      const detail = await openSharedThreadCommand(id);
-      setActiveSharedThread(detail);
-      if (initialTab) {
-        setSharedPaneTab(initialTab);
-      } else if (sharedListTab === "drafts") {
-        setSharedPaneTab("draft");
-      } else {
-        setSharedPaneTab("thread");
-      }
-      if (layout === "classic") setStage("thread");
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
   }
 
   function clearSelection(): void {
@@ -1062,16 +803,12 @@ export function useMailApp(): MailApp {
     const targets = scopeAccount
       ? accounts.filter((a) => a.id === scopeAccount)
       : accounts;
-    const syncStaff = staffWorkspace.connected;
-    if (targets.length === 0 && !syncStaff) return;
+    if (targets.length === 0) return;
     syncInFlightRef.current = true;
     lastAutoSyncAtRef.current = Date.now();
     setSyncing(true);
     try {
       const results = await Promise.allSettled(targets.map((a) => syncAccount(a.id)));
-      if (syncStaff) {
-        await syncStaffWorkspaceCommand().catch(() => undefined);
-      }
       await reloadMeta();
       await reload(scope, view);
       const succeeded = results.filter((r) => r.status === "fulfilled").length;
@@ -1084,8 +821,6 @@ export function useMailApp(): MailApp {
         showToast(`Synced ${succeeded} of ${targets.length} accounts`);
       } else if (firstRejected) {
         showToast(friendlyError(firstRejected.reason));
-      } else if (syncStaff) {
-        showToast("Staff workspace synced");
       }
     } catch (err) {
       showToast(friendlyError(err));
@@ -1328,18 +1063,6 @@ export function useMailApp(): MailApp {
       closeSettings();
       return;
     }
-    if (shareModalOpen) {
-      setShareModalOpen(false);
-      return;
-    }
-    if (contactsOpen) {
-      setContactsOpen(false);
-      return;
-    }
-    if (pinnedLinksOpen) {
-      setPinnedLinksOpen(false);
-      return;
-    }
     if (templatesOpen) closeTemplates();
   }
 
@@ -1374,12 +1097,6 @@ export function useMailApp(): MailApp {
     insertTextSnippet(template.bodyText);
   }
 
-  function loadApprovedDraftToReply(bodyText: string): void {
-    setReplyText(bodyText);
-    setReplyNonce((n) => n + 1);
-    showToast("Loaded approved draft into reply dock");
-  }
-
   function clearComposeInsert(): void {
     setComposeInsert(null);
   }
@@ -1410,7 +1127,6 @@ export function useMailApp(): MailApp {
       setScopeAccount(created.id);
       setView(nextView);
       await reloadMeta();
-      void updater.checkForUpdates({ manual: false });
       showToast(`Added ${created.displayName} — syncing…`);
       setSyncing(true);
       try {
@@ -1439,7 +1155,6 @@ export function useMailApp(): MailApp {
       setScopeAccount(created.id);
       setView(nextView);
       await reloadMeta();
-      void updater.checkForUpdates({ manual: false });
       showToast(`Connected ${created.email} — syncing…`);
       void (async () => {
         setSyncing(true);
@@ -1485,7 +1200,6 @@ export function useMailApp(): MailApp {
       await reauthOAuthAccountCommand(id);
       await reloadMeta();
       await reload(scope, view);
-      void updater.checkForUpdates({ manual: false });
       showToast("Signed in and synced");
     } catch (err) {
       await reloadMeta();
@@ -1501,183 +1215,6 @@ export function useMailApp(): MailApp {
       if (scopeAccount === id) setScopeAccount(null);
       await reloadMeta();
       await reload(scope, view);
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  // ── Phase B: Staff Sync & Collaboration actions ──────────────────────────
-
-  async function connectStaffWorkspace(
-    input: ConnectStaffWorkspaceInput,
-  ): Promise<StaffWorkspaceView> {
-    try {
-      const ws = await connectStaffWorkspaceCommand(input);
-      await reloadStaff();
-      void updater.checkForUpdates({ manual: false });
-      showToast(`Connected to Pigment Staff Sync as @${ws.staffHandle}`);
-      return ws;
-    } catch (err) {
-      const msg = friendlyError(err);
-      showToast(msg, { durationMs: 7000 });
-      throw new Error(msg);
-    }
-  }
-
-  async function disconnectStaffWorkspace(): Promise<void> {
-    try {
-      await disconnectStaffWorkspaceCommand();
-      await reloadStaff();
-      showToast("Disconnected from Staff Sync");
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function syncStaffWorkspace(): Promise<void> {
-    try {
-      const ws = await syncStaffWorkspaceCommand();
-      await reloadStaff();
-      if (activeSharedThread) {
-        const refreshed = await openSharedThreadCommand(activeSharedThread.id).catch(() => null);
-        if (refreshed) setActiveSharedThread(refreshed);
-      }
-      const offlineMsg =
-        ws.pendingOutboxCount > 0
-          ? `Staff Sync offline (${ws.pendingOutboxCount} pending), working from local cache`
-          : "Staff Sync offline, working from local cache";
-      showToast(
-        ws.status === "connected"
-          ? "Staff workspace synced"
-          : ws.lastError ?? offlineMsg,
-      );
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function shareThread(input: ShareThreadInput): Promise<SharedThreadView> {
-    try {
-      const shared = await shareThreadCommand(input);
-      setActiveSharedThread(shared);
-      await reloadStaff();
-      showToast(
-        input.visibility === "allStaff"
-          ? "Shared thread with All Staff"
-          : `Shared thread with ${shared.invitedHandles.map((h) => `@${h}`).join(", ")}`,
-      );
-      return shared;
-    } catch (err) {
-      const msg = friendlyError(err);
-      showToast(msg, { durationMs: 7000 });
-      throw new Error(msg);
-    }
-  }
-
-  async function updateHandoff(input: UpdateHandoffInput): Promise<void> {
-    try {
-      const updated = await updateSharedHandoffCommand(input);
-      setActiveSharedThread(updated);
-      await reloadStaff();
-      showToast(
-        updated.assigneeHandle
-          ? `Handed off to @${updated.assigneeHandle} (${updated.status})`
-          : `Updated status to ${updated.status}`,
-      );
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function postSharedComment(input: AddSharedCommentInput): Promise<void> {
-    try {
-      await addSharedCommentCommand(input);
-      const refreshed = await openSharedThreadCommand(input.sharedThreadId);
-      setActiveSharedThread(refreshed);
-      await reloadStaff();
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function mutateSharedDraft(input: UpdateSharedDraftInput): Promise<void> {
-    try {
-      await updateSharedDraftCommand(input);
-      const refreshed = await openSharedThreadCommand(input.sharedThreadId);
-      setActiveSharedThread(refreshed);
-      await reloadStaff();
-      if (input.action.kind === "requestReview") {
-        showToast("Review requested and teammates notified");
-      } else if (input.action.kind === "approve") {
-        showToast("Reply draft approved — ready for mailbox owner to send");
-      } else if (input.action.kind === "takeOver") {
-        showToast("You took over the reply draft lock");
-      }
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function persistSharedTemplate(input: SaveSharedTemplateInput): Promise<void> {
-    try {
-      await saveSharedTemplateCommand(input);
-      await reloadStaff();
-      showToast("Saved shared staff template");
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function removeSharedTemplate(id: SharedTemplateId): Promise<void> {
-    try {
-      await deleteSharedTemplateCommand(id);
-      await reloadStaff();
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function persistShowContact(input: SaveShowContactInput): Promise<void> {
-    try {
-      await saveShowContactCommand(input);
-      await reloadStaff();
-      showToast("Saved show contact");
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function removeShowContact(id: ContactId): Promise<void> {
-    try {
-      await deleteShowContactCommand(id);
-      await reloadStaff();
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function persistPinnedLink(input: SavePinnedLinkInput): Promise<void> {
-    try {
-      await savePinnedLinkCommand(input);
-      await reloadStaff();
-      showToast("Saved pinned staff link");
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function removePinnedLink(id: PinnedLinkId): Promise<void> {
-    try {
-      await deletePinnedLinkCommand(id);
-      await reloadStaff();
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function launchPinnedLink(url: string): Promise<void> {
-    try {
-      await openExternalUrl(url);
     } catch (err) {
       showToast(friendlyError(err));
     }
@@ -1727,9 +1264,6 @@ export function useMailApp(): MailApp {
       settingsOpen ||
       onboardingOpen ||
       tourOpen ||
-      shareModalOpen ||
-      contactsOpen ||
-      pinnedLinksOpen ||
       popover !== null ||
       activeSection === "calendar"
     ) {
@@ -1800,9 +1334,7 @@ export function useMailApp(): MailApp {
     setActiveSection("calendar");
     setSelectedId(null);
     setThread(null);
-    setSelectedSharedId(null);
-    setActiveSharedThread(null);
-    void reloadStaff().catch(() => undefined);
+    void reloadCalendarMeta().catch(() => undefined);
   }
 
   const loadCalendarRange = useCallback(async (rangeStart: UnixMs, rangeEnd: UnixMs) => {
@@ -1822,16 +1354,6 @@ export function useMailApp(): MailApp {
 
   async function selectCalendarEvent(event: CalendarEventView | null): Promise<void> {
     setSelectedCalendarEvent(event);
-    if (!event) {
-      setActiveMeetingDoc(null);
-      return;
-    }
-    try {
-      const doc = await getMeetingDocCommand(event.id);
-      setActiveMeetingDoc(doc);
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
   }
 
   async function persistCalendarEvent(input: SaveCalendarEventInput): Promise<CalendarEventView> {
@@ -1844,7 +1366,7 @@ export function useMailApp(): MailApp {
   async function quickAddEvent(text: string): Promise<CalendarEventView> {
     try {
       const created = await quickAddCalendarEventCommand(text);
-      showToast(`Added "${created.title}" to Pigment Calendar`);
+      showToast(`Added "${created.title}" to Calendar`);
       return created;
     } catch (err) {
       showToast(friendlyError(err));
@@ -1857,47 +1379,8 @@ export function useMailApp(): MailApp {
       await deleteCalendarEventCommand(id);
       if (selectedCalendarEvent?.id === id) {
         setSelectedCalendarEvent(null);
-        setActiveMeetingDoc(null);
       }
       showToast("Calendar event deleted");
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function mutateMeetingDoc(input: UpdateMeetingDocInput): Promise<void> {
-    try {
-      const updated = await updateMeetingDocCommand(input);
-      setActiveMeetingDoc(updated);
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function promoteAgendaToAction(input: PromoteActionItemInput): Promise<void> {
-    try {
-      const item = await promoteToActionItemCommand(input);
-      const [refreshed, nextItems] = await Promise.all([
-        getMeetingDocCommand(input.eventId),
-        listActionItems(),
-      ]);
-      setActiveMeetingDoc(refreshed);
-      setActionItems(nextItems);
-      showToast(`Promoted to Action Item: ${item.title}`);
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function setActionItemStatus(id: ActionItemId, status: ActionItemStatus): Promise<void> {
-    try {
-      await toggleActionItemCommand(id, status);
-      const nextItems = await listActionItems();
-      setActionItems(nextItems);
-      if (selectedCalendarEvent) {
-        const refreshed = await getMeetingDocCommand(selectedCalendarEvent.id);
-        setActiveMeetingDoc(refreshed);
-      }
     } catch (err) {
       showToast(friendlyError(err));
     }
@@ -1931,7 +1414,7 @@ export function useMailApp(): MailApp {
 
   async function addInviteToCalendar(input: AddInviteToCalendarInput): Promise<void> {
     try {
-      const ev = await addInviteToPigmentCalendarCommand(input);
+      const ev = await addInviteToCalendarCommand(input);
       setThread((prev) =>
         prev
           ? {
@@ -1949,7 +1432,7 @@ export function useMailApp(): MailApp {
             }
           : prev,
       );
-      showToast(`Added "${ev.title}" to Pigment Calendar`);
+      showToast(`Added "${ev.title}" to Calendar`);
     } catch (err) {
       showToast(friendlyError(err));
     }
@@ -1984,165 +1467,6 @@ export function useMailApp(): MailApp {
     }
   }
 
-  async function saveDiscordWebhook(url: string | null): Promise<void> {
-    const status = await setDiscordWebhookCommand(url);
-    setDiscordWebhookConfigured(status.configured);
-    showToast(
-      status.configured
-        ? "Discord webhook saved to OS keychain"
-        : "Discord webhook cleared from OS keychain",
-    );
-  }
-
-  async function copyDiscordRecap(eventId: CalendarEventId): Promise<void> {
-    try {
-      const md = await formatMeetingRecapCommand(eventId);
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(md);
-        showToast("Discord recap copied to clipboard");
-      } else {
-        showToast("Recap formatted (clipboard unavailable in this browser)");
-      }
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function postDiscordRecap(eventId: CalendarEventId): Promise<void> {
-    try {
-      await postMeetingRecapToDiscordCommand(eventId, null);
-      showToast("Meeting recap posted to Discord");
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  function openActionsSection(): void {
-    setActiveSection("actions");
-    setSelectedId(null);
-    setThread(null);
-    setSelectedSharedId(null);
-    setActiveSharedThread(null);
-    void reloadStaff().catch(() => undefined);
-  }
-
-  function openNewActionItemModal(seed?: ActionItemDraftSeed): void {
-    setActionItemModalSeed(seed ?? {});
-  }
-
-  function closeNewActionItemModal(): void {
-    setActionItemModalSeed(null);
-  }
-
-  function openWorkbookImport(target: WorkbookImportTarget = "auto"): void {
-    setWorkbookImportTarget(target);
-    setWorkbookImportOpen(true);
-  }
-
-  function closeWorkbookImport(): void {
-    setWorkbookImportOpen(false);
-  }
-
-  async function persistActionItem(input: SaveActionItemInput): Promise<ActionItemView> {
-    const saved = await saveActionItemCommand(input);
-    await reloadStaff();
-    showToast(input.id ? "Action item updated" : "Action item created");
-    return saved;
-  }
-
-  async function removeActionItem(id: ActionItemId): Promise<void> {
-    try {
-      await deleteActionItemCommand(id);
-      const next = await listActionItems();
-      setActionItems(next);
-      showToast("Action item deleted");
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function jumpToCalendarEvent(eventId: CalendarEventId): Promise<void> {
-    setActiveSection("calendar");
-    setSelectedId(null);
-    setThread(null);
-    setSelectedSharedId(null);
-    setActiveSharedThread(null);
-    const match = calendarOccurrences.find((o) => o.event.id === eventId)?.event;
-    if (match) {
-      await selectCalendarEvent(match);
-      return;
-    }
-    try {
-      const nowMs = Date.now();
-      const occs = await listCalendarEvents({
-        rangeStart: nowMs - 365 * 86_400_000,
-        rangeEnd: nowMs + 730 * 86_400_000,
-      });
-      setCalendarOccurrences(occs);
-      const found = occs.find((o) => o.event.id === eventId)?.event;
-      if (found) {
-        await selectCalendarEvent(found);
-      } else {
-        showToast("Linked calendar event was deleted");
-      }
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function importWorkbook(input: ImportWorkbookInput): Promise<WorkbookImportReport> {
-    const report = await importOperationsWorkbookCommand(input);
-    if (!input.dryRun) {
-      await reloadStaff();
-      const parts: string[] = [];
-      const tasks = report.actionItemsCreated + report.actionItemsUpdated;
-      const contacts = report.contactsCreated + report.contactsUpdated;
-      if (tasks > 0) parts.push(`${tasks} action item${tasks === 1 ? "" : "s"}`);
-      if (contacts > 0) parts.push(`${contacts} contact${contacts === 1 ? "" : "s"}`);
-      if (report.calendarEventsCreated > 0) {
-        parts.push(
-          `${report.calendarEventsCreated} calendar event${report.calendarEventsCreated === 1 ? "" : "s"}`,
-        );
-      }
-      showToast(parts.length > 0 ? `Imported ${parts.join(", ")}` : "Workbook import complete");
-    }
-    return report;
-  }
-
-  function triggerCsvDownload(filename: string, csv: string): void {
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  async function downloadActionItemsCsv(): Promise<void> {
-    try {
-      const csv = await exportActionItemsCsv();
-      const stamp = new Date().toISOString().slice(0, 10);
-      triggerCsvDownload(`pigment-action-items-${stamp}.csv`, csv);
-      showToast("Exported Action Items CSV");
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
-  async function downloadShowContactsCsv(): Promise<void> {
-    try {
-      const csv = await exportShowContactsCsv();
-      const stamp = new Date().toISOString().slice(0, 10);
-      triggerCsvDownload(`pigment-show-contacts-${stamp}.csv`, csv);
-      showToast("Exported Show Contacts CSV");
-    } catch (err) {
-      showToast(friendlyError(err));
-    }
-  }
-
   return {
     booting,
     error,
@@ -2171,38 +1495,18 @@ export function useMailApp(): MailApp {
     onboardingOpen,
     tourOpen,
     tourStep,
-    shareModalOpen,
-    contactsOpen,
-    pinnedLinksOpen,
     popover,
     replyText,
     replyNonce,
     expanded,
     remoteContent,
     syncing: syncing || accounts.some((a) => a.sync.kind === "syncing"),
-    updater,
     composeInsert,
     activeSection,
-    staffWorkspace,
-    staffDirectory,
-    sharedThreads,
-    sharedTemplates,
-    showContacts,
-    pinnedLinks,
-    selectedSharedId,
-    activeSharedThread,
-    sharedListTab,
-    sharedPaneTab,
     calendarOccurrences,
     icsOverlays,
     overlayBusyBlocks,
     selectedCalendarEvent,
-    activeMeetingDoc,
-    discordWebhookConfigured,
-    actionItems,
-    actionItemModalSeed,
-    workbookImportOpen,
-    workbookImportTarget,
     toggleTheme: () => setTheme((prev) => (prev === "dark" ? "light" : "dark")),
     setTheme,
     toggleLayout: () => setLayout((prev) => (prev === "split" ? "classic" : "split")),
@@ -2267,59 +1571,17 @@ export function useMailApp(): MailApp {
     updateAccount,
     reauthAccount,
     removeAccount,
-    openSharedSection,
-    openSharedThread,
-    setSharedListTab,
-    setSharedPaneTab,
-    openShareModal: () => setShareModalOpen(true),
-    closeShareModal: () => setShareModalOpen(false),
-    openContacts: () => setContactsOpen(true),
-    closeContacts: () => setContactsOpen(false),
-    openPinnedLinks: () => setPinnedLinksOpen(true),
-    closePinnedLinks: () => setPinnedLinksOpen(false),
-    connectStaffWorkspace,
-    disconnectStaffWorkspace,
-    syncStaffWorkspace,
-    shareThread,
-    updateHandoff,
-    postSharedComment,
-    mutateSharedDraft,
-    loadApprovedDraftToReply,
     insertTextSnippet,
-    persistSharedTemplate,
-    removeSharedTemplate,
-    persistShowContact,
-    removeShowContact,
-    persistPinnedLink,
-    removePinnedLink,
-    launchPinnedLink,
     openCalendarSection,
     loadCalendarRange,
     selectCalendarEvent,
     persistCalendarEvent,
     quickAddEvent,
     removeCalendarEvent,
-    mutateMeetingDoc,
-    promoteAgendaToAction,
-    setActionItemStatus,
     rsvpInvite,
     addInviteToCalendar,
     persistIcsOverlay,
     removeIcsOverlay,
     syncIcsOverlay,
-    saveDiscordWebhook,
-    copyDiscordRecap,
-    postDiscordRecap,
-    openActionsSection,
-    openNewActionItemModal,
-    closeNewActionItemModal,
-    openWorkbookImport,
-    closeWorkbookImport,
-    persistActionItem,
-    removeActionItem,
-    jumpToCalendarEvent,
-    importWorkbook,
-    downloadActionItemsCsv,
-    downloadShowContactsCsv,
   };
 }

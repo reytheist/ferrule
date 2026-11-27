@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Pencil, Shield, Trash2, Users, X } from "lucide-react";
-import type { AccountView, SpaceColor, SpaceKind } from "../../types/mail";
+import { Pencil, Trash2, X } from "lucide-react";
+import type { AccountView, SpaceColor } from "../../types/mail";
 import type { MailApp } from "../shell/useMailApp";
 
 export const SPACE_COLORS: SpaceColor[] = [
@@ -29,7 +29,6 @@ export function SpaceSwitcher({ app }: { app: MailApp }) {
   const [editing, setEditing] = useState<AccountView | null>(null);
   const [name, setName] = useState("");
   const [color, setColor] = useState<SpaceColor>("azure");
-  const [spaceKind, setSpaceKind] = useState<SpaceKind>("personal");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,7 +38,6 @@ export function SpaceSwitcher({ app }: { app: MailApp }) {
     setEditing(account);
     setName(account.displayName);
     setColor(account.color);
-    setSpaceKind(account.spaceKind);
     setError(null);
   }
 
@@ -63,7 +61,6 @@ export function SpaceSwitcher({ app }: { app: MailApp }) {
         accountId: editing.id,
         displayName: trimmed,
         color,
-        spaceKind,
       });
       setEditing(null);
     } catch (err) {
@@ -108,15 +105,10 @@ export function SpaceSwitcher({ app }: { app: MailApp }) {
                 className="space-chip-hit"
                 onClick={() => app.selectSpace(account.id)}
                 onDoubleClick={() => openEditor(account)}
-                title={`${account.displayName} · ${account.email}${account.spaceKind === "pigmentStaff" ? " · Pigment Staff Space" : ""} (double-click to edit)`}
+                title={`${account.displayName} · ${account.email} (double-click to edit)`}
               >
                 <span className="acct-dot" />
                 <span>{account.displayName}</span>
-                {account.spaceKind === "pigmentStaff" && (
-                  <span className="sp-staff-tag" title="Pigment Staff Space">
-                    Staff
-                  </span>
-                )}
                 <span className="sp-cnt">{account.unread}</span>
               </button>
               {isActive && (
@@ -182,32 +174,6 @@ export function SpaceSwitcher({ app }: { app: MailApp }) {
                     />
                   ))}
                 </div>
-              </div>
-              <div className="field">
-                <label>Space type</label>
-                <div className="space-kind-toggle">
-                  <button
-                    type="button"
-                    className={`btn compact${spaceKind === "pigmentStaff" ? " primary" : ""}`}
-                    onClick={() => setSpaceKind("pigmentStaff")}
-                  >
-                    <Users />
-                    Pigment Staff Space
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn compact${spaceKind === "personal" ? " primary" : ""}`}
-                    onClick={() => setSpaceKind("personal")}
-                  >
-                    <Shield />
-                    Personal Space
-                  </button>
-                </div>
-                <span className="hint-text">
-                  {spaceKind === "pigmentStaff"
-                    ? "Eligible for Staff Sharing and handoffs with Pigment teammates."
-                    : "Staff Sharing is disabled by default so personal threads stay private."}
-                </span>
               </div>
               {error && <span className="error-text">{error}</span>}
             </div>

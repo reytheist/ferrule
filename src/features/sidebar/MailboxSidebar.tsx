@@ -2,20 +2,15 @@ import {
   Archive,
   CalendarClock,
   CalendarDays,
-  CheckSquare,
-  Contact,
-  ExternalLink,
   FileText,
   Flag,
   Inbox,
-  Link2,
   Send,
   ShieldAlert,
   Sparkles,
   Star,
   Trash2,
   Clock,
-  Users,
 } from "lucide-react";
 import type { ComponentType } from "react";
 import type { MailboxView } from "../../types/mail";
@@ -136,80 +131,23 @@ export function MailboxSidebar({ app }: { app: MailApp }) {
       </div>
       {restEntries.map(renderEntry)}
 
-      <div className="sidebar-tour-group" data-tour="staff">
-        <div className="sidebar-section">Pigment Staff</div>
-        <button
-          className={`nav-item${app.activeSection === "shared" ? " active" : ""}`}
-          onClick={app.openSharedSection}
-          title="Shared with Me"
-        >
-          <Users />
-          <span className="nav-label">Shared with Me</span>
-          <span className="nav-count">{app.sharedThreads.length}</span>
-        </button>
-        <button
-          className={`nav-item${app.activeSection === "calendar" ? " active" : ""}`}
-          onClick={app.openCalendarSection}
-          title="Pigment Shared Calendar & Meetings"
-        >
-          <CalendarDays />
-          <span className="nav-label">Calendar</span>
-          <span className="nav-count">{app.calendarOccurrences.length}</span>
-        </button>
-        <button
-          className={`nav-item${app.activeSection === "actions" ? " active" : ""}`}
-          onClick={app.openActionsSection}
-          title="Pigment Shared Action Items & Operations Workbook"
-        >
-          <CheckSquare />
-          <span className="nav-label">Action Items</span>
-          <span className="nav-count">
-            {app.actionItems.filter((a) => a.status === "open").length}
-          </span>
-        </button>
-        <button className="nav-item" onClick={app.openContacts} title="Shared Show Contacts">
-          <Contact />
-          <span className="nav-label">Show Contacts</span>
-          <span className="nav-count">{app.showContacts.length}</span>
-        </button>
-      </div>
+      <div className="sidebar-section">Workspace</div>
+      <button
+        className={`nav-item${app.activeSection === "calendar" ? " active" : ""}`}
+        onClick={app.openCalendarSection}
+        title="Calendar"
+      >
+        <CalendarDays />
+        <span className="nav-label">Calendar</span>
+        <span className="nav-count">{app.calendarOccurrences.length}</span>
+      </button>
 
       <div className="sidebar-section">Library</div>
       <button className="nav-item" onClick={app.openTemplates} title="Templates">
         <FileText />
         <span className="nav-label">Templates</span>
-        <span className="nav-count">{app.templates.length + app.sharedTemplates.length}</span>
+        <span className="nav-count">{app.templates.length}</span>
       </button>
-
-      <div className="sidebar-section sidebar-section-row">
-        <span>Pinned Links</span>
-        <button
-          type="button"
-          className="sidebar-mini-btn"
-          onClick={app.openPinnedLinks}
-          title="Manage Pinned Staff Links"
-        >
-          Edit
-        </button>
-      </div>
-      {app.pinnedLinks.length === 0 ? (
-        <button className="nav-item" onClick={app.openPinnedLinks} title="Add pinned link">
-          <Link2 />
-          <span className="nav-label">Pin a staff link…</span>
-        </button>
-      ) : (
-        app.pinnedLinks.slice(0, 6).map((link) => (
-          <button
-            key={link.id}
-            className="nav-item pinned-link-item"
-            onClick={() => void app.launchPinnedLink(link.url)}
-            title={link.description ? `${link.title} — ${link.description}` : link.url}
-          >
-            <ExternalLink />
-            <span className="nav-label">{link.title}</span>
-          </button>
-        ))
-      )}
 
       {app.settings.developerToolsEnabled && (
         <div className="sidebar-footer">

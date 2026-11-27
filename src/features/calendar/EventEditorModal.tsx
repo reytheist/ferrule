@@ -87,11 +87,11 @@ export function EventEditorModal({
         if (event.target === event.currentTarget && !busy) onClose();
       }}
     >
-      <div className="modal wide" role="dialog" aria-label="Pigment Calendar Event">
+      <div className="modal wide" role="dialog" aria-label="Calendar Event">
         <div className="modal-head">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <CalendarDays style={{ width: 15, height: 15, color: "var(--app-accent)" }} />
-            <h2>{initial ? "Edit Calendar Event" : "New Pigment Calendar Event"}</h2>
+            <h2>{initial ? "Edit Calendar Event" : "New Calendar Event"}</h2>
           </div>
           <button className="icon-btn" onClick={onClose} title="Close">
             <X />
@@ -222,7 +222,7 @@ export function EventEditorModal({
 
         <div className="modal-foot">
           <span className="hint-text" style={{ flex: 1 }}>
-            Synced to Pigment Staff Calendar when connected.
+            Saved locally in your Ferrule calendar.
           </span>
           <button type="button" className="btn" disabled={busy} onClick={onClose}>
             Cancel

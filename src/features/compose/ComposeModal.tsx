@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CalendarClock, ChevronDown, Clock, Lock, X } from "lucide-react";
 import type { CreateDraftInput } from "../../types/mail";
 import { AvailabilityPicker } from "../calendar/AvailabilityPicker";
@@ -42,40 +42,6 @@ export function ComposeModal({ app }: { app: MailApp }) {
   }, [composeInsert, app]);
 
   const account = app.accounts.find((a) => a.id === accountId) ?? firstAccount;
-
-  const recipientSuggestions = useMemo(() => {
-    const token = to.split(/[,\s;]+/).pop()?.trim().toLowerCase() ?? "";
-    if (token.length < 1) return [];
-    const pool: Array<{ label: string; email: string; badge: string }> = [];
-    for (const m of app.staffDirectory) {
-      pool.push({ label: `${m.name} (@${m.handle})`, email: m.email, badge: "Staff" });
-    }
-    for (const c of app.showContacts) {
-      for (const email of c.emails) {
-        pool.push({
-          label: c.organization ? `${c.name} · ${c.organization}` : c.name,
-          email,
-          badge: c.category,
-        });
-      }
-    }
-    const existing = new Set(splitRecipients(to).map((e) => e.toLowerCase()));
-    return pool
-      .filter(
-        (entry) =>
-          !existing.has(entry.email.toLowerCase()) &&
-          (entry.label.toLowerCase().includes(token) ||
-            entry.email.toLowerCase().includes(token)),
-      )
-      .slice(0, 5);
-  }, [to, app.staffDirectory, app.showContacts]);
-
-  function applySuggestion(email: string): void {
-    const parts = to.split(/([,\s;]+)/);
-    if (parts.length > 0) parts[parts.length - 1] = email;
-    const joined = parts.join("");
-    setTo(joined.endsWith(", ") ? joined : `${joined}, `);
-  }
 
   function submit(mode: "now" | "later", sendAt?: number): void {
     const fields = fieldsRef.current;
@@ -153,26 +119,10 @@ export function ComposeModal({ app }: { app: MailApp }) {
             <label>To</label>
             <input
               className="input"
-              placeholder="alice@example.com, or type a staff name / show contact…"
+              placeholder="alice@example.com"
               value={to}
               onChange={(event) => setTo(event.target.value)}
             />
-            {recipientSuggestions.length > 0 && (
-              <div className="recipient-suggestions">
-                {recipientSuggestions.map((item) => (
-                  <button
-                    key={item.email}
-                    type="button"
-                    className="recipient-suggestion-item"
-                    onClick={() => applySuggestion(item.email)}
-                  >
-                    <span>{item.label}</span>
-                    <span className="hint-text">{item.email}</span>
-                    <span className="kbd">{item.badge}</span>
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
 
           {showCc ? (
@@ -239,57 +189,24 @@ export function ComposeModal({ app }: { app: MailApp }) {
             )}
             {snippetsOpen && (
               <div className="snippet-menu" style={{ bottom: "calc(100% + 6px)", top: "auto" }}>
-                {app.templates.length === 0 && app.sharedTemplates.length === 0 ? (
+                {app.templates.length === 0 ? (
                   <span className="cmd-empty">No snippets yet.</span>
                 ) : (
-                  <>
-                    {app.sharedTemplates.length > 0 && (
-                      <>
-                        <span className="snippet-group-label">Shared Staff Templates</span>
-                        {app.sharedTemplates.map((template) => (
-                          <button
-                            key={template.id}
-                            className="snippet-item shared"
-                            onClick={() => {
-                              const text = template.bodyText;
-                              setBody((prev) => (prev ? `${prev}\n\n${text}` : text));
-                              if (!subject && template.subject) setSubject(template.subject);
-                              setSnippetsOpen(false);
-                              bodyRef.current?.focus();
-                            }}
-                          >
-                            <span className="name">
-                              <span className="staff-tpl-dot" />
-                              {template.name}
-                            </span>
-                            <span className="kbd">{template.shortcut ?? template.category}</span>
-                          </button>
-                        ))}
-                      </>
-                    )}
-                    {app.templates.length > 0 && (
-                      <>
-                        {app.sharedTemplates.length > 0 && (
-                          <span className="snippet-group-label">Personal Snippets</span>
-                        )}
-                        {app.templates.map((template) => (
-                          <button
-                            key={template.id}
-                            className="snippet-item"
-                            onClick={() => {
-                              const text = template.bodyText;
-                              setBody((prev) => (prev ? `${prev}\n\n${text}` : text));
-                              setSnippetsOpen(false);
-                              bodyRef.current?.focus();
-                            }}
-                          >
-                            <span className="name">{template.name}</span>
-                            {template.shortcut && <span className="kbd">{template.shortcut}</span>}
-                          </button>
-                        ))}
-                      </>
-                    )}
-                  </>
+                  app.templates.map((template) => (
+                    <button
+                      key={template.id}
+                      className="snippet-item"
+                      onClick={() => {
+                        const text = template.bodyText;
+                        setBody((prev) => (prev ? `${prev}\n\n${text}` : text));
+                        setSnippetsOpen(false);
+                        bodyRef.current?.focus();
+                      }}
+                    >
+                      <span className="name">{template.name}</span>
+                      {template.shortcut && <span className="kbd">{template.shortcut}</span>}
+                    </button>
+                  ))
                 )}
               </div>
             )}

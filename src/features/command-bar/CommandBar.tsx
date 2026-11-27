@@ -3,16 +3,10 @@ import type { ComponentType, KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   Archive,
   CalendarDays,
-  CheckSquare,
   Clock,
-  Contact,
-  Download,
-  ExternalLink,
-  FileSpreadsheet,
   FileText,
   Flag,
   Inbox,
-  Link2,
   Moon,
   PenLine,
   Plus,
@@ -27,7 +21,6 @@ import {
   Sun,
   Trash2,
   Type,
-  Users,
 } from "lucide-react";
 import { listThreads } from "../../ipc/core";
 import type { Scope, ThreadSummary } from "../../types/mail";
@@ -208,49 +201,8 @@ export function CommandBar({ app }: { app: MailApp }) {
       { id: "go-archive", label: "Go to Archive", icon: Archive, run: () => app.selectView({ kind: "archive" }) },
       { id: "go-spam", label: "Go to Spam", icon: ShieldAlert, run: () => app.selectView({ kind: "spam" }) },
       { id: "go-trash", label: "Go to Trash", icon: Trash2, run: () => app.selectView({ kind: "trash" }) },
-      { id: "go-shared", label: "Go to Shared with Me (Pigment Staff)", icon: Users, run: app.openSharedSection },
-      { id: "go-calendar", label: "Go to Pigment Shared Calendar & Meetings", icon: CalendarDays, run: app.openCalendarSection },
-      { id: "go-actions", label: "Go to Action Items (Pigment Staff)", icon: CheckSquare, run: app.openActionsSection },
-      { id: "new-action", label: "New Action Item", icon: Plus, run: () => app.openNewActionItemModal() },
-      {
-        id: "import-workbook",
-        label: "Import Operations Workbook (.xlsx / CSV)",
-        icon: FileSpreadsheet,
-        run: () => app.openWorkbookImport("auto"),
-      },
-      {
-        id: "export-actions-csv",
-        label: "Export Action Items CSV",
-        icon: Download,
-        run: () => void app.downloadActionItemsCsv(),
-      },
-      {
-        id: "export-contacts-csv",
-        label: "Export Show Contacts CSV",
-        icon: Download,
-        run: () => void app.downloadShowContactsCsv(),
-      },
-      { id: "open-contacts", label: "Open Shared Show Contacts", icon: Contact, run: app.openContacts },
-      { id: "open-links", label: "Manage Pinned Staff Links", icon: Link2, run: app.openPinnedLinks },
+      { id: "go-calendar", label: "Go to Calendar", icon: CalendarDays, run: app.openCalendarSection },
     ];
-    for (const link of app.pinnedLinks) {
-      items.push({
-        id: `link-${link.id}`,
-        label: `Pinned link: ${link.title}`,
-        hint: link.category,
-        icon: ExternalLink,
-        run: () => void app.launchPinnedLink(link.url),
-      });
-    }
-    for (const template of app.sharedTemplates) {
-      items.push({
-        id: `stpl-${template.id}`,
-        label: `Insert staff template: ${template.name}`,
-        hint: template.shortcut ?? template.category,
-        icon: Users,
-        run: () => app.insertTextSnippet(template.bodyText),
-      });
-    }
     for (const template of app.templates) {
       items.push({
         id: `tpl-${template.id}`,

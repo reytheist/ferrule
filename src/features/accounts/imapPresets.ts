@@ -152,27 +152,3 @@ export function matchesPresetEndpoints(
 ): boolean {
   return matchesEndpoint(preset.imap, imap) && matchesEndpoint(preset.smtp, smtp);
 }
-
-export const PIGMENT_STAFF_IONOS_PRESET: ImapServerPreset = {
-  id: "ionos",
-  name: "Pigment Staff (IONOS)",
-  defaultSpaceName: "Pigment Staff",
-  emailPlaceholder: "info@pigmentshow.us",
-  domains: ["ionos.com", "ionos.de", "ionos.co.uk", "1and1.com"],
-  imap: { host: "imap.ionos.com", port: 993, tls: true },
-  smtp: { host: "smtp.ionos.com", port: 587, tls: true },
-  passwordLabel: "Mailbox password",
-  passwordPlaceholder: "IONOS mailbox password",
-  hint: "Enter your Pigment role mailbox (info@, sponsors@, exhibition@, marketing@, volunteers@) and IONOS password.",
-};
-
-export function suggestPigmentSpaceName(email: string): string {
-  const local = email.trim().split("@")[0]?.trim() ?? "";
-  if (!local) return "Pigment Staff";
-  const titled = local
-    .split(/[._-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
-  return titled ? `Pigment · ${titled}` : "Pigment Staff";
-}

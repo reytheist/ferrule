@@ -1,23 +1,13 @@
 use std::time::Duration;
 
 use mail_core::calendar::{
-    ActionItemStatus, ActionItemView, AddInviteToCalendarInput, AvailabilityQuery,
-    AvailabilitySlot, CalendarEventView, CalendarInviteView, CalendarOccurrence,
-    CalendarRangeQuery, DiscordWebhookStatus, IcsOverlayView, MeetingDocView, OverlayBusyBlock,
-    PromoteActionItemInput, RsvpInviteInput, SaveActionItemInput, SaveCalendarEventInput,
-    SaveIcsOverlayInput, UpdateMeetingDocInput,
+    AddInviteToCalendarInput, AvailabilityQuery, AvailabilitySlot, CalendarEventView,
+    CalendarInviteView, CalendarOccurrence, CalendarRangeQuery, IcsOverlayView, OverlayBusyBlock,
+    RsvpInviteInput, SaveCalendarEventInput, SaveIcsOverlayInput,
 };
-use mail_core::workbook::{ImportWorkbookInput, WorkbookImportReport};
 use mail_core::error::CoreError;
 use mail_core::ids::{
-    AccountId, ActionItemId, CalendarEventId, ContactId, DraftId, IcsOverlayId, JobId,
-    PinnedLinkId, SharedTemplateId, SharedThreadId, TemplateId, ThreadId, UnixMs,
-};
-use mail_core::staff::{
-    AddSharedCommentInput, ConnectStaffWorkspaceInput, PinnedLinkView, SavePinnedLinkInput,
-    SaveSharedTemplateInput, SaveShowContactInput, ShareThreadInput, SharedCommentView,
-    SharedDraftView, SharedTemplateView, SharedThreadSummary, SharedThreadView, ShowContactView,
-    StaffMemberView, StaffWorkspaceView, UpdateHandoffInput, UpdateSharedDraftInput,
+    AccountId, CalendarEventId, DraftId, IcsOverlayId, JobId, TemplateId, ThreadId, UnixMs,
 };
 use mail_core::types::{
     AccountView, ActionOutcome, AppSettings, CreateDraftInput, DraftView, JobView, MailAction,
@@ -28,9 +18,6 @@ use mail_core::types::{
 use mail_core::MailCore;
 use tauri::Manager;
 
-use crate::updater::{
-    self, InstallUpdateInput, InstallUpdateOutcome, UpdateCheckResult,
-};
 use crate::SplashState;
 
 const MIN_SPLASH_DWELL: Duration = Duration::from_millis(2400);
@@ -268,183 +255,6 @@ pub async fn tick_scheduler(core: tauri::State<'_, MailCore>) -> Result<(), Core
     Ok(())
 }
 
-// ---------------------------------------------------------------- Phase B: Staff Collaboration
-
-#[tauri::command]
-pub async fn get_staff_workspace(
-    core: tauri::State<'_, MailCore>,
-) -> Result<StaffWorkspaceView, CoreError> {
-    core.get_staff_workspace().await
-}
-
-#[tauri::command]
-pub async fn connect_staff_workspace(
-    core: tauri::State<'_, MailCore>,
-    input: ConnectStaffWorkspaceInput,
-) -> Result<StaffWorkspaceView, CoreError> {
-    core.connect_staff_workspace(input).await
-}
-
-#[tauri::command]
-pub async fn disconnect_staff_workspace(
-    core: tauri::State<'_, MailCore>,
-) -> Result<(), CoreError> {
-    core.disconnect_staff_workspace().await
-}
-
-#[tauri::command]
-pub async fn sync_staff_workspace(
-    core: tauri::State<'_, MailCore>,
-) -> Result<StaffWorkspaceView, CoreError> {
-    core.sync_staff_workspace().await
-}
-
-#[tauri::command]
-pub async fn pending_staff_outbox_count(
-    core: tauri::State<'_, MailCore>,
-) -> Result<u32, CoreError> {
-    Ok(core.pending_staff_outbox_count().await?.min(u32::MAX as usize) as u32)
-}
-
-#[tauri::command]
-pub async fn list_staff_directory(
-    core: tauri::State<'_, MailCore>,
-) -> Result<Vec<StaffMemberView>, CoreError> {
-    core.list_staff_directory().await
-}
-
-#[tauri::command]
-pub async fn list_shared_threads(
-    core: tauri::State<'_, MailCore>,
-) -> Result<Vec<SharedThreadSummary>, CoreError> {
-    core.list_shared_threads().await
-}
-
-#[tauri::command]
-pub async fn open_shared_thread(
-    core: tauri::State<'_, MailCore>,
-    shared_thread_id: SharedThreadId,
-) -> Result<SharedThreadView, CoreError> {
-    core.open_shared_thread(shared_thread_id).await
-}
-
-#[tauri::command]
-pub async fn find_shared_thread_for_local(
-    core: tauri::State<'_, MailCore>,
-    thread_id: ThreadId,
-) -> Result<Option<SharedThreadView>, CoreError> {
-    core.find_shared_thread_for_local(thread_id).await
-}
-
-#[tauri::command]
-pub async fn share_thread(
-    core: tauri::State<'_, MailCore>,
-    input: ShareThreadInput,
-) -> Result<SharedThreadView, CoreError> {
-    core.share_thread(input).await
-}
-
-#[tauri::command]
-pub async fn update_shared_handoff(
-    core: tauri::State<'_, MailCore>,
-    input: UpdateHandoffInput,
-) -> Result<SharedThreadView, CoreError> {
-    core.update_shared_handoff(input).await
-}
-
-#[tauri::command]
-pub async fn add_shared_comment(
-    core: tauri::State<'_, MailCore>,
-    input: AddSharedCommentInput,
-) -> Result<SharedCommentView, CoreError> {
-    core.add_shared_comment(input).await
-}
-
-#[tauri::command]
-pub async fn update_shared_draft(
-    core: tauri::State<'_, MailCore>,
-    input: UpdateSharedDraftInput,
-) -> Result<SharedDraftView, CoreError> {
-    core.update_shared_draft(input).await
-}
-
-#[tauri::command]
-pub async fn list_shared_templates(
-    core: tauri::State<'_, MailCore>,
-) -> Result<Vec<SharedTemplateView>, CoreError> {
-    core.list_shared_templates().await
-}
-
-#[tauri::command]
-pub async fn save_shared_template(
-    core: tauri::State<'_, MailCore>,
-    input: SaveSharedTemplateInput,
-) -> Result<SharedTemplateView, CoreError> {
-    core.save_shared_template(input).await
-}
-
-#[tauri::command]
-pub async fn delete_shared_template(
-    core: tauri::State<'_, MailCore>,
-    template_id: SharedTemplateId,
-) -> Result<(), CoreError> {
-    core.delete_shared_template(template_id).await
-}
-
-#[tauri::command]
-pub async fn list_show_contacts(
-    core: tauri::State<'_, MailCore>,
-) -> Result<Vec<ShowContactView>, CoreError> {
-    core.list_show_contacts().await
-}
-
-#[tauri::command]
-pub async fn find_contact_by_email(
-    core: tauri::State<'_, MailCore>,
-    email: String,
-) -> Result<Option<ShowContactView>, CoreError> {
-    core.find_contact_by_email(email).await
-}
-
-#[tauri::command]
-pub async fn save_show_contact(
-    core: tauri::State<'_, MailCore>,
-    input: SaveShowContactInput,
-) -> Result<ShowContactView, CoreError> {
-    core.save_show_contact(input).await
-}
-
-#[tauri::command]
-pub async fn delete_show_contact(
-    core: tauri::State<'_, MailCore>,
-    contact_id: ContactId,
-) -> Result<(), CoreError> {
-    core.delete_show_contact(contact_id).await
-}
-
-#[tauri::command]
-pub async fn list_pinned_links(
-    core: tauri::State<'_, MailCore>,
-) -> Result<Vec<PinnedLinkView>, CoreError> {
-    core.list_pinned_links().await
-}
-
-#[tauri::command]
-pub async fn save_pinned_link(
-    core: tauri::State<'_, MailCore>,
-    input: SavePinnedLinkInput,
-) -> Result<PinnedLinkView, CoreError> {
-    core.save_pinned_link(input).await
-}
-
-#[tauri::command]
-pub async fn delete_pinned_link(
-    core: tauri::State<'_, MailCore>,
-    link_id: PinnedLinkId,
-) -> Result<(), CoreError> {
-    core.delete_pinned_link(link_id).await
-}
-
 #[tauri::command]
 pub fn open_external_url(
     core: tauri::State<'_, MailCore>,
@@ -453,7 +263,7 @@ pub fn open_external_url(
     core.open_external_url(&url)
 }
 
-// ---------------------------------------------------------------- Phase C: Calendar & Meetings
+// ---------------------------------------------------------------- Personal Calendar
 
 #[tauri::command]
 pub async fn list_calendar_events(
@@ -488,86 +298,6 @@ pub async fn delete_calendar_event(
 }
 
 #[tauri::command]
-pub async fn get_meeting_doc(
-    core: tauri::State<'_, MailCore>,
-    event_id: CalendarEventId,
-) -> Result<MeetingDocView, CoreError> {
-    core.get_meeting_doc(event_id).await
-}
-
-#[tauri::command]
-pub async fn update_meeting_doc(
-    core: tauri::State<'_, MailCore>,
-    input: UpdateMeetingDocInput,
-) -> Result<MeetingDocView, CoreError> {
-    core.update_meeting_doc(input).await
-}
-
-#[tauri::command]
-pub async fn promote_to_action_item(
-    core: tauri::State<'_, MailCore>,
-    input: PromoteActionItemInput,
-) -> Result<ActionItemView, CoreError> {
-    core.promote_to_action_item(input).await
-}
-
-#[tauri::command]
-pub async fn toggle_action_item(
-    core: tauri::State<'_, MailCore>,
-    action_item_id: ActionItemId,
-    status: ActionItemStatus,
-) -> Result<ActionItemView, CoreError> {
-    core.toggle_action_item(action_item_id, status).await
-}
-
-#[tauri::command]
-pub async fn list_action_items(
-    core: tauri::State<'_, MailCore>,
-) -> Result<Vec<ActionItemView>, CoreError> {
-    core.list_action_items().await
-}
-
-// ---------------------------------------------------------------- Phase D: Action Items & Workbook
-
-#[tauri::command]
-pub async fn save_action_item(
-    core: tauri::State<'_, MailCore>,
-    input: SaveActionItemInput,
-) -> Result<ActionItemView, CoreError> {
-    core.save_action_item(input).await
-}
-
-#[tauri::command]
-pub async fn delete_action_item(
-    core: tauri::State<'_, MailCore>,
-    action_item_id: ActionItemId,
-) -> Result<(), CoreError> {
-    core.delete_action_item(action_item_id).await
-}
-
-#[tauri::command]
-pub async fn import_operations_workbook(
-    core: tauri::State<'_, MailCore>,
-    input: ImportWorkbookInput,
-) -> Result<WorkbookImportReport, CoreError> {
-    core.import_operations_workbook(input).await
-}
-
-#[tauri::command]
-pub async fn export_action_items_csv(
-    core: tauri::State<'_, MailCore>,
-) -> Result<String, CoreError> {
-    core.export_action_items_csv().await
-}
-
-#[tauri::command]
-pub async fn export_show_contacts_csv(
-    core: tauri::State<'_, MailCore>,
-) -> Result<String, CoreError> {
-    core.export_show_contacts_csv().await
-}
-
-#[tauri::command]
 pub async fn rsvp_calendar_invite(
     core: tauri::State<'_, MailCore>,
     input: RsvpInviteInput,
@@ -576,11 +306,11 @@ pub async fn rsvp_calendar_invite(
 }
 
 #[tauri::command]
-pub async fn add_invite_to_pigment_calendar(
+pub async fn add_invite_to_calendar(
     core: tauri::State<'_, MailCore>,
     input: AddInviteToCalendarInput,
 ) -> Result<CalendarEventView, CoreError> {
-    core.add_invite_to_pigment_calendar(input).await
+    core.add_invite_to_calendar(input).await
 }
 
 #[tauri::command]
@@ -628,52 +358,4 @@ pub async fn find_availability_slots(
     query: AvailabilityQuery,
 ) -> Result<Vec<AvailabilitySlot>, CoreError> {
     core.find_availability_slots(query).await
-}
-
-#[tauri::command]
-pub async fn get_discord_webhook_status(
-    core: tauri::State<'_, MailCore>,
-) -> Result<DiscordWebhookStatus, CoreError> {
-    core.get_discord_webhook_status().await
-}
-
-#[tauri::command]
-pub async fn set_discord_webhook(
-    core: tauri::State<'_, MailCore>,
-    url: Option<String>,
-) -> Result<DiscordWebhookStatus, CoreError> {
-    core.set_discord_webhook(url).await
-}
-
-#[tauri::command]
-pub async fn format_meeting_recap(
-    core: tauri::State<'_, MailCore>,
-    event_id: CalendarEventId,
-) -> Result<String, CoreError> {
-    core.format_meeting_recap(event_id).await
-}
-
-#[tauri::command]
-pub async fn post_meeting_recap_to_discord(
-    core: tauri::State<'_, MailCore>,
-    event_id: CalendarEventId,
-    custom_markdown: Option<String>,
-) -> Result<(), CoreError> {
-    core.post_meeting_recap_to_discord(event_id, custom_markdown)
-        .await
-}
-
-// ---------------------------------------------------------------- In-App Updates
-
-#[tauri::command]
-pub async fn check_for_updates() -> Result<UpdateCheckResult, CoreError> {
-    updater::check_for_updates().await
-}
-
-#[tauri::command]
-pub async fn download_and_install_update(
-    app: tauri::AppHandle,
-    input: InstallUpdateInput,
-) -> Result<InstallUpdateOutcome, CoreError> {
-    updater::download_and_install_update(&app, input).await
 }

@@ -151,7 +151,6 @@ async fn mock_account(core: &MailCore, smtp_port: u16, label: &str) -> AccountVi
     core.add_account(NewAccountInput {
         display_name: label.to_string(),
         color: SpaceColor::Emerald,
-        space_kind: SpaceKind::Personal,
         auth: ProviderAuth::ImapPassword {
             address: format!("{label}@example.test"),
             username: format!("{label}@example.test"),

@@ -1,6 +1,5 @@
-//! Phase C — Pigment Shared Calendar, Email ↔ Calendar Bridges (.ics invites,
-//! read-only personal .ics overlays, availability slots), Meeting Docs with
-//! recurring carryover, and Discord meeting integration.
+//! Personal Calendar, Email ↔ Calendar Bridges (.ics invites,
+//! read-only personal .ics overlays, and availability slots).
 
 use std::collections::HashMap;
 
@@ -8,7 +7,7 @@ use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, TimeZone, T
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreError;
-use crate::ids::{ActionItemId, CalendarEventId, IcsOverlayId, MessageId, ThreadId, UnixMs};
+use crate::ids::{CalendarEventId, IcsOverlayId, MessageId, UnixMs};
 
 // ── Calendar Events & Recurrence ────────────────────────────────────────────
 
@@ -263,156 +262,6 @@ pub struct AvailabilitySlot {
     pub start_at: UnixMs,
     pub end_at: UnixMs,
     pub label: String,
-}
-
-// ── Meeting Docs & Shared Action Items (Phase C + Phase D table) ────────────
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgendaItem {
-    pub id: String,
-    pub text: String,
-    pub checked: bool,
-    pub added_by: String,
-    pub promoted_action_id: Option<ActionItemId>,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ActionItemStatus {
-    #[default]
-    Open,
-    Done,
-}
-
-impl ActionItemStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Open => "open",
-            Self::Done => "done",
-        }
-    }
-
-    pub fn from_db(raw: &str) -> Self {
-        match raw {
-            "done" => Self::Done,
-            _ => Self::Open,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ActionItemView {
-    pub id: ActionItemId,
-    pub title: String,
-    pub department: Option<String>,
-    pub milestone: Option<String>,
-    pub assignee_handle: Option<String>,
-    pub status: ActionItemStatus,
-    pub due_at: Option<UnixMs>,
-    #[serde(default)]
-    pub start_time: Option<String>,
-    #[serde(default)]
-    pub end_time: Option<String>,
-    pub location: Option<String>,
-    pub cost_note: Option<String>,
-    #[serde(default)]
-    pub calendar_event_id: Option<CalendarEventId>,
-    pub source_event_id: Option<CalendarEventId>,
-    pub source_series_id: Option<String>,
-    pub source_thread_id: Option<ThreadId>,
-    pub created_by: String,
-    pub created_at: UnixMs,
-    pub updated_at: UnixMs,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SaveActionItemInput {
-    pub id: Option<ActionItemId>,
-    pub title: String,
-    #[serde(default)]
-    pub department: Option<String>,
-    #[serde(default)]
-    pub milestone: Option<String>,
-    #[serde(default)]
-    pub assignee_handle: Option<String>,
-    #[serde(default)]
-    pub status: ActionItemStatus,
-    #[serde(default)]
-    pub due_at: Option<UnixMs>,
-    #[serde(default)]
-    pub start_time: Option<String>,
-    #[serde(default)]
-    pub end_time: Option<String>,
-    #[serde(default)]
-    pub location: Option<String>,
-    #[serde(default)]
-    pub cost_note: Option<String>,
-    #[serde(default)]
-    pub source_event_id: Option<CalendarEventId>,
-    #[serde(default)]
-    pub source_series_id: Option<String>,
-    #[serde(default)]
-    pub source_thread_id: Option<ThreadId>,
-    #[serde(default)]
-    pub sync_to_calendar: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MeetingDocView {
-    pub event_id: CalendarEventId,
-    pub series_id: Option<String>,
-    pub agenda: Vec<AgendaItem>,
-    pub notes_markdown: String,
-    pub notes_editor_handle: Option<String>,
-    pub notes_editor_name: Option<String>,
-    pub rev: u32,
-    pub updated_at: UnixMs,
-    pub action_items: Vec<ActionItemView>,
-    pub carryover_items: Vec<ActionItemView>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum MeetingDocAction {
-    UpdateAgenda { agenda: Vec<AgendaItem> },
-    ClaimNotesLock,
-    SaveNotes { notes_markdown: String, release_lock: bool },
-    ReleaseNotesLock,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateMeetingDocInput {
-    pub event_id: CalendarEventId,
-    pub action: MeetingDocAction,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PromoteActionItemInput {
-    pub event_id: CalendarEventId,
-    pub agenda_item_id: Option<String>,
-    pub title: String,
-    #[serde(default)]
-    pub department: Option<String>,
-    #[serde(default)]
-    pub assignee_handle: Option<String>,
-    #[serde(default)]
-    pub due_at: Option<UnixMs>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DiscordWebhookStatus {
-    pub configured: bool,
 }
 
 // ── Pure RFC 5545 .ics Parser ───────────────────────────────────────────────
@@ -1303,56 +1152,4 @@ pub fn compute_availability_slots(
     }
 
     slots
-}
-
-// ── Discord Markdown Recap Formatter ────────────────────────────────────────
-
-pub fn render_discord_recap(event: &CalendarEventView, doc: &MeetingDocView) -> String {
-    let start_str = DateTime::from_timestamp_millis(event.start_at.0)
-        .map(|dt| dt.format("%a, %b %-d · %-I:%M %p UTC").to_string())
-        .unwrap_or_else(|| "Scheduled".to_string());
-
-    let mut out = String::new();
-    out.push_str(&format!("**Meeting Recap: {}**\n", event.title));
-    let mut meta = vec![start_str];
-    if let Some(dept) = &event.department {
-        meta.push(format!("#{dept}"));
-    }
-    if let Some(loc) = &event.location {
-        meta.push(format!("📍 {loc}"));
-    }
-    out.push_str(&format!("_{}_\n", meta.join(" · ")));
-
-    if !doc.notes_markdown.trim().is_empty() {
-        out.push_str("\n**Notes**\n");
-        out.push_str(doc.notes_markdown.trim());
-        out.push('\n');
-    }
-
-    if !doc.agenda.is_empty() {
-        out.push_str("\n**Agenda**\n");
-        for item in &doc.agenda {
-            let mark = if item.checked { "x" } else { " " };
-            out.push_str(&format!("- [{mark}] {}\n", item.text));
-        }
-    }
-
-    if !doc.action_items.is_empty() || !doc.carryover_items.is_empty() {
-        out.push_str("\n**Action Items**\n");
-        for item in doc.action_items.iter().chain(doc.carryover_items.iter()) {
-            let mark = if item.status == ActionItemStatus::Done {
-                "✅"
-            } else {
-                "⬜"
-            };
-            let owner = item
-                .assignee_handle
-                .as_deref()
-                .map(|h| format!(" (@{h})"))
-                .unwrap_or_default();
-            out.push_str(&format!("- {mark} {}{owner}\n", item.title));
-        }
-    }
-
-    out.trim_end().to_string()
 }

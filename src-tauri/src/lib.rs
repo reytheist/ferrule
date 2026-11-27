@@ -1,5 +1,4 @@
 mod commands;
-mod updater;
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -97,7 +96,6 @@ pub fn run() {
             // Follow-ups fire cleanly while the desktop app stays resident.
             let sched_core = core.clone();
             tauri::async_runtime::spawn(async move {
-                sched_core.start_staff_sync_listener();
                 let mut interval = tokio::time::interval(Duration::from_secs(5));
                 loop {
                     interval.tick().await;
@@ -227,58 +225,19 @@ pub fn run() {
             commands::save_template,
             commands::delete_template,
             commands::tick_scheduler,
-            commands::get_staff_workspace,
-            commands::connect_staff_workspace,
-            commands::disconnect_staff_workspace,
-            commands::sync_staff_workspace,
-            commands::pending_staff_outbox_count,
-            commands::list_staff_directory,
-            commands::list_shared_threads,
-            commands::open_shared_thread,
-            commands::find_shared_thread_for_local,
-            commands::share_thread,
-            commands::update_shared_handoff,
-            commands::add_shared_comment,
-            commands::update_shared_draft,
-            commands::list_shared_templates,
-            commands::save_shared_template,
-            commands::delete_shared_template,
-            commands::list_show_contacts,
-            commands::find_contact_by_email,
-            commands::save_show_contact,
-            commands::delete_show_contact,
-            commands::list_pinned_links,
-            commands::save_pinned_link,
-            commands::delete_pinned_link,
             commands::open_external_url,
             commands::list_calendar_events,
             commands::save_calendar_event,
             commands::quick_add_calendar_event,
             commands::delete_calendar_event,
-            commands::get_meeting_doc,
-            commands::update_meeting_doc,
-            commands::promote_to_action_item,
-            commands::toggle_action_item,
-            commands::list_action_items,
-            commands::save_action_item,
-            commands::delete_action_item,
-            commands::import_operations_workbook,
-            commands::export_action_items_csv,
-            commands::export_show_contacts_csv,
             commands::rsvp_calendar_invite,
-            commands::add_invite_to_pigment_calendar,
+            commands::add_invite_to_calendar,
             commands::list_ics_overlays,
             commands::save_ics_overlay,
             commands::delete_ics_overlay,
             commands::refresh_ics_overlay,
             commands::list_overlay_busy_blocks,
             commands::find_availability_slots,
-            commands::get_discord_webhook_status,
-            commands::set_discord_webhook,
-            commands::format_meeting_recap,
-            commands::post_meeting_recap_to_discord,
-            commands::check_for_updates,
-            commands::download_and_install_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Ferrule");

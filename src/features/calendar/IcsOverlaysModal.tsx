@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Layers, MessageSquare, Plus, RefreshCw, Shield, Trash2, X } from "lucide-react";
+import { Layers, Plus, RefreshCw, Shield, Trash2, X } from "lucide-react";
 import type { MailApp } from "../shell/useMailApp";
 
 export function IcsOverlaysModal({
@@ -11,7 +11,6 @@ export function IcsOverlaysModal({
 }) {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
-  const [webhookInput, setWebhookInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -37,20 +36,6 @@ export function IcsOverlaysModal({
     }
   }
 
-  async function saveWebhook(): Promise<void> {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await app.saveDiscordWebhook(webhookInput.trim() || null);
-      setWebhookInput("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div
       className="modal-backdrop"
@@ -58,11 +43,11 @@ export function IcsOverlaysModal({
         if (event.target === event.currentTarget && !busy) onClose();
       }}
     >
-      <div className="modal wide" role="dialog" aria-label="Personal Overlays and Discord">
+      <div className="modal wide" role="dialog" aria-label="Personal Calendar Overlays">
         <div className="modal-head">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Layers style={{ width: 15, height: 15, color: "var(--app-accent)" }} />
-            <h2>Personal .ics Overlays &amp; Discord</h2>
+            <h2>Personal .ics Overlays</h2>
           </div>
           <button className="icon-btn" onClick={onClose} title="Close">
             <X />
@@ -77,7 +62,7 @@ export function IcsOverlaysModal({
             </div>
             <span className="hint-text">
               Paste private read-only .ics URLs from Google Calendar, Apple iCloud, or Outlook.
-              Feed URLs and personal busy blocks stay 100% local and never sync to Staff Sync.
+              Feed URLs and busy blocks stay 100% local in your SQLite database.
             </span>
 
             {app.icsOverlays.length > 0 && (
@@ -156,52 +141,6 @@ export function IcsOverlaysModal({
                 <Plus />
                 Add Feed
               </button>
-            </div>
-          </section>
-
-          <section className="settings-section">
-            <div className="settings-section-title">
-              <MessageSquare style={{ width: 12, height: 12 }} />
-              Discord Recap Webhook (OS Keychain)
-            </div>
-            <span className="hint-text">
-              Optional: store a Discord channel webhook URL strictly in your OS keychain (never
-              SQLite or localStorage) to post meeting recaps with 1 click.
-            </span>
-            <div className="field-row">
-              <div className="field">
-                <label>
-                  Status:{" "}
-                  <strong>{app.discordWebhookConfigured ? "Configured in OS Keychain" : "Not set"}</strong>
-                </label>
-                <input
-                  className="input"
-                  type="password"
-                  placeholder="https://discord.com/api/webhooks/..."
-                  value={webhookInput}
-                  onChange={(e) => setWebhookInput(e.target.value)}
-                />
-              </div>
-              <button
-                type="button"
-                className="btn compact primary"
-                style={{ alignSelf: "flex-end" }}
-                disabled={!webhookInput.trim() || busy}
-                onClick={() => void saveWebhook()}
-              >
-                Save Webhook
-              </button>
-              {app.discordWebhookConfigured && (
-                <button
-                  type="button"
-                  className="btn compact"
-                  style={{ alignSelf: "flex-end" }}
-                  disabled={busy}
-                  onClick={() => void app.saveDiscordWebhook(null)}
-                >
-                  Clear
-                </button>
-              )}
             </div>
           </section>
 

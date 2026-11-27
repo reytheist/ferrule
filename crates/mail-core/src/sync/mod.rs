@@ -3,7 +3,6 @@
 pub(crate) mod imap;
 pub(crate) mod oauth;
 pub(crate) mod smtp;
-pub(crate) mod staff;
 
 use mail_parser::MimeHeaders;
 use regex::Regex;

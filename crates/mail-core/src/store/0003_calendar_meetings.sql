@@ -1,7 +1,5 @@
--- Phase C: Local-first SQLite tables for Pigment Shared Calendar, Meeting Docs,
--- shared Action Items (shared with Phase D), inline .ics invites, and local-only
--- read-only Personal .ics Overlays.
--- Discord webhook URLs are NEVER stored here; they live strictly in SecretStore.
+-- Local-first SQLite tables for personal Calendar events, inline .ics invites,
+-- and read-only Personal .ics Overlays.
 
 CREATE TABLE IF NOT EXISTS calendar_event (
     id BLOB PRIMARY KEY,
@@ -18,48 +16,12 @@ CREATE TABLE IF NOT EXISTS calendar_event (
     discord_url TEXT,
     attendees_json TEXT NOT NULL DEFAULT '[]',
     source_ics_uid TEXT,
-    created_by TEXT NOT NULL DEFAULT 'staff',
+    created_by TEXT NOT NULL DEFAULT 'me',
     updated_at INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_calendar_event_start ON calendar_event(start_at ASC);
 CREATE INDEX IF NOT EXISTS idx_calendar_event_series ON calendar_event(series_id);
-
-CREATE TABLE IF NOT EXISTS meeting_doc (
-    event_id BLOB PRIMARY KEY REFERENCES calendar_event(id) ON DELETE CASCADE,
-    series_id TEXT,
-    agenda_json TEXT NOT NULL DEFAULT '[]',
-    notes_markdown TEXT NOT NULL DEFAULT '',
-    notes_editor_handle TEXT,
-    notes_editor_name TEXT,
-    rev INTEGER NOT NULL DEFAULT 1,
-    updated_at INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS action_item (
-    id BLOB PRIMARY KEY,
-    title TEXT NOT NULL,
-    department TEXT,
-    milestone TEXT,
-    assignee_handle TEXT,
-    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done')),
-    due_at INTEGER,
-    start_time TEXT,
-    end_time TEXT,
-    location TEXT,
-    cost_note TEXT,
-    calendar_event_id BLOB REFERENCES calendar_event(id) ON DELETE SET NULL,
-    source_event_id BLOB REFERENCES calendar_event(id) ON DELETE SET NULL,
-    source_series_id TEXT,
-    source_thread_id BLOB REFERENCES thread(id) ON DELETE SET NULL,
-    created_by TEXT NOT NULL DEFAULT 'staff',
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_action_item_event ON action_item(source_event_id);
-CREATE INDEX IF NOT EXISTS idx_action_item_series ON action_item(source_series_id, status);
-CREATE INDEX IF NOT EXISTS idx_action_item_status ON action_item(status, due_at ASC);
 
 CREATE TABLE IF NOT EXISTS message_invite (
     message_id BLOB NOT NULL REFERENCES message(id) ON DELETE CASCADE,
@@ -77,7 +39,7 @@ CREATE TABLE IF NOT EXISTS message_invite (
     PRIMARY KEY (message_id, uid)
 );
 
--- Strictly local-only personal .ics overlay feeds (never synced to Staff Sync).
+-- Strictly local-only personal .ics overlay feeds.
 CREATE TABLE IF NOT EXISTS ics_overlay (
     id BLOB PRIMARY KEY,
     name TEXT NOT NULL,

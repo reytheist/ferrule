@@ -30,7 +30,7 @@ export function FeatureTour({ app }: { app: MailApp }) {
       id: "spaces",
       selector: '[data-tour="spaces"]',
       title: "Account Spaces",
-      body: "Each email account lives in its own color-coded Account Space. Personal spaces keep Staff Sharing disabled by default, while Pigment Staff spaces lock the From address and unlock team collaboration.",
+      body: "Each email account lives in its own color-coded Account Space with a locked From address guard so you never reply from the wrong identity.",
       placement: "bottom",
     },
     {
@@ -55,19 +55,10 @@ export function FeatureTour({ app }: { app: MailApp }) {
       placement: "right",
     },
     {
-      id: "staff",
-      selector: '[data-tour="staff"]',
-      title: "Pigment Staff Collaboration",
-      body: app.staffWorkspace.connected
-        ? "Coordinate on shared threads with internal @mentions, claim exclusive reply draft locks, and manage the shared show calendar, meeting docs, and action items."
-        : "Coordinate on shared threads, reply draft locks, shared calendar, and action items. You haven't connected Pigment Staff Sync yet — you can connect anytime in Settings.",
-      placement: "right",
-    },
-    {
       id: "settings",
       selector: '[data-tour="settings"]',
       title: "Settings & Replay",
-      body: "Manage Account Spaces, appearance, Pigment Staff Sync, and Developer Tools here — or click Replay Feature Tour whenever you want a refresher.",
+      body: "Manage Account Spaces, appearance, and Developer Tools here — or click Replay Feature Tour whenever you want a refresher.",
       placement: "bottom-end",
     },
   ];

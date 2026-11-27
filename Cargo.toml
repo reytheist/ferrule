@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/mail-core", "crates/staff-sync-server", "src-tauri"]
+members = ["crates/mail-core", "src-tauri"]
 resolver = "2"
 
 [workspace.package]
@@ -29,4 +29,3 @@ sha2 = "0.10"
 base64 = "0.22"
 url = "2"
 open = "5"
-calamine = { version = "0.38", features = ["dates"] }

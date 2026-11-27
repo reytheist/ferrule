@@ -4,7 +4,6 @@ import {
   CalendarClock,
   CalendarDays,
   CalendarPlus,
-  CheckSquare,
   ChevronDown,
   ChevronLeft,
   Clock,
@@ -13,19 +12,16 @@ import {
   Lock,
   MapPin,
   Paperclip,
-  Share2,
   ShieldAlert,
   ShieldCheck,
   Star,
   Trash2,
   Type,
-  Users,
 } from "lucide-react";
 import type { CalendarInviteView, MessageView, RsvpStatus, ThreadView } from "../../types/mail";
 import { AvailabilityPicker } from "../calendar/AvailabilityPicker";
 import type { MailApp } from "../shell/useMailApp";
 import { spaceClass } from "../spaces/SpaceSwitcher";
-import { StaffCollabSidebar } from "../staff/StaffCollabSidebar";
 import { anchorBelow } from "../ui/anchor";
 import { formatFull, initialsOf } from "../ui/format";
 import { applyReaderTextSize } from "./readerTextSize";
@@ -157,12 +153,12 @@ function CalendarInviteCard({
             void app.addInviteToCalendar({
               messageId: invite.messageId,
               uid: invite.uid,
-              department: "operations",
+              department: null,
             })
           }
         >
           <CalendarPlus />
-          {invite.addedEventId ? "In Pigment Calendar" : "Add to Pigment Calendar"}
+          {invite.addedEventId ? "In Calendar" : "Add to Calendar"}
         </button>
       </div>
     </div>
@@ -252,52 +248,22 @@ function ReplyDock({ app, thread }: { app: MailApp; thread: ThreadView }) {
           )}
           {menuOpen && (
             <div className="snippet-menu">
-              {app.templates.length === 0 && app.sharedTemplates.length === 0 ? (
+              {app.templates.length === 0 ? (
                 <span className="cmd-empty">No snippets yet — create one in Templates.</span>
               ) : (
-                <>
-                  {app.sharedTemplates.length > 0 && (
-                    <>
-                      <span className="snippet-group-label">Shared Staff Templates</span>
-                      {app.sharedTemplates.map((template) => (
-                        <button
-                          key={template.id}
-                          className="snippet-item shared"
-                          onClick={() => {
-                            app.insertTextSnippet(template.bodyText);
-                            setMenuOpen(false);
-                          }}
-                        >
-                          <span className="name">
-                            <span className="staff-tpl-dot" />
-                            {template.name}
-                          </span>
-                          <span className="kbd">{template.shortcut ?? template.category}</span>
-                        </button>
-                      ))}
-                    </>
-                  )}
-                  {app.templates.length > 0 && (
-                    <>
-                      {app.sharedTemplates.length > 0 && (
-                        <span className="snippet-group-label">Personal Snippets</span>
-                      )}
-                      {app.templates.map((template) => (
-                        <button
-                          key={template.id}
-                          className="snippet-item"
-                          onClick={() => {
-                            app.insertTemplate(template);
-                            setMenuOpen(false);
-                          }}
-                        >
-                          <span className="name">{template.name}</span>
-                          {template.shortcut && <span className="kbd">{template.shortcut}</span>}
-                        </button>
-                      ))}
-                    </>
-                  )}
-                </>
+                app.templates.map((template) => (
+                  <button
+                    key={template.id}
+                    className="snippet-item"
+                    onClick={() => {
+                      app.insertTemplate(template);
+                      setMenuOpen(false);
+                    }}
+                  >
+                    <span className="name">{template.name}</span>
+                    {template.shortcut && <span className="kbd">{template.shortcut}</span>}
+                  </button>
+                ))
               )}
             </div>
           )}
@@ -368,17 +334,6 @@ export function ReadingPane({ app }: { app: MailApp }) {
   const earlier = thread.messages.slice(0, -1);
   const current = thread.messages[thread.messages.length - 1];
   const imagesAllowed = app.remoteContent !== "blockAll";
-  const account = app.accounts.find((a) => a.id === thread.accountId);
-  const isStaffSpace = account?.spaceKind === "pigmentStaff";
-  const shared =
-    app.activeSharedThread && app.activeSharedThread.sourceThreadId === thread.id
-      ? app.activeSharedThread
-      : null;
-  const participantEmails = Array.from(
-    new Set(
-      thread.messages.flatMap((m) => [m.fromEmail, ...m.to, ...m.cc]).filter(Boolean),
-    ),
-  );
 
   return (
     <main className="read-col">
@@ -455,34 +410,6 @@ export function ReadingPane({ app }: { app: MailApp }) {
                 ? "Text: M"
                 : "Text: L"}
           </button>
-          <button
-            className="t-btn"
-            onClick={() =>
-              app.openNewActionItemModal({
-                title: thread.subject,
-                sourceThreadId: thread.id,
-              })
-            }
-            title="Create a Pigment Staff Action Item linked to this email thread"
-          >
-            <CheckSquare />
-            + Action Item
-          </button>
-          <button
-            className={`t-btn${shared ? " on" : ""}`}
-            disabled={!isStaffSpace}
-            onClick={app.openShareModal}
-            title={
-              isStaffSpace
-                ? shared
-                  ? "Thread shared with Pigment Staff — click to update sharing"
-                  : "Share sanitized snapshot with Pigment Staff"
-                : "Staff Sharing is disabled for Personal spaces"
-            }
-          >
-            {shared ? <Users /> : <Share2 />}
-            {shared ? "Shared" : "Share with Staff"}
-          </button>
         </div>
 
         <div className="read-split-body">
@@ -494,12 +421,6 @@ export function ReadingPane({ app }: { app: MailApp }) {
                   <span className="acct-dot" />
                   {thread.accountLabel} · {thread.accountEmail}
                 </span>
-                {shared && (
-                  <span className="badge badge-staff">
-                    <Users style={{ width: 9, height: 9 }} />
-                    Shared · {shared.status}
-                  </span>
-                )}
                 {thread.snoozedUntil !== null && (
                   <span className="badge badge-snooze">Snoozed</span>
                 )}
@@ -524,15 +445,6 @@ export function ReadingPane({ app }: { app: MailApp }) {
 
             {current && <MessageBubble app={app} message={current} />}
           </div>
-
-          <StaffCollabSidebar
-            app={app}
-            shared={shared}
-            participantEmails={participantEmails}
-            senderName={current?.fromName ?? null}
-            senderEmail={current?.fromEmail ?? null}
-            canLoadApprovedToReply={true}
-          />
         </div>
 
         <ReplyDock app={app} thread={thread} />
