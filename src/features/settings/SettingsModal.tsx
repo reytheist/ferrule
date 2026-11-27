@@ -2,21 +2,57 @@ import { useState } from "react";
 import {
   Code2,
   Moon,
+  PenTool,
+  Plus,
   SlidersHorizontal,
   Sparkles,
   Sun,
   Terminal,
+  Trash2,
   X,
 } from "lucide-react";
+import type { AccountId, SignatureId } from "../../types/mail";
+import { plainTextToHtml } from "../compose/RichEditor";
 import type { MailApp, TextSize } from "../shell/useMailApp";
 import { spaceClass } from "../spaces/SpaceSwitcher";
 
 export function SettingsModal({ app }: { app: MailApp }) {
   const [busy, setBusy] = useState(false);
+  const [sigAccountId, setSigAccountId] = useState<string>("");
+  const [editingSigId, setEditingSigId] = useState<SignatureId | null>(null);
+  const [sigName, setSigName] = useState("");
+  const [sigBody, setSigBody] = useState("");
+  const [sigDefault, setSigDefault] = useState(true);
 
   if (!app.settingsOpen) return null;
 
   const devTools = app.settings.developerToolsEnabled;
+  const activeSigAccount =
+    (app.accounts.find((a) => a.id === sigAccountId) ?? app.accounts[0])?.id ?? null;
+  const accountSigs = activeSigAccount
+    ? app.signatures.filter((s) => s.accountId === activeSigAccount)
+    : [];
+
+  async function saveSig(): Promise<void> {
+    if (!activeSigAccount || !sigName.trim()) return;
+    setBusy(true);
+    try {
+      await app.persistSignature({
+        id: editingSigId,
+        accountId: activeSigAccount as AccountId,
+        name: sigName.trim(),
+        bodyText: sigBody,
+        bodyHtml: plainTextToHtml(sigBody),
+        isDefault: sigDefault,
+      });
+      setEditingSigId(null);
+      setSigName("");
+      setSigBody("");
+      setSigDefault(false);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function toggleDeveloperTools(): Promise<void> {
     if (busy) return;
@@ -135,6 +171,118 @@ export function SettingsModal({ app }: { app: MailApp }) {
             <span className="hint-text">
               All mail stays 100% local in SQLite, with outgoing identities locked per space.
             </span>
+          </section>
+
+          <section className="settings-section">
+            <div className="settings-section-title">
+              <PenTool style={{ width: 12, height: 12, marginRight: 5, verticalAlign: "-1px" }} />
+              Named Signatures
+            </div>
+            {app.accounts.length === 0 ? (
+              <span className="hint-text">Connect an account to configure signatures.</span>
+            ) : (
+              <div className="signature-manager">
+                <select
+                  className="select"
+                  value={activeSigAccount ?? ""}
+                  onChange={(event) => {
+                    setSigAccountId(event.target.value);
+                    setEditingSigId(null);
+                    setSigName("");
+                    setSigBody("");
+                  }}
+                >
+                  {app.accounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.displayName} · {account.email}
+                    </option>
+                  ))}
+                </select>
+
+                {accountSigs.length > 0 && (
+                  <div className="signature-list">
+                    {accountSigs.map((sig) => (
+                      <div key={sig.id} className="signature-item">
+                        <div className="signature-item-main">
+                          <strong>{sig.name}</strong>
+                          {sig.isDefault && <span className="kbd">Default</span>}
+                          <span className="hint-text">{sig.bodyText.slice(0, 60)}</span>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn compact"
+                          onClick={() => {
+                            setEditingSigId(sig.id);
+                            setSigName(sig.name);
+                            setSigBody(sig.bodyText);
+                            setSigDefault(sig.isDefault);
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title="Delete signature"
+                          onClick={() => void app.removeSignature(sig.id)}
+                        >
+                          <Trash2 />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="signature-editor-box">
+                  <input
+                    className="input"
+                    placeholder="Signature name (e.g. Formal, Casual)"
+                    value={sigName}
+                    onChange={(event) => setSigName(event.target.value)}
+                  />
+                  <textarea
+                    className="textarea"
+                    rows={3}
+                    placeholder="Signature text…"
+                    value={sigBody}
+                    onChange={(event) => setSigBody(event.target.value)}
+                  />
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <label className="hint-text" style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <input
+                        type="checkbox"
+                        checked={sigDefault}
+                        onChange={(event) => setSigDefault(event.target.checked)}
+                      />
+                      Default for this account
+                    </label>
+                    <span style={{ flex: 1 }} />
+                    {editingSigId && (
+                      <button
+                        type="button"
+                        className="btn compact"
+                        onClick={() => {
+                          setEditingSigId(null);
+                          setSigName("");
+                          setSigBody("");
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn compact primary"
+                      disabled={busy || !sigName.trim()}
+                      onClick={() => void saveSig()}
+                    >
+                      <Plus />
+                      {editingSigId ? "Update" : "Add Signature"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
 
           <section className="settings-section">

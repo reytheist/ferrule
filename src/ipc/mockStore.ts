@@ -1816,3 +1816,74 @@ export async function findAvailabilitySlots(
   }
   return slots;
 }
+
+// ── Mock Attachments & Named Signatures ─────────────────────────────────────
+
+const mockSignatures: import("../types/mail").SignatureView[] = [];
+let mockSigSeq = 1;
+
+export async function downloadAttachment(
+  attachmentId: import("../types/mail").AttachmentId,
+): Promise<import("../types/mail").AttachmentData> {
+  for (const thread of state.threads) {
+    for (const msg of thread.messages) {
+      const hit = msg.attachments.find((a) => a.id === attachmentId);
+      if (hit) {
+        const sample = `Preview content for ${hit.filename} (${hit.mime})`;
+        return {
+          id: hit.id,
+          filename: hit.filename,
+          mime: hit.mime,
+          size: sample.length,
+          dataBase64: btoa(sample),
+        };
+      }
+    }
+  }
+  throw new Error("Attachment not found");
+}
+
+export async function listSignatures(
+  accountId: import("../types/mail").AccountId | null,
+): Promise<import("../types/mail").SignatureView[]> {
+  return accountId
+    ? mockSignatures.filter((s) => s.accountId === accountId)
+    : [...mockSignatures];
+}
+
+export async function saveSignature(
+  input: import("../types/mail").SaveSignatureInput,
+): Promise<import("../types/mail").SignatureView> {
+  if (input.isDefault) {
+    for (const sig of mockSignatures) {
+      if (sig.accountId === input.accountId) sig.isDefault = false;
+    }
+  }
+  if (input.id) {
+    const existing = mockSignatures.find((s) => s.id === input.id);
+    if (existing) {
+      existing.name = input.name.trim();
+      existing.bodyHtml = input.bodyHtml;
+      existing.bodyText = input.bodyText;
+      existing.isDefault = input.isDefault;
+      return { ...existing };
+    }
+  }
+  const created: import("../types/mail").SignatureView = {
+    id: `sig-${mockSigSeq++}` as import("../types/mail").SignatureId,
+    accountId: input.accountId,
+    name: input.name.trim(),
+    bodyHtml: input.bodyHtml,
+    bodyText: input.bodyText,
+    isDefault: input.isDefault,
+  };
+  mockSignatures.push(created);
+  return { ...created };
+}
+
+export async function deleteSignature(
+  signatureId: import("../types/mail").SignatureId,
+): Promise<void> {
+  const idx = mockSignatures.findIndex((s) => s.id === signatureId);
+  if (idx >= 0) mockSignatures.splice(idx, 1);
+}

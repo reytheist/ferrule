@@ -1,18 +1,24 @@
 //! Private SQLite + FTS5 persistence. Nothing in this module crosses the crate boundary.
 
 mod accounts;
+mod actions;
+mod attachments;
 mod calendar;
 mod demo;
 mod drafts;
 mod jobs;
+mod signatures;
 mod templates;
 mod threads;
 
 pub(crate) use accounts::*;
+pub(crate) use actions::*;
+pub(crate) use attachments::*;
 pub(crate) use calendar::*;
 pub(crate) use demo::*;
 pub(crate) use drafts::*;
 pub(crate) use jobs::*;
+pub(crate) use signatures::*;
 pub(crate) use templates::*;
 pub(crate) use threads::*;
 
@@ -45,6 +51,7 @@ DROP TABLE IF EXISTS staff_workspace;
 DROP TABLE IF EXISTS meeting_doc;
 DROP TABLE IF EXISTS action_item;
 ";
+const MIGRATION_0010_PHASE2: &str = include_str!("0010_phase2_sync_attachments.sql");
 
 pub(crate) struct Store {
     conn: Mutex<Connection>,
@@ -112,6 +119,35 @@ impl Store {
             .map_err(|e| CoreError::Storage {
                 reason: format!("run migration 0009: {e}"),
             })?;
+        conn.execute_batch(MIGRATION_0010_PHASE2)
+            .map_err(|e| CoreError::Storage {
+                reason: format!("run migration 0010: {e}"),
+            })?;
+        // Phase 2 additive columns on existing tables (idempotent).
+        for (table, col, ddl) in [
+            ("folder_cursor", "messages_count", "ALTER TABLE folder_cursor ADD COLUMN messages_count INTEGER NOT NULL DEFAULT 0;"),
+            ("folder_cursor", "unseen_count", "ALTER TABLE folder_cursor ADD COLUMN unseen_count INTEGER NOT NULL DEFAULT 0;"),
+            ("folder_cursor", "uid_next", "ALTER TABLE folder_cursor ADD COLUMN uid_next INTEGER NOT NULL DEFAULT 0;"),
+            ("folder_cursor", "low_uid", "ALTER TABLE folder_cursor ADD COLUMN low_uid INTEGER NOT NULL DEFAULT 0;"),
+            ("folder_cursor", "backfill_done", "ALTER TABLE folder_cursor ADD COLUMN backfill_done INTEGER NOT NULL DEFAULT 0;"),
+            ("folder_cursor", "last_full_flag_pass", "ALTER TABLE folder_cursor ADD COLUMN last_full_flag_pass INTEGER NOT NULL DEFAULT 0;"),
+            ("message", "folder_name", "ALTER TABLE message ADD COLUMN folder_name TEXT NOT NULL DEFAULT 'INBOX';"),
+            ("message", "imap_uid", "ALTER TABLE message ADD COLUMN imap_uid INTEGER;"),
+            ("draft", "body_html", "ALTER TABLE draft ADD COLUMN body_html TEXT;"),
+        ] {
+            if !column_exists(&conn, table, col)? {
+                conn.execute_batch(ddl).map_err(|e| CoreError::Storage {
+                    reason: format!("run migration 0010 ({table}.{col}): {e}"),
+                })?;
+            }
+        }
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_message_folder_uid ON message(account_id, folder_name, imap_uid);
+             CREATE INDEX IF NOT EXISTS idx_message_body_state ON message(account_id, body_state, date DESC);",
+        )
+        .map_err(|e| CoreError::Storage {
+            reason: format!("run migration 0010 indexes: {e}"),
+        })?;
         purge_legacy_demo_data(&mut conn)?;
         Ok(Self {
             conn: Mutex::new(conn),

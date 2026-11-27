@@ -11,6 +11,8 @@ import type {
   ActionOutcome,
   AddInviteToCalendarInput,
   AppSettings,
+  AttachmentData,
+  AttachmentId,
   AvailabilityQuery,
   AvailabilitySlot,
   CalendarEventId,
@@ -35,11 +37,14 @@ import type {
   RsvpInviteInput,
   SaveCalendarEventInput,
   SaveIcsOverlayInput,
+  SaveSignatureInput,
   SaveTemplateInput,
   SavedOAuthClients,
   Scope,
   SendMode,
   SendReceipt,
+  SignatureId,
+  SignatureView,
   TemplateId,
   TemplateView,
   ThreadId,
@@ -195,6 +200,34 @@ export async function saveTemplate(input: SaveTemplateInput): Promise<TemplateVi
 export async function deleteTemplate(templateId: TemplateId): Promise<void> {
   if (!isTauriRuntime()) return mock.deleteTemplate(templateId);
   return invoke<void>("delete_template", { templateId });
+}
+
+export async function downloadAttachment(attachmentId: AttachmentId): Promise<AttachmentData> {
+  if (!isTauriRuntime()) return mock.downloadAttachment(attachmentId);
+  return invoke<AttachmentData>("download_attachment", { attachmentId });
+}
+
+export async function saveAttachment(
+  attachmentId: AttachmentId,
+  destPath: string,
+): Promise<string> {
+  if (!isTauriRuntime()) return destPath;
+  return invoke<string>("save_attachment", { attachmentId, destPath });
+}
+
+export async function listSignatures(accountId: AccountId | null): Promise<SignatureView[]> {
+  if (!isTauriRuntime()) return mock.listSignatures(accountId);
+  return invoke<SignatureView[]>("list_signatures", { accountId });
+}
+
+export async function saveSignature(input: SaveSignatureInput): Promise<SignatureView> {
+  if (!isTauriRuntime()) return mock.saveSignature(input);
+  return invoke<SignatureView>("save_signature", { input });
+}
+
+export async function deleteSignature(signatureId: SignatureId): Promise<void> {
+  if (!isTauriRuntime()) return mock.deleteSignature(signatureId);
+  return invoke<void>("delete_signature", { signatureId });
 }
 
 export async function tickScheduler(): Promise<void> {

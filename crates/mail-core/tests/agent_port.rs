@@ -203,6 +203,8 @@ async fn from_identity_guard_blocks_cross_account_replies() {
             bcc: vec![],
             subject: "Re: Q2 illustration retainer".into(),
             body_text: "Should not exist.".into(),
+            body_html: None,
+            attachments: vec![],
         })
         .await;
     assert!(matches!(
@@ -220,6 +222,8 @@ async fn from_identity_guard_blocks_cross_account_replies() {
             bcc: vec![],
             subject: "Re: Q2 illustration retainer".into(),
             body_text: "Rough by Friday.".into(),
+            body_html: None,
+            attachments: vec![],
         })
         .await
         .expect("reply draft");
@@ -238,6 +242,8 @@ async fn from_identity_guard_blocks_cross_account_replies() {
             bcc: vec![],
             subject: "New thread".into(),
             body_text: "Hello.".into(),
+            body_html: None,
+            attachments: vec![],
         })
         .await
         .expect("compose draft");
@@ -254,6 +260,8 @@ async fn from_identity_guard_blocks_cross_account_replies() {
             bcc: vec![],
             subject: "Re: Fall layers".into(),
             body_text: "Unsubscribe me please.".into(),
+            body_html: None,
+            attachments: vec![],
         })
         .await
         .expect("personal reply");
@@ -273,6 +281,8 @@ async fn from_identity_guard_blocks_cross_account_replies() {
             bcc: vec![],
             subject: "Ghost".into(),
             body_text: "hi".into(),
+            body_html: None,
+            attachments: vec![],
         })
         .await,
         Err(mail_core::error::CoreError::NotFound { .. })
@@ -299,6 +309,8 @@ async fn queued_human_drafts_enqueue_without_touching_the_network() {
             bcc: vec![],
             subject: "Re: Q2 illustration retainer — invoice #4821".into(),
             body_text: "Rough by Friday, promise.".into(),
+            body_html: None,
+            attachments: vec![],
         })
         .await
         .expect("draft");
@@ -334,6 +346,8 @@ async fn queued_human_drafts_enqueue_without_touching_the_network() {
             bcc: vec![],
             subject: "Later".into(),
             body_text: "hi".into(),
+            body_html: None,
+            attachments: vec![],
         })
         .await
         .expect("draft2");
@@ -357,6 +371,8 @@ async fn queued_human_drafts_enqueue_without_touching_the_network() {
             bcc: vec![],
             subject: "No recipients".into(),
             body_text: "hi".into(),
+            body_html: None,
+            attachments: vec![],
         })
         .await
         .expect("draft3");

@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::{ProviderAuth, ProviderKind};
 use crate::ids::{
-    AccountId, AttachmentId, DraftId, IdentityId, JobId, LabelId, MessageId, TemplateId, ThreadId,
-    UnixMs,
+    AccountId, AttachmentId, DraftId, IdentityId, JobId, LabelId, MessageId, SignatureId,
+    TemplateId, ThreadId, UnixMs,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -323,6 +323,37 @@ pub struct AttachmentMeta {
     pub mime: String,
     pub size: u64,
     pub cached: bool,
+    #[serde(default)]
+    pub is_inline: bool,
+    #[serde(default)]
+    pub content_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentData {
+    pub id: AttachmentId,
+    pub filename: String,
+    pub mime: String,
+    pub size: u64,
+    pub data_base64: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftAttachmentInput {
+    pub filename: String,
+    pub mime: String,
+    pub data_base64: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftAttachmentView {
+    pub id: AttachmentId,
+    pub filename: String,
+    pub mime: String,
+    pub size: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -427,6 +458,10 @@ pub struct DraftView {
     pub bcc: Vec<String>,
     pub subject: String,
     pub body_text: String,
+    #[serde(default)]
+    pub body_html: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<DraftAttachmentView>,
     pub rev: u32,
     pub origin: DraftOrigin,
     pub state: DraftState,
@@ -442,6 +477,10 @@ pub struct CreateDraftInput {
     pub bcc: Vec<String>,
     pub subject: String,
     pub body_text: String,
+    #[serde(default)]
+    pub body_html: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<DraftAttachmentInput>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -501,6 +540,28 @@ pub struct SaveTemplateInput {
     pub shortcut: Option<String>,
     pub subject: String,
     pub body_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignatureView {
+    pub id: SignatureId,
+    pub account_id: AccountId,
+    pub name: String,
+    pub body_html: String,
+    pub body_text: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveSignatureInput {
+    pub id: Option<SignatureId>,
+    pub account_id: AccountId,
+    pub name: String,
+    pub body_html: String,
+    pub body_text: String,
+    pub is_default: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

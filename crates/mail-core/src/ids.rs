@@ -66,6 +66,8 @@ define_id!(AttachmentId);
 define_id!(DraftId);
 define_id!(JobId);
 define_id!(TemplateId);
+define_id!(SignatureId);
+define_id!(OfflineActionId);
 define_id!(CalendarEventId);
 define_id!(IcsOverlayId);
 

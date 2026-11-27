@@ -7,8 +7,10 @@ import {
   createDraft,
   deleteCalendarEvent as deleteCalendarEventCommand,
   deleteIcsOverlay as deleteIcsOverlayCommand,
+  deleteSignature as deleteSignatureCommand,
   deleteTemplate,
   dismissFollowUp,
+  downloadAttachment as downloadAttachmentCommand,
   getSettings,
   isTauriRuntime,
   listAccounts,
@@ -16,6 +18,7 @@ import {
   listIcsOverlays,
   listJobs,
   listOverlayBusyBlocks,
+  listSignatures,
   listTemplates,
   listThreads,
   mailboxCounts,
@@ -29,6 +32,7 @@ import {
   rsvpCalendarInvite as rsvpCalendarInviteCommand,
   saveCalendarEvent as saveCalendarEventCommand,
   saveIcsOverlay as saveIcsOverlayCommand,
+  saveSignature as saveSignatureCommand,
   saveTemplate as saveTemplateCommand,
   savedOAuthClients as savedOAuthClientsCommand,
   sendDraft,
@@ -46,6 +50,8 @@ import type {
   AccountView,
   AddInviteToCalendarInput,
   AppSettings,
+  AttachmentData,
+  AttachmentId,
   CalendarEventId,
   CalendarEventView,
   CalendarOccurrence,
@@ -65,10 +71,13 @@ import type {
   RsvpInviteInput,
   SaveCalendarEventInput,
   SaveIcsOverlayInput,
+  SaveSignatureInput,
   SaveTemplateInput,
   SavedOAuthClients,
   Scope,
   SendMode,
+  SignatureId,
+  SignatureView,
   TemplateId,
   TemplateView,
   ThreadId,
@@ -191,6 +200,7 @@ export interface MailApp {
   threads: ThreadSummary[];
   jobs: JobView[];
   templates: TemplateView[];
+  signatures: SignatureView[];
   scopeAccount: AccountId | null;
   view: MailboxView;
   selectedId: ThreadId | null;
@@ -278,6 +288,9 @@ export interface MailApp {
   clearComposeInsert(): void;
   persistTemplate(input: SaveTemplateInput): Promise<void>;
   removeTemplate(id: TemplateId): Promise<void>;
+  persistSignature(input: SaveSignatureInput): Promise<SignatureView>;
+  removeSignature(id: SignatureId): Promise<void>;
+  downloadAttachment(id: AttachmentId): Promise<AttachmentData>;
   addAccount(input: NewAccountInput): Promise<void>;
   oauthSignInAccount(input: OAuthSignInInput): Promise<AccountView>;
   updateAccount(input: UpdateAccountInput): Promise<AccountView>;
@@ -317,6 +330,7 @@ export function useMailApp(): MailApp {
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [jobs, setJobs] = useState<JobView[]>([]);
   const [templates, setTemplates] = useState<TemplateView[]>([]);
+  const [signatures, setSignatures] = useState<SignatureView[]>([]);
   const [scopeAccount, setScopeAccount] = useState<AccountId | null>(null);
   const [view, setView] = useState<MailboxView>({ kind: "inbox", category: "primary" });
   const [selectedId, setSelectedId] = useState<ThreadId | null>(null);
@@ -405,16 +419,19 @@ export function useMailApp(): MailApp {
   }, []);
 
   const reloadMeta = useCallback(async () => {
-    const [nextAccounts, nextJobs, nextTemplates, nextClients, nextSettings] = await Promise.all([
-      listAccounts(),
-      listJobs(),
-      listTemplates(),
-      savedOAuthClientsCommand(),
-      getSettings(),
-    ]);
+    const [nextAccounts, nextJobs, nextTemplates, nextSignatures, nextClients, nextSettings] =
+      await Promise.all([
+        listAccounts(),
+        listJobs(),
+        listTemplates(),
+        listSignatures(null),
+        savedOAuthClientsCommand(),
+        getSettings(),
+      ]);
     setAccounts(nextAccounts);
     setJobs(nextJobs);
     setTemplates(nextTemplates);
+    setSignatures(nextSignatures);
     setSavedOAuthClients(nextClients);
     setSettings(nextSettings);
     jobsSignature.current = nextJobs.map((j) => `${j.id}:${j.state}`).join("|");
@@ -1119,6 +1136,37 @@ export function useMailApp(): MailApp {
     }
   }
 
+  async function persistSignature(input: SaveSignatureInput): Promise<SignatureView> {
+    try {
+      const saved = await saveSignatureCommand(input);
+      await reloadMeta();
+      showToast(`Saved signature “${saved.name}”`);
+      return saved;
+    } catch (err) {
+      showToast(friendlyError(err));
+      throw err;
+    }
+  }
+
+  async function removeSignature(id: SignatureId): Promise<void> {
+    try {
+      await deleteSignatureCommand(id);
+      await reloadMeta();
+      showToast("Deleted signature");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function downloadAttachment(id: AttachmentId): Promise<AttachmentData> {
+    try {
+      return await downloadAttachmentCommand(id);
+    } catch (err) {
+      showToast(friendlyError(err));
+      throw err;
+    }
+  }
+
   async function addAccount(input: NewAccountInput): Promise<void> {
     try {
       const created = await addAccountCommand(input);
@@ -1477,6 +1525,7 @@ export function useMailApp(): MailApp {
     threads,
     jobs,
     templates,
+    signatures,
     scopeAccount,
     view,
     selectedId,
@@ -1566,6 +1615,9 @@ export function useMailApp(): MailApp {
     clearComposeInsert,
     persistTemplate,
     removeTemplate,
+    persistSignature,
+    removeSignature,
+    downloadAttachment,
     addAccount,
     oauthSignInAccount,
     updateAccount,

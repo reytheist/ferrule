@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use mail_core::calendar::{
@@ -7,13 +8,15 @@ use mail_core::calendar::{
 };
 use mail_core::error::CoreError;
 use mail_core::ids::{
-    AccountId, CalendarEventId, DraftId, IcsOverlayId, JobId, TemplateId, ThreadId, UnixMs,
+    AccountId, AttachmentId, CalendarEventId, DraftId, IcsOverlayId, JobId, SignatureId,
+    TemplateId, ThreadId, UnixMs,
 };
 use mail_core::types::{
-    AccountView, ActionOutcome, AppSettings, CreateDraftInput, DraftView, JobView, MailAction,
-    MailboxCounts, NewAccountInput, OAuthSignInInput, RemoteContent, SaveTemplateInput,
-    SavedOAuthClients, Scope, SendMode, SendReceipt, TemplateView, ThreadPage, ThreadQuery,
-    ThreadView, UndoOutcome, UpdateAccountInput,
+    AccountView, ActionOutcome, AppSettings, AttachmentData, CreateDraftInput, DraftView, JobView,
+    MailAction, MailboxCounts, NewAccountInput, OAuthSignInInput, RemoteContent,
+    SaveSignatureInput, SaveTemplateInput, SavedOAuthClients, Scope, SendMode, SendReceipt,
+    SignatureView, TemplateView, ThreadPage, ThreadQuery, ThreadView, UndoOutcome,
+    UpdateAccountInput,
 };
 use mail_core::MailCore;
 use tauri::Manager;
@@ -234,6 +237,48 @@ pub async fn delete_template(
     template_id: TemplateId,
 ) -> Result<(), CoreError> {
     core.delete_template(template_id).await
+}
+
+#[tauri::command]
+pub async fn download_attachment(
+    core: tauri::State<'_, MailCore>,
+    attachment_id: AttachmentId,
+) -> Result<AttachmentData, CoreError> {
+    core.download_attachment(attachment_id).await
+}
+
+#[tauri::command]
+pub async fn save_attachment(
+    core: tauri::State<'_, MailCore>,
+    attachment_id: AttachmentId,
+    dest_path: String,
+) -> Result<String, CoreError> {
+    core.save_attachment(attachment_id, PathBuf::from(dest_path))
+        .await
+}
+
+#[tauri::command]
+pub async fn list_signatures(
+    core: tauri::State<'_, MailCore>,
+    account_id: Option<AccountId>,
+) -> Result<Vec<SignatureView>, CoreError> {
+    core.list_signatures(account_id).await
+}
+
+#[tauri::command]
+pub async fn save_signature(
+    core: tauri::State<'_, MailCore>,
+    input: SaveSignatureInput,
+) -> Result<SignatureView, CoreError> {
+    core.save_signature(input).await
+}
+
+#[tauri::command]
+pub async fn delete_signature(
+    core: tauri::State<'_, MailCore>,
+    signature_id: SignatureId,
+) -> Result<(), CoreError> {
+    core.delete_signature(signature_id).await
 }
 
 #[tauri::command]

@@ -44,10 +44,17 @@ impl IdentityRow {
     }
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct FolderCursorRow {
     pub uid_validity: i64,
     pub high_uid: i64,
+    pub low_uid: i64,
     pub window_floor: UnixMs,
+    pub messages_count: u32,
+    pub unseen_count: u32,
+    pub uid_next: u32,
+    pub backfill_done: bool,
+    pub last_full_flag_pass: UnixMs,
 }
 
 fn provider_db(kind: ProviderKind) -> &'static str {
@@ -303,14 +310,21 @@ pub(crate) fn folder_cursor(
     folder_name: &str,
 ) -> Result<Option<FolderCursorRow>, CoreError> {
     conn.query_row(
-        "SELECT uid_validity, high_uid, window_floor
+        "SELECT uid_validity, high_uid, low_uid, window_floor,
+                messages_count, unseen_count, uid_next, backfill_done, last_full_flag_pass
          FROM folder_cursor WHERE account_id = ?1 AND folder_name = ?2",
         params![id_to_blob(account_id.as_bytes()), folder_name],
         |row| {
             Ok(FolderCursorRow {
                 uid_validity: row.get(0)?,
                 high_uid: row.get(1)?,
-                window_floor: UnixMs(row.get(2)?),
+                low_uid: row.get(2)?,
+                window_floor: UnixMs(row.get(3)?),
+                messages_count: row.get::<_, i64>(4)?.max(0) as u32,
+                unseen_count: row.get::<_, i64>(5)?.max(0) as u32,
+                uid_next: row.get::<_, i64>(6)?.max(0) as u32,
+                backfill_done: row.get::<_, i64>(7)? != 0,
+                last_full_flag_pass: UnixMs(row.get(8)?),
             })
         },
     )
@@ -326,7 +340,7 @@ pub(crate) fn update_folder_high_uid(
     high_uid: i64,
 ) -> Result<(), CoreError> {
     conn.execute(
-        "UPDATE folder_cursor SET uid_validity = ?3, high_uid = ?4
+        "UPDATE folder_cursor SET uid_validity = ?3, high_uid = MAX(high_uid, ?4)
          WHERE account_id = ?1 AND folder_name = ?2",
         params![
             id_to_blob(account_id.as_bytes()),
@@ -334,6 +348,83 @@ pub(crate) fn update_folder_high_uid(
             uid_validity,
             high_uid
         ],
+    )
+    .sq()?;
+    Ok(())
+}
+
+pub(crate) struct FolderStatusUpdate<'a> {
+    pub folder_name: &'a str,
+    pub uid_validity: i64,
+    pub uid_next: u32,
+    pub messages_count: u32,
+    pub unseen_count: u32,
+}
+
+pub(crate) fn update_folder_status(
+    conn: &mut Connection,
+    account_id: AccountId,
+    update: &FolderStatusUpdate<'_>,
+    now: UnixMs,
+) -> Result<(), CoreError> {
+    conn.execute(
+        "INSERT INTO folder_cursor
+           (account_id, folder_name, uid_validity, high_uid, low_uid, window_floor, backfill_target,
+            messages_count, unseen_count, uid_next, backfill_done, last_full_flag_pass)
+         VALUES (?1, ?2, ?3, 0, 0, ?7, ?7, ?5, ?6, ?4, 0, 0)
+         ON CONFLICT(account_id, folder_name) DO UPDATE SET
+           uid_validity = CASE WHEN excluded.uid_validity > 0 THEN excluded.uid_validity ELSE folder_cursor.uid_validity END,
+           high_uid = CASE WHEN excluded.uid_validity > 0 AND folder_cursor.uid_validity > 0 AND excluded.uid_validity != folder_cursor.uid_validity THEN 0 ELSE folder_cursor.high_uid END,
+           low_uid = CASE WHEN excluded.uid_validity > 0 AND folder_cursor.uid_validity > 0 AND excluded.uid_validity != folder_cursor.uid_validity THEN 0 ELSE folder_cursor.low_uid END,
+           backfill_done = CASE WHEN excluded.uid_validity > 0 AND folder_cursor.uid_validity > 0 AND excluded.uid_validity != folder_cursor.uid_validity THEN 0 ELSE folder_cursor.backfill_done END,
+           uid_next = excluded.uid_next,
+           messages_count = excluded.messages_count,
+           unseen_count = excluded.unseen_count",
+        params![
+            id_to_blob(account_id.as_bytes()),
+            update.folder_name,
+            update.uid_validity,
+            i64::from(update.uid_next),
+            i64::from(update.messages_count),
+            i64::from(update.unseen_count),
+            now.0,
+        ],
+    )
+    .sq()?;
+    Ok(())
+}
+
+pub(crate) fn update_folder_backfill(
+    conn: &mut Connection,
+    account_id: AccountId,
+    folder_name: &str,
+    low_uid: i64,
+    backfill_done: bool,
+) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE folder_cursor SET low_uid = ?3, backfill_done = ?4
+         WHERE account_id = ?1 AND folder_name = ?2",
+        params![
+            id_to_blob(account_id.as_bytes()),
+            folder_name,
+            low_uid,
+            backfill_done as i64,
+        ],
+    )
+    .sq()?;
+    Ok(())
+}
+
+pub(crate) fn mark_folder_flag_pass(
+    conn: &mut Connection,
+    account_id: AccountId,
+    folder_name: &str,
+    at: UnixMs,
+) -> Result<(), CoreError> {
+    conn.execute(
+        "UPDATE folder_cursor SET last_full_flag_pass = ?3
+         WHERE account_id = ?1 AND folder_name = ?2",
+        params![id_to_blob(account_id.as_bytes()), folder_name, at.0],
     )
     .sq()?;
     Ok(())

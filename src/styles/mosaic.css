@@ -4593,3 +4593,250 @@
 .shared-draft-steps strong {
   color: var(--app-ink);
 }
+
+/* ── Phase 2: Rich Compose, Attachments & Named Signatures ─────────────── */
+
+.rich-editor {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface);
+  overflow: hidden;
+}
+
+.rich-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-surface-2);
+}
+
+.rich-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--app-muted);
+  cursor: pointer;
+}
+
+.rich-btn:hover {
+  background: var(--app-hover);
+  color: var(--app-ink);
+}
+
+.rich-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.rich-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--app-border);
+  margin: 0 3px;
+}
+
+.rich-mode-btn {
+  border: none;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: calc(10px * var(--chrome-font-scale));
+  background: transparent;
+  color: var(--app-muted);
+  cursor: pointer;
+}
+
+.rich-mode-btn.active {
+  background: var(--app-hover);
+  color: var(--app-ink);
+  font-weight: 600;
+}
+
+.rich-surface {
+  min-height: 160px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  font-size: calc(13px * var(--reader-font-scale));
+  line-height: 1.55;
+  color: var(--app-ink);
+  outline: none;
+}
+
+.rich-surface:empty::before {
+  content: attr(data-placeholder);
+  color: var(--app-muted);
+  pointer-events: none;
+}
+
+.rich-surface blockquote {
+  margin: 6px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--app-accent);
+  color: var(--app-muted);
+}
+
+.rich-surface pre {
+  margin: 6px 0;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: var(--app-surface-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.rich-plain {
+  border: none !important;
+  border-radius: 0 !important;
+  min-height: 160px;
+}
+
+.compose-drop-active {
+  outline: 2px dashed var(--app-accent);
+  outline-offset: -4px;
+}
+
+.compose-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.compose-signature-preview {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--app-surface-2);
+  border: 1px dashed var(--app-border);
+}
+
+.sig-preview-text {
+  white-space: pre-wrap;
+  font-size: calc(11px * var(--chrome-font-scale));
+  color: var(--app-muted);
+  margin-top: 2px;
+}
+
+.sig-picker-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface-2);
+  color: var(--app-muted);
+  font-size: calc(11px * var(--chrome-font-scale));
+}
+
+.sig-select {
+  border: none;
+  background: transparent;
+  color: var(--app-ink);
+  font-size: inherit;
+  outline: none;
+  cursor: pointer;
+}
+
+.att-remove-btn,
+.att-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--app-muted);
+  cursor: pointer;
+  padding: 1px;
+  border-radius: 3px;
+}
+
+.att-remove-btn:hover,
+.att-action-btn:hover {
+  color: var(--app-ink);
+  background: var(--app-hover);
+}
+
+.attachment-preview-modal {
+  max-width: 780px;
+}
+
+.attachment-preview-body {
+  max-height: 70vh;
+  overflow: auto;
+  align-items: center;
+}
+
+.att-preview-img {
+  max-width: 100%;
+  max-height: 64vh;
+  border-radius: 6px;
+}
+
+.att-preview-pdf {
+  width: 100%;
+  height: 64vh;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+}
+
+.att-preview-text {
+  width: 100%;
+  margin: 0;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--app-surface-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.signature-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.signature-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.signature-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border);
+}
+
+.signature-item-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.signature-editor-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface-2);
+}

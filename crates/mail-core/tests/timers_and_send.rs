@@ -184,6 +184,8 @@ async fn simple_draft(
         bcc: vec![],
         subject: subject.to_string(),
         body_text: format!("Body for {subject}."),
+        body_html: None,
+        attachments: vec![],
     })
     .await
     .expect("draft")
@@ -460,6 +462,8 @@ async fn undo_send_cancels_before_start_and_reports_too_late_after_delivery() {
             bcc: vec![],
             subject: "Hello from the outbox".into(),
             body_text: "Second delivery attempt.".into(),
+            body_html: None,
+            attachments: vec![],
         })
         .await
         .expect("reply draft");

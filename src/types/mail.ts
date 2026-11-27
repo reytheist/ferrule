@@ -9,6 +9,7 @@ export type AttachmentId = Brand<string, "AttachmentId">;
 export type DraftId = Brand<string, "DraftId">;
 export type JobId = Brand<string, "JobId">;
 export type TemplateId = Brand<string, "TemplateId">;
+export type SignatureId = Brand<string, "SignatureId">;
 export type CalendarEventId = Brand<string, "CalendarEventId">;
 export type IcsOverlayId = Brand<string, "IcsOverlayId">;
 export type UnixMs = number;
@@ -196,6 +197,29 @@ export interface AttachmentMeta {
   mime: string;
   size: number;
   cached: boolean;
+  isInline?: boolean;
+  contentId?: string | null;
+}
+
+export interface AttachmentData {
+  id: AttachmentId;
+  filename: string;
+  mime: string;
+  size: number;
+  dataBase64: string;
+}
+
+export interface DraftAttachmentInput {
+  filename: string;
+  mime: string;
+  dataBase64: string;
+}
+
+export interface DraftAttachmentView {
+  id: AttachmentId;
+  filename: string;
+  mime: string;
+  size: number;
 }
 
 export interface UnsubscribeInfo {
@@ -268,6 +292,8 @@ export interface DraftView {
   bcc: string[];
   subject: string;
   bodyText: string;
+  bodyHtml?: string | null;
+  attachments?: DraftAttachmentView[];
   rev: number;
   origin: DraftOrigin;
   state: DraftState;
@@ -281,6 +307,8 @@ export interface CreateDraftInput {
   bcc: string[];
   subject: string;
   bodyText: string;
+  bodyHtml?: string | null;
+  attachments?: DraftAttachmentInput[];
 }
 
 export type SendMode =
@@ -320,6 +348,24 @@ export interface SaveTemplateInput {
   shortcut: string | null;
   subject: string;
   bodyText: string;
+}
+
+export interface SignatureView {
+  id: SignatureId;
+  accountId: AccountId;
+  name: string;
+  bodyHtml: string;
+  bodyText: string;
+  isDefault: boolean;
+}
+
+export interface SaveSignatureInput {
+  id: SignatureId | null;
+  accountId: AccountId;
+  name: string;
+  bodyHtml: string;
+  bodyText: string;
+  isDefault: boolean;
 }
 
 export interface MailboxCounts {

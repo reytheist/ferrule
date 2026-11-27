@@ -32,6 +32,7 @@ pub(crate) struct MessageRow {
     pub cc: Vec<String>,
     pub date: UnixMs,
     pub snippet: String,
+    pub body_state: String,
     pub body_text: String,
     pub raw_html: Option<String>,
     pub unsub: Option<UnsubscribeInfo>,
@@ -84,7 +85,7 @@ fn map_thread(row: &Row<'_>) -> Result<ThreadRow, CoreError> {
 
 /// Columns for the thread-list projection (see `list_threads`).
 const THREAD_COLS: &str =
-    "t.id, t.account_id, t.subject, t.snippet, t.sender_name, t.sender_email, t.last_at, t.unread_count, t.message_count, t.starred, t.archived, t.category, t.trashed";
+    "t.id, t.account_id, t.subject, t.snippet, t.sender_name, t.sender_email, t.last_at, t.unread_count, t.message_count, t.has_attachments, t.starred, t.category, t.trackers_blocked";
 
 /// Columns `open_thread` needs for one thread.
 const THREAD_COLS_SINGLE: &str = "t.id, t.account_id, t.subject, t.starred";
@@ -100,7 +101,7 @@ pub(crate) fn get_thread(
 fn map_message(row: &Row<'_>) -> Result<MessageRow, CoreError> {
     let to_json_raw: String = row.get(4).sq()?;
     let cc_json_raw: String = row.get(5).sq()?;
-    let unsub_raw: Option<String> = row.get(10).sq()?;
+    let unsub_raw: Option<String> = row.get(11).sq()?;
     Ok(MessageRow {
         id: row_id(row, 0, MessageId::from_bytes)?,
         message_id_hdr: row.get(1).sq()?,
@@ -110,8 +111,9 @@ fn map_message(row: &Row<'_>) -> Result<MessageRow, CoreError> {
         cc: crate::store::from_json(&cc_json_raw)?,
         date: UnixMs(row.get(6).sq()?),
         snippet: row.get(7).sq()?,
-        body_text: row.get(8).sq()?,
-        raw_html: row.get(9).sq()?,
+        body_state: row.get(8).sq()?,
+        body_text: row.get(9).sq()?,
+        raw_html: row.get(10).sq()?,
         unsub: match unsub_raw {
             Some(raw) => Some(crate::store::from_json(&raw)?),
             None => None,
@@ -120,7 +122,7 @@ fn map_message(row: &Row<'_>) -> Result<MessageRow, CoreError> {
 }
 
 const MESSAGE_COLS: &str =
-    "id, message_id_hdr, from_name, from_email, to_json, cc_json, date, snippet, body_text, raw_html, unsub_json";
+    "id, message_id_hdr, from_name, from_email, to_json, cc_json, date, snippet, body_state, body_text, raw_html, unsub_json";
 
 pub(crate) fn load_messages(
     conn: &mut Connection,
@@ -257,6 +259,10 @@ pub(crate) fn refresh_thread_summary(
            last_at = COALESCE((SELECT MAX(date) FROM message WHERE thread_id = ?1), last_at),
            message_count = (SELECT COUNT(*) FROM message WHERE thread_id = ?1),
            unread_count = (SELECT COUNT(*) FROM message WHERE thread_id = ?1 AND is_read = 0),
+           has_attachments = CASE WHEN EXISTS (
+               SELECT 1 FROM attachment a JOIN message m ON m.id = a.message_id
+               WHERE m.thread_id = ?1 AND a.is_inline = 0
+           ) THEN 1 ELSE 0 END,
            snippet = COALESCE((SELECT snippet FROM message WHERE thread_id = ?1 ORDER BY date DESC, rowid DESC LIMIT 1), snippet),
            sender_name = COALESCE((SELECT COALESCE(from_name, '') FROM message WHERE thread_id = ?1 ORDER BY date DESC, rowid DESC LIMIT 1), sender_name),
            sender_email = COALESCE((SELECT from_email FROM message WHERE thread_id = ?1 ORDER BY date DESC, rowid DESC LIMIT 1), sender_email)
@@ -749,8 +755,182 @@ pub(crate) fn thread_account_ids(
     Ok(accounts)
 }
 
-/// Ingest parsed IMAP messages: upsert threads, insert messages + FTS rows, refresh
-/// derived columns. Message-level dedup makes re-sync idempotent.
+/// Distinct `(account_id, thread_id)` pairs for the given threads.
+pub(crate) fn thread_account_pairs(
+    conn: &mut Connection,
+    ids: &[ThreadId],
+) -> Result<Vec<(AccountId, ThreadId)>, CoreError> {
+    let mut pairs = Vec::new();
+    for chunk in ids.chunks(400) {
+        let values = id_values(chunk);
+        let sql = format!(
+            "SELECT t.account_id, t.id FROM thread t WHERE t.id IN ({})",
+            in_clause(chunk.len())
+        );
+        let mut stmt = conn.prepare(&sql).sq()?;
+        let rows = stmt
+            .query_map(params_from_iter(values.iter()), |r| {
+                Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?))
+            })
+            .sq()?;
+        for row in rows {
+            let (acct_bytes, thread_bytes) = row.sq()?;
+            pairs.push((
+                blob_to_id(&acct_bytes, AccountId::from_bytes)?,
+                blob_to_id(&thread_bytes, ThreadId::from_bytes)?,
+            ));
+        }
+    }
+    Ok(pairs)
+}
+
+/// Headers-only messages awaiting full body download (newest first).
+pub(crate) fn list_headers_only_messages(
+    conn: &mut Connection,
+    account_id: AccountId,
+    limit: usize,
+) -> Result<Vec<(MessageId, ThreadId, String, u32)>, CoreError> {
+    query_all(
+        conn,
+        "SELECT id, thread_id, folder_name, imap_uid FROM message
+         WHERE account_id = ?1 AND body_state = 'headers_only' AND imap_uid IS NOT NULL AND imap_uid > 0
+         ORDER BY date DESC LIMIT ?2",
+        params![id_to_blob(account_id.as_bytes()), limit.clamp(1, 100) as i64],
+        |row| {
+            Ok((
+                row_id(row, 0, MessageId::from_bytes)?,
+                row_id(row, 1, ThreadId::from_bytes)?,
+                row.get::<_, String>(2).sq()?,
+                row.get::<_, i64>(3).sq()? as u32,
+            ))
+        },
+    )
+}
+
+/// Upgrade a `headers_only` message with its full parsed body and attachments.
+pub(crate) fn upgrade_message_body(
+    conn: &mut Connection,
+    account_id: AccountId,
+    message_id: MessageId,
+    incoming: &IngestMessage,
+) -> Result<Option<ThreadId>, CoreError> {
+    let meta: Option<(i64, Vec<u8>)> = query_one(
+        conn,
+        "SELECT rowid, thread_id FROM message WHERE id = ?1 AND account_id = ?2",
+        params![
+            id_to_blob(message_id.as_bytes()),
+            id_to_blob(account_id.as_bytes())
+        ],
+        |row| Ok((row.get(0).sq()?, row.get(1).sq()?)),
+    )?;
+    let Some((rowid, thread_bytes)) = meta else {
+        return Ok(None);
+    };
+    let thread_id = blob_to_id(&thread_bytes, ThreadId::from_bytes)?;
+    conn.execute(
+        "UPDATE message
+         SET body_state = 'full', body_text = ?2, raw_html = ?3, snippet = ?4, unsub_json = ?5
+         WHERE id = ?1",
+        params![
+            id_to_blob(message_id.as_bytes()),
+            incoming.body_text,
+            incoming.raw_html,
+            incoming.snippet,
+            incoming.unsub.as_ref().map(to_json).transpose()?,
+        ],
+    )
+    .sq()?;
+    let _ = crate::store::fts_delete(conn, rowid);
+    let sender = match &incoming.from_name {
+        Some(name) => format!("{name} {}", incoming.from_email),
+        None => incoming.from_email.clone(),
+    };
+    fts_insert(conn, rowid, &incoming.subject, &sender, &incoming.body_text)?;
+    let att_rows: Vec<crate::store::NewAttachment> = incoming
+        .attachments
+        .iter()
+        .map(|a| crate::store::NewAttachment {
+            id: crate::ids::AttachmentId::fresh(),
+            message_id,
+            account_id,
+            filename: a.filename.clone(),
+            mime: a.mime.clone(),
+            size: a.size,
+            content_id: a.content_id.clone(),
+            is_inline: a.is_inline,
+            part_id: a.part_id.clone(),
+            data: a.data.clone(),
+        })
+        .collect();
+    crate::store::insert_attachments(conn, &att_rows)?;
+    for payload in &incoming.ics_payloads {
+        for parsed in crate::calendar::parse_ics(payload) {
+            crate::store::upsert_message_invite(conn, message_id, &parsed)?;
+        }
+    }
+    refresh_thread_summary(conn, thread_id)?;
+    Ok(Some(thread_id))
+}
+
+/// Reconcile `\Seen` flags from a periodic full flag pass against local messages in `folder`.
+pub(crate) fn sync_folder_seen_flags(
+    conn: &mut Connection,
+    account_id: AccountId,
+    folder: &str,
+    seen_uids: &[u32],
+    unseen_uids: &[u32],
+) -> Result<Vec<ThreadId>, CoreError> {
+    let mut touched = Vec::new();
+    for (uids, is_read) in [(seen_uids, 1i64), (unseen_uids, 0i64)] {
+        for chunk in uids.chunks(200) {
+            if chunk.is_empty() {
+                continue;
+            }
+            let placeholders = in_clause(chunk.len());
+            let mut params_vec: Vec<Value> = Vec::with_capacity(chunk.len() + 3);
+            params_vec.push(Value::Integer(is_read));
+            params_vec.push(Value::Blob(id_to_blob(account_id.as_bytes())));
+            params_vec.push(Value::Text(folder.to_string()));
+            for &uid in chunk {
+                params_vec.push(Value::Integer(i64::from(uid)));
+            }
+            let select_sql = format!(
+                "SELECT DISTINCT thread_id FROM message
+                 WHERE account_id = ?2 AND folder_name = ?3 AND is_read != ?1 AND imap_uid IN ({placeholders})"
+            );
+            let mut stmt = conn.prepare(&select_sql).sq()?;
+            let rows = stmt
+                .query_map(params_from_iter(params_vec.iter()), |r| {
+                    r.get::<_, Vec<u8>>(0)
+                })
+                .sq()?;
+            let mut batch_threads = Vec::new();
+            for row in rows {
+                let bytes = row.sq()?;
+                batch_threads.push(blob_to_id(&bytes, ThreadId::from_bytes)?);
+            }
+            drop(stmt);
+            if !batch_threads.is_empty() {
+                let update_sql = format!(
+                    "UPDATE message SET is_read = ?1
+                     WHERE account_id = ?2 AND folder_name = ?3 AND imap_uid IN ({placeholders})"
+                );
+                conn.execute(&update_sql, params_from_iter(params_vec.iter()))
+                    .sq()?;
+                for tid in batch_threads {
+                    refresh_thread_summary(conn, tid)?;
+                    if !touched.contains(&tid) {
+                        touched.push(tid);
+                    }
+                }
+            }
+        }
+    }
+    Ok(touched)
+}
+
+/// Ingest parsed IMAP messages: upsert threads, insert messages + FTS rows + attachments,
+/// refresh derived columns. Message-level dedup makes re-sync idempotent.
 pub(crate) fn ingest_messages(
     conn: &mut Connection,
     account_id: AccountId,
@@ -802,6 +982,41 @@ pub(crate) fn ingest_messages(
             },
         )?;
         if inserted {
+            let body_state = if incoming.headers_only {
+                "headers_only"
+            } else {
+                "full"
+            };
+            conn.execute(
+                "UPDATE message SET folder_name = ?2, imap_uid = ?3, body_state = ?4 WHERE id = ?1",
+                params![
+                    id_to_blob(msg_id.as_bytes()),
+                    incoming.folder_name,
+                    incoming.imap_uid.map(i64::from),
+                    body_state,
+                ],
+            )
+            .sq()?;
+            if !incoming.attachments.is_empty() {
+                let att_rows: Vec<crate::store::NewAttachment> = incoming
+                    .attachments
+                    .iter()
+                    .map(|a| crate::store::NewAttachment {
+                        id: crate::ids::AttachmentId::fresh(),
+                        message_id: msg_id,
+                        account_id,
+                        filename: a.filename.clone(),
+                        mime: a.mime.clone(),
+                        size: a.size,
+                        content_id: a.content_id.clone(),
+                        is_inline: a.is_inline,
+                        part_id: a.part_id.clone(),
+                        data: a.data.clone(),
+                    })
+                    .collect();
+                crate::store::insert_attachments(conn, &att_rows)?;
+                refresh_thread_summary(conn, thread_id)?;
+            }
             for payload in &incoming.ics_payloads {
                 for parsed in crate::calendar::parse_ics(payload) {
                     crate::store::upsert_message_invite(conn, msg_id, &parsed)?;

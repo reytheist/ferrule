@@ -532,6 +532,8 @@ pub(crate) fn seed_demo(conn: &mut Connection, now: UnixMs) -> Result<bool, Core
             body_text:
                 "Confirmed — 25% kill fee works. Circulate for signature whenever you're ready."
                     .to_string(),
+            body_html: None,
+            attachments: vec![],
             in_reply_to: Some("<northstar-3@northstar-legal.com>".to_string()),
             references: Some("<northstar-3@northstar-legal.com>".to_string()),
         },
@@ -552,6 +554,7 @@ pub(crate) fn seed_demo(conn: &mut Connection, now: UnixMs) -> Result<bool, Core
             body_text:
                 "Confirmed — 25% kill fee works. Circulate for signature whenever you're ready."
                     .to_string(),
+            body_html: None,
             origin: DraftOrigin::Human,
             state: DraftState::Queued {
                 job_id: send_job_id,

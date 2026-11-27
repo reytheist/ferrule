@@ -20,21 +20,22 @@ pub(crate) struct DraftRow {
     pub bcc: Vec<String>,
     pub subject: String,
     pub body_text: String,
+    pub body_html: Option<String>,
     pub rev: u32,
     pub origin: DraftOrigin,
     pub state: DraftState,
 }
 
-const DRAFT_COLS: &str = "id, account_id, from_identity_id, from_locked, reply_to_thread, to_json, cc_json, bcc_json, subject, body_text, rev, origin_kind, origin_agent, rationale, state_json";
+const DRAFT_COLS: &str = "id, account_id, from_identity_id, from_locked, reply_to_thread, to_json, cc_json, bcc_json, subject, body_text, body_html, rev, origin_kind, origin_agent, rationale, state_json";
 
 fn map_draft(row: &Row<'_>) -> Result<DraftRow, CoreError> {
     let to_raw: String = row.get(5).sq()?;
     let cc_raw: String = row.get(6).sq()?;
     let bcc_raw: String = row.get(7).sq()?;
-    let origin_kind: String = row.get(11).sq()?;
-    let origin_agent: Option<String> = row.get(12).sq()?;
-    let rationale: Option<String> = row.get(13).sq()?;
-    let state_raw: String = row.get(14).sq()?;
+    let origin_kind: String = row.get(12).sq()?;
+    let origin_agent: Option<String> = row.get(13).sq()?;
+    let rationale: Option<String> = row.get(14).sq()?;
+    let state_raw: String = row.get(15).sq()?;
     Ok(DraftRow {
         id: row_id(row, 0, DraftId::from_bytes)?,
         account_id: row_id(row, 1, AccountId::from_bytes)?,
@@ -49,7 +50,8 @@ fn map_draft(row: &Row<'_>) -> Result<DraftRow, CoreError> {
         bcc: from_json(&bcc_raw)?,
         subject: row.get(8).sq()?,
         body_text: row.get(9).sq()?,
-        rev: row.get::<_, i64>(10).sq()?.max(0) as u32,
+        body_html: row.get(10).sq()?,
+        rev: row.get::<_, i64>(11).sq()?.max(0) as u32,
         origin: match origin_kind.as_str() {
             "agent" => DraftOrigin::Agent {
                 agent_id: origin_agent.unwrap_or_default(),
@@ -75,6 +77,7 @@ pub(crate) struct InsertDraft {
     pub bcc: Vec<String>,
     pub subject: String,
     pub body_text: String,
+    pub body_html: Option<String>,
     pub origin: DraftOrigin,
     pub state: DraftState,
     pub updated_at: UnixMs,
@@ -94,8 +97,8 @@ pub(crate) fn insert_draft(conn: &mut Connection, d: &InsertDraft) -> Result<Dra
     };
     let id = DraftId::fresh();
     conn.execute(
-        "INSERT INTO draft (id, account_id, from_identity_id, from_locked, reply_to_thread, to_json, cc_json, bcc_json, subject, body_text, rev, origin_kind, origin_agent, rationale, state_json, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, ?11, ?12, ?13, ?14, ?15)",
+        "INSERT INTO draft (id, account_id, from_identity_id, from_locked, reply_to_thread, to_json, cc_json, bcc_json, subject, body_text, body_html, rev, origin_kind, origin_agent, rationale, state_json, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12, ?13, ?14, ?15, ?16)",
         params![
             id_to_blob(id.as_bytes()),
             id_to_blob(d.account_id.as_bytes()),
@@ -107,6 +110,7 @@ pub(crate) fn insert_draft(conn: &mut Connection, d: &InsertDraft) -> Result<Dra
             to_json(&d.bcc)?,
             d.subject,
             d.body_text,
+            d.body_html,
             origin_kind,
             origin_agent,
             rationale,
@@ -147,6 +151,10 @@ pub(crate) fn draft_view(conn: &mut Connection, draft: &DraftRow) -> Result<Draf
     if ident.account_id != draft.account_id {
         return Err(CoreError::IdentityMismatch);
     }
+    let attachments = crate::store::list_draft_attachments(conn, draft.id)?
+        .into_iter()
+        .map(|a| a.to_view())
+        .collect();
     Ok(DraftView {
         id: draft.id,
         account_id: draft.account_id,
@@ -159,6 +167,8 @@ pub(crate) fn draft_view(conn: &mut Connection, draft: &DraftRow) -> Result<Draf
         bcc: draft.bcc.clone(),
         subject: draft.subject.clone(),
         body_text: draft.body_text.clone(),
+        body_html: draft.body_html.clone(),
+        attachments,
         rev: draft.rev,
         origin: draft.origin.clone(),
         state: draft.state.clone(),

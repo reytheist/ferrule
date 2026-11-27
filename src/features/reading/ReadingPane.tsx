@@ -7,6 +7,8 @@ import {
   ChevronDown,
   ChevronLeft,
   Clock,
+  Download,
+  Eye,
   Flag,
   Image,
   Lock,
@@ -17,8 +19,16 @@ import {
   Star,
   Trash2,
   Type,
+  X,
 } from "lucide-react";
-import type { CalendarInviteView, MessageView, RsvpStatus, ThreadView } from "../../types/mail";
+import type {
+  AttachmentData,
+  AttachmentMeta,
+  CalendarInviteView,
+  MessageView,
+  RsvpStatus,
+  ThreadView,
+} from "../../types/mail";
 import { AvailabilityPicker } from "../calendar/AvailabilityPicker";
 import type { MailApp } from "../shell/useMailApp";
 import { spaceClass } from "../spaces/SpaceSwitcher";
@@ -67,12 +77,143 @@ function PrivacyRibbon({ app, thread }: { app: MailApp; thread: ThreadView }) {
   );
 }
 
-function AttachmentChip({ name, size }: { name: string; size: number }) {
+function isPreviewableMime(mime: string): boolean {
+  const lower = mime.toLowerCase();
   return (
-    <span className="attachment-chip">
+    lower.startsWith("image/") ||
+    lower === "application/pdf" ||
+    lower.startsWith("text/") ||
+    lower === "application/json"
+  );
+}
+
+function triggerBrowserDownload(data: AttachmentData): void {
+  const binary = atob(data.dataBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  const blob = new Blob([bytes], { type: data.mime || "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = data.filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function AttachmentPreviewModal({
+  data,
+  onClose,
+}: {
+  data: AttachmentData;
+  onClose: () => void;
+}) {
+  const lower = data.mime.toLowerCase();
+  const dataUri = `data:${data.mime};base64,${data.dataBase64}`;
+  const decodedText =
+    lower.startsWith("text/") || lower === "application/json" ? atob(data.dataBase64) : null;
+
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="modal wide attachment-preview-modal" role="dialog" aria-label={data.filename}>
+        <div className="modal-head">
+          <h2>{data.filename}</h2>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <button
+              type="button"
+              className="btn compact primary"
+              onClick={() => triggerBrowserDownload(data)}
+            >
+              <Download />
+              Save
+            </button>
+            <button type="button" className="icon-btn" onClick={onClose} title="Close">
+              <X />
+            </button>
+          </div>
+        </div>
+        <div className="modal-body attachment-preview-body">
+          {lower.startsWith("image/") ? (
+            <img className="att-preview-img" src={dataUri} alt={data.filename} />
+          ) : lower === "application/pdf" ? (
+            <iframe className="att-preview-pdf" src={dataUri} title={data.filename} />
+          ) : decodedText !== null ? (
+            <pre className="att-preview-text">{decodedText}</pre>
+          ) : (
+            <span className="hint-text">Preview unavailable for {data.mime}.</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AttachmentChip({
+  app,
+  attachment,
+  onPreview,
+}: {
+  app: MailApp;
+  attachment: AttachmentMeta;
+  onPreview: (data: AttachmentData) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+
+  async function handleDownload(): Promise<void> {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const data = await app.downloadAttachment(attachment.id);
+      triggerBrowserDownload(data);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handlePreview(): Promise<void> {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const data = await app.downloadAttachment(attachment.id);
+      onPreview(data);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <span className="attachment-chip interactive">
       <Paperclip />
-      {name}
-      <span className="size">{formatSize(size)}</span>
+      <span className="att-name">{attachment.filename}</span>
+      <span className="size">{formatSize(attachment.size)}</span>
+      {isPreviewableMime(attachment.mime) && (
+        <button
+          type="button"
+          className="att-action-btn"
+          disabled={loading}
+          title="Preview attachment"
+          onClick={() => void handlePreview()}
+        >
+          <Eye />
+        </button>
+      )}
+      <button
+        type="button"
+        className="att-action-btn"
+        disabled={loading}
+        title="Download attachment"
+        onClick={() => void handleDownload()}
+      >
+        <Download />
+      </button>
     </span>
   );
 }
@@ -165,7 +306,15 @@ function CalendarInviteCard({
   );
 }
 
-function MessageBubble({ app, message }: { app: MailApp; message: MessageView }) {
+function MessageBubble({
+  app,
+  message,
+  onPreview,
+}: {
+  app: MailApp;
+  message: MessageView;
+  onPreview: (data: AttachmentData) => void;
+}) {
   const invites = message.invites ?? [];
   return (
     <div className="msg-bubble">
@@ -189,7 +338,12 @@ function MessageBubble({ app, message }: { app: MailApp; message: MessageView })
       {message.attachments.length > 0 && (
         <div className="msg-attachments">
           {message.attachments.map((attachment) => (
-            <AttachmentChip key={attachment.id} name={attachment.filename} size={attachment.size} />
+            <AttachmentChip
+              key={attachment.id}
+              app={app}
+              attachment={attachment}
+              onPreview={onPreview}
+            />
           ))}
         </div>
       )}
@@ -314,6 +468,7 @@ function ReplyDock({ app, thread }: { app: MailApp; thread: ThreadView }) {
 }
 
 export function ReadingPane({ app }: { app: MailApp }) {
+  const [previewAttachment, setPreviewAttachment] = useState<AttachmentData | null>(null);
   const thread = app.thread;
 
   if (!thread) {
@@ -433,7 +588,12 @@ export function ReadingPane({ app }: { app: MailApp }) {
 
             {earlier.map((message) =>
               app.expanded.has(message.id) ? (
-                <MessageBubble key={message.id} app={app} message={message} />
+                <MessageBubble
+                  key={message.id}
+                  app={app}
+                  message={message}
+                  onPreview={setPreviewAttachment}
+                />
               ) : (
                 <CollapsedMessage
                   key={message.id}
@@ -443,12 +603,20 @@ export function ReadingPane({ app }: { app: MailApp }) {
               ),
             )}
 
-            {current && <MessageBubble app={app} message={current} />}
+            {current && (
+              <MessageBubble app={app} message={current} onPreview={setPreviewAttachment} />
+            )}
           </div>
         </div>
 
         <ReplyDock app={app} thread={thread} />
       </div>
+      {previewAttachment && (
+        <AttachmentPreviewModal
+          data={previewAttachment}
+          onClose={() => setPreviewAttachment(null)}
+        />
+      )}
     </main>
   );
 }

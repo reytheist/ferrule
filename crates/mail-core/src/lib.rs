@@ -27,13 +27,18 @@ use crate::auth::{
 use crate::error::CoreError;
 use crate::events::{Alert, CoreEvent};
 use crate::host::{Clock, OsKeychain, SystemClock};
-use crate::ids::{AccountId, AgentId, DraftId, JobId, TemplateId, ThreadId, UnixMs};
+use crate::ids::{
+    AccountId, AgentId, AttachmentId, DraftId, JobId, SignatureId, TemplateId, ThreadId, UnixMs,
+};
 use crate::schedule::{
     step_follow_up, step_outbox, step_snooze, FollowUpEvent, FollowUpState, OutboxEffect,
     OutboxEvent, OutboxState, SnoozeEvent, SnoozeState,
 };
 use crate::store::JobKind;
-use crate::sync::smtp::{freeze_message, send_frozen, FreezeInput, FrozenMessage, SmtpOutcome};
+use crate::sync::actor::{ActorCommand, SyncManager};
+use crate::sync::smtp::{
+    freeze_message, send_frozen, FreezeInput, FrozenAttachment, FrozenMessage, SmtpOutcome,
+};
 use crate::sync::Dialect;
 use crate::types::*;
 
@@ -81,6 +86,7 @@ struct MailCoreInner {
     host: Host,
     events: broadcast::Sender<CoreEvent>,
     token_cache: Mutex<HashMap<AccountId, CachedAccessToken>>,
+    sync_manager: SyncManager,
 }
 
 #[derive(Clone)]
@@ -123,8 +129,20 @@ impl MailCore {
                 host,
                 events,
                 token_cache: Mutex::new(HashMap::new()),
+                sync_manager: SyncManager::new(),
             }),
         })
+    }
+
+    /// Start background per-account async IMAP sync actors and the dedicated durable
+    /// SMTP submission worker. Call once on desktop startup.
+    pub fn start_background_services(&self) {
+        self.inner.sync_manager.start_smtp_worker(self.clone());
+        if let Ok(accounts) = self.inner.store.with_conn(store::list_account_rows) {
+            for account in accounts {
+                self.inner.sync_manager.ensure_actor(self.clone(), account.id);
+            }
+        }
     }
 
     pub fn config(&self) -> &CoreConfig {
@@ -321,6 +339,7 @@ impl MailCore {
             cache.remove(&account_id);
         }
 
+        self.inner.sync_manager.stop_actor(account_id);
         self.inner
             .store
             .with_conn(|conn| store::delete_account(conn, account_id))?;
@@ -581,6 +600,9 @@ impl MailCore {
             )?;
         }
         self.cache_access_token(account_id, bundle.access_token, bundle.expires_in_secs);
+        self.inner
+            .sync_manager
+            .send_command(account_id, ActorCommand::Reauthed);
         self.sync_account(account_id).await
     }
 
@@ -764,7 +786,7 @@ impl MailCore {
         thread_id: ThreadId,
         remote_content: RemoteContent,
     ) -> Result<ThreadView, CoreError> {
-        let (view, changed, account_id) = self.inner.store.with_conn(|conn| {
+        let (view, changed, account_id, headers_only_ids) = self.inner.store.with_conn(|conn| {
             let thread = store::get_thread(conn, thread_id)?.ok_or(CoreError::NotFound {
                 entity: "thread".to_string(),
             })?;
@@ -779,13 +801,23 @@ impl MailCore {
                 store::live_follow_up_for_thread(conn, thread_id)?.map(|j| j.due_at);
 
             let mut out = Vec::with_capacity(messages.len());
+            let mut headers_only_ids = Vec::new();
             for message in &messages {
+                if message.body_state == "headers_only" {
+                    headers_only_ids.push(message.id);
+                }
+                let att_rows = store::list_message_attachments(conn, message.id)?;
                 let raw = match &message.raw_html {
-                    Some(html) => html.clone(),
+                    Some(html) => sync::inline_cid_images(html, &att_rows),
                     None => sanitize::text_to_html(&message.body_text),
                 };
                 let doc = sanitize::sanitize_html(&raw, remote_content);
                 let invites = store::load_message_invites(conn, message.id)?;
+                let attachments: Vec<AttachmentMeta> = att_rows
+                    .iter()
+                    .filter(|a| !a.is_inline || a.content_id.is_none())
+                    .map(store::AttachmentRow::to_meta)
+                    .collect();
                 out.push(MessageView {
                     id: message.id,
                     from_name: message.from_name.clone(),
@@ -797,7 +829,7 @@ impl MailCore {
                     body_srcdoc: doc.srcdoc.into_inner(),
                     body_text: message.body_text.clone(),
                     privacy: doc.privacy,
-                    attachments: Vec::new(),
+                    attachments,
                     unsubscribe: message.unsub.clone(),
                     invites,
                 });
@@ -818,8 +850,15 @@ impl MailCore {
                 },
                 changed,
                 thread.account_id,
+                headers_only_ids,
             ))
         })?;
+
+        for mid in headers_only_ids {
+            self.inner
+                .sync_manager
+                .send_command(account_id, ActorCommand::FetchBody(mid));
+        }
 
         if changed {
             self.emit(CoreEvent::MailChanged {
@@ -835,16 +874,28 @@ impl MailCore {
         action: MailAction,
         thread_ids: Vec<ThreadId>,
     ) -> Result<ActionOutcome, CoreError> {
+        let now = self.now();
         let outcome = self
             .inner
             .store
             .with_conn(|conn| store::apply_mail_action(conn, &action, &thread_ids))?;
         if !outcome.updated_ids.is_empty() {
+            let pairs = self
+                .inner
+                .store
+                .with_conn(|conn| store::thread_account_pairs(conn, &outcome.updated_ids))?;
+            let _ = self
+                .inner
+                .store
+                .with_conn(|conn| store::enqueue_offline_actions(conn, &pairs, &action, now));
             let accounts = self
                 .inner
                 .store
                 .with_conn(|conn| store::thread_account_ids(conn, &outcome.updated_ids))?;
             for account_id in accounts {
+                self.inner
+                    .sync_manager
+                    .send_command(account_id, ActorCommand::FlushActions);
                 self.emit(CoreEvent::MailChanged {
                     account_id,
                     thread_ids: outcome.updated_ids.clone(),
@@ -854,9 +905,51 @@ impl MailCore {
         Ok(outcome)
     }
 
+    /// Number of queued offline actions awaiting remote IMAP synchronization for an account.
+    pub async fn pending_offline_actions(&self, account_id: AccountId) -> Result<u32, CoreError> {
+        self.inner
+            .store
+            .with_conn(|conn| store::pending_action_count(conn, account_id))
+    }
+
     // ---------------------------------------------------------------- drafts
 
     pub async fn create_draft(&self, input: CreateDraftInput) -> Result<DraftView, CoreError> {
+        use base64::Engine as _;
+        const MAX_TOTAL_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
+
+        let mut decoded_attachments: Vec<(String, String, Vec<u8>)> =
+            Vec::with_capacity(input.attachments.len());
+        let mut total_bytes = 0usize;
+        for att in &input.attachments {
+            let filename = att.filename.trim();
+            if filename.is_empty() {
+                return Err(CoreError::InvalidInput {
+                    field: "attachments".to_string(),
+                    reason: "attachment filename is required".to_string(),
+                });
+            }
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(&att.data_base64)
+                .map_err(|e| CoreError::InvalidInput {
+                    field: "attachments".to_string(),
+                    reason: format!("invalid base64 attachment '{filename}': {e}"),
+                })?;
+            total_bytes = total_bytes.saturating_add(bytes.len());
+            if total_bytes > MAX_TOTAL_ATTACHMENT_BYTES {
+                return Err(CoreError::InvalidInput {
+                    field: "attachments".to_string(),
+                    reason: "total attachment size exceeds 25 MB limit".to_string(),
+                });
+            }
+            let mime = if att.mime.trim().is_empty() {
+                "application/octet-stream".to_string()
+            } else {
+                att.mime.trim().to_string()
+            };
+            decoded_attachments.push((filename.to_string(), mime, bytes));
+        }
+
         let now = self.now();
         let view = self.inner.store.with_conn(|conn| {
             store::get_account(conn, input.account_id)?.ok_or(CoreError::NotFound {
@@ -889,11 +982,15 @@ impl MailCore {
                     bcc: input.bcc,
                     subject: input.subject,
                     body_text: input.body_text,
+                    body_html: input.body_html,
                     origin: DraftOrigin::Human,
                     state: DraftState::Editing,
                     updated_at: now,
                 },
             )?;
+            if !decoded_attachments.is_empty() {
+                store::insert_draft_attachments(conn, draft_id, &decoded_attachments)?;
+            }
             let draft = store::get_draft(conn, draft_id)?.ok_or(CoreError::Internal {
                 reason: "draft disappeared after insert".to_string(),
             })?;
@@ -1017,6 +1114,17 @@ impl MailCore {
                 None => (None, None),
             };
 
+            use base64::Engine as _;
+            let frozen_attachments: Vec<FrozenAttachment> =
+                store::list_draft_attachments(conn, draft_id)?
+                    .into_iter()
+                    .map(|att| FrozenAttachment {
+                        filename: att.filename,
+                        mime: att.mime,
+                        data_base64: base64::engine::general_purpose::STANDARD.encode(&att.data),
+                    })
+                    .collect();
+
             let frozen = freeze_message(
                 FreezeInput {
                     from_name: identity.display_name.clone(),
@@ -1026,6 +1134,8 @@ impl MailCore {
                     bcc: draft.bcc.clone(),
                     subject: draft.subject.clone(),
                     body_text: draft.body_text.clone(),
+                    body_html: draft.body_html.clone(),
+                    attachments: frozen_attachments,
                     in_reply_to,
                     references,
                 },
@@ -1086,6 +1196,7 @@ impl MailCore {
         self.emit(CoreEvent::DraftChanged {
             draft_id: sendable.draft_id,
         });
+        self.inner.sync_manager.wake_smtp();
 
         Ok(SendReceipt {
             job_id: sendable.job_id,
@@ -1293,6 +1404,147 @@ impl MailCore {
     pub async fn list_jobs(&self) -> Result<Vec<JobView>, CoreError> {
         let jobs = self.inner.store.with_conn(store::list_live_jobs)?;
         Ok(jobs.iter().map(|job| job.to_view()).collect())
+    }
+
+    // ---------------------------------------------------------------- attachments & signatures
+
+    /// Return attachment bytes (base64-encoded). If not yet cached in SQLite, fetches
+    /// the owning message from IMAP on demand and caches the attachment locally.
+    pub async fn download_attachment(
+        &self,
+        attachment_id: AttachmentId,
+    ) -> Result<AttachmentData, CoreError> {
+        use base64::Engine as _;
+
+        let att = self
+            .inner
+            .store
+            .with_conn(|conn| store::get_attachment(conn, attachment_id))?
+            .ok_or_else(|| CoreError::NotFound {
+                entity: "attachment".to_string(),
+            })?;
+
+        if let Some(bytes) = att.data {
+            return Ok(AttachmentData {
+                id: att.id,
+                filename: att.filename,
+                mime: att.mime,
+                size: bytes.len() as u64,
+                data_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+            });
+        }
+
+        // On-demand IMAP fetch for uncached attachment.
+        let location = self
+            .inner
+            .store
+            .with_conn(|conn| store::message_imap_location(conn, att.message_id))?
+            .ok_or_else(|| CoreError::NotFound {
+                entity: "attachment source message".to_string(),
+            })?;
+        let account = self.account_row(att.account_id)?;
+        let Some(secret) = self
+            .resolve_transport_secret(att.account_id, &account.auth)
+            .await?
+        else {
+            return Err(CoreError::AuthRequired {
+                account_id: att.account_id,
+                reason: "no saved credential in OS keychain".to_string(),
+            });
+        };
+        let plan = sync::imap::plan_for(
+            att.account_id,
+            &account.auth,
+            secret,
+            location.0,
+            sync::imap::SyncWindow {
+                since: self.now(),
+                now: self.now(),
+                min_uid: 0,
+            },
+        );
+        let fetched = sync::imap::fetch_bodies_for_uids(&plan, &[location.1]).await?;
+        let bytes = fetched
+            .into_iter()
+            .flat_map(|m| m.attachments.into_iter())
+            .find(|parsed| {
+                parsed.filename == att.filename
+                    || (att.part_id.is_some() && parsed.part_id == att.part_id)
+            })
+            .and_then(|parsed| parsed.data)
+            .ok_or_else(|| CoreError::NotFound {
+                entity: "attachment payload on server".to_string(),
+            })?;
+
+        self.inner
+            .store
+            .with_conn(|conn| store::cache_attachment_data(conn, att.id, &bytes))?;
+
+        Ok(AttachmentData {
+            id: att.id,
+            filename: att.filename,
+            mime: att.mime,
+            size: bytes.len() as u64,
+            data_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        })
+    }
+
+    /// Save an attachment to a local file path (downloads on demand if uncached).
+    pub async fn save_attachment(
+        &self,
+        attachment_id: AttachmentId,
+        dest_path: PathBuf,
+    ) -> Result<String, CoreError> {
+        use base64::Engine as _;
+        let data = self.download_attachment(attachment_id).await?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&data.data_base64)
+            .map_err(|e| CoreError::Internal {
+                reason: format!("decode attachment base64: {e}"),
+            })?;
+        if let Some(parent) = dest_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent).map_err(|e| CoreError::Storage {
+                    reason: format!("create attachment parent dir: {e}"),
+                })?;
+            }
+        }
+        std::fs::write(&dest_path, &bytes).map_err(|e| CoreError::Storage {
+            reason: format!("write attachment file: {e}"),
+        })?;
+        Ok(dest_path.to_string_lossy().to_string())
+    }
+
+    pub async fn list_signatures(
+        &self,
+        account_id: Option<AccountId>,
+    ) -> Result<Vec<SignatureView>, CoreError> {
+        self.inner
+            .store
+            .with_conn(|conn| store::list_signatures(conn, account_id))
+    }
+
+    pub async fn save_signature(
+        &self,
+        input: SaveSignatureInput,
+    ) -> Result<SignatureView, CoreError> {
+        let now = self.now();
+        self.inner
+            .store
+            .with_conn(|conn| store::save_signature(conn, &input, now))
+    }
+
+    pub async fn delete_signature(&self, signature_id: SignatureId) -> Result<(), CoreError> {
+        let deleted = self
+            .inner
+            .store
+            .with_conn(|conn| store::delete_signature(conn, signature_id))?;
+        if !deleted {
+            return Err(CoreError::NotFound {
+                entity: "signature".to_string(),
+            });
+        }
+        Ok(())
     }
 
     // ---------------------------------------------------------------- templates
@@ -1610,12 +1862,13 @@ impl MailCore {
     ) -> Result<JobView, CoreError> {
         let snippet = crate::sync::snippet_of(&frozen.body_text);
         let (view, thread_id) = self.inner.store.with_conn(|conn| {
+            let sent_msg_id = crate::ids::MessageId::fresh();
             let thread_id = match job.thread_id {
                 Some(thread_id) => {
                     store::insert_message(
                         conn,
                         &store::NewMessage {
-                            id: crate::ids::MessageId::fresh(),
+                            id: sent_msg_id,
                             account_id: job.account_id,
                             thread_id,
                             message_id_hdr: frozen.message_id.clone(),
@@ -1629,7 +1882,7 @@ impl MailCore {
                             snippet: snippet.clone(),
                             is_read: true,
                             body_text: frozen.body_text.clone(),
-                            raw_html: None,
+                            raw_html: frozen.body_html.clone(),
                             unsub: None,
                             trackers: 0,
                         },
@@ -1673,7 +1926,7 @@ impl MailCore {
                     store::insert_message(
                         conn,
                         &store::NewMessage {
-                            id: crate::ids::MessageId::fresh(),
+                            id: sent_msg_id,
                             account_id: job.account_id,
                             thread_id,
                             message_id_hdr: frozen.message_id.clone(),
@@ -1687,7 +1940,7 @@ impl MailCore {
                             snippet: snippet.clone(),
                             is_read: true,
                             body_text: frozen.body_text.clone(),
-                            raw_html: None,
+                            raw_html: frozen.body_html.clone(),
                             unsub: None,
                             trackers: 0,
                         },
@@ -1695,6 +1948,31 @@ impl MailCore {
                     thread_id
                 }
             };
+
+            if !frozen.attachments.is_empty() {
+                use base64::Engine as _;
+                let mut sent_atts = Vec::with_capacity(frozen.attachments.len());
+                for att in &frozen.attachments {
+                    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&att.data_base64) {
+                        sent_atts.push(store::NewAttachment {
+                            id: AttachmentId::fresh(),
+                            message_id: sent_msg_id,
+                            account_id: job.account_id,
+                            filename: att.filename.clone(),
+                            mime: att.mime.clone(),
+                            size: bytes.len() as u64,
+                            content_id: None,
+                            is_inline: false,
+                            part_id: None,
+                            data: Some(bytes),
+                        });
+                    }
+                }
+                if !sent_atts.is_empty() {
+                    store::insert_attachments(conn, &sent_atts)?;
+                    store::refresh_thread_summary(conn, thread_id)?;
+                }
+            }
 
             if let Some(draft_id) = job.draft_id {
                 store::set_draft_state(conn, draft_id, &DraftState::Sent { at }, at)?;
@@ -1749,11 +2027,7 @@ impl MailCore {
             .message_id_hdr
             .clone()
             .unwrap_or_else(|| frozen.message_id.clone());
-        tokio::task::spawn_blocking(move || sync::imap::verify_in_sent(&plan, &message_id))
-            .await
-            .map_err(|e| CoreError::Internal {
-                reason: format!("verify task failed: {e}"),
-            })?
+        sync::imap::verify_in_sent(&plan, &message_id).await
     }
 
     // ---------------------------------------------------------------- sync
@@ -1828,11 +2102,10 @@ impl MailCore {
                 min_uid,
             },
         );
-        let fetched = tokio::task::spawn_blocking(move || sync::imap::fetch_window(&plan))
-            .await
-            .map_err(|e| CoreError::Internal {
-                reason: format!("sync task failed: {e}"),
-            })?;
+        let fetched = sync::imap::fetch_window(&plan).await;
+        self.inner
+            .sync_manager
+            .send_command(account_id, ActorCommand::SyncNow);
 
         match fetched {
             Ok(window) => {
@@ -1977,6 +2250,7 @@ impl MailCore {
                     bcc: Vec::new(),
                     subject,
                     body_text,
+                    body_html: None,
                     origin: DraftOrigin::Agent {
                         agent_id: agent_id.to_string(),
                         rationale,
