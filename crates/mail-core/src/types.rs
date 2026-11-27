@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::{ProviderAuth, ProviderKind};
 use crate::ids::{
-    AccountId, AttachmentId, DraftId, IdentityId, JobId, LabelId, MessageId, RuleId, SavedSearchId,
-    SignatureId, TemplateId, ThreadId, UnixMs,
+    AccountId, AgentActivityId, AttachmentId, DraftId, IdentityId, JobId, LabelId, MessageId,
+    RuleId, SavedSearchId, SignatureId, TemplateId, ThreadId, UnixMs,
 };
 use crate::rules::{RuleAction, RuleCondition};
 
@@ -683,4 +683,206 @@ pub struct SaveMailRuleInput {
     pub match_all: bool,
     pub conditions: Vec<RuleCondition>,
     pub actions: Vec<RuleAction>,
+}
+
+// ── Phase 4: Hermes MCP Bridge, Agent Permissions, Activity Log & In-Pane AI ──
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentAccountPermissionView {
+    pub account_id: AccountId,
+    pub account_label: String,
+    pub account_email: String,
+    pub enabled: bool,
+    pub allow_read: bool,
+    pub allow_triage: bool,
+    pub allow_drafts: bool,
+    pub blocked_folders: Vec<String>,
+    pub known_folders: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAgentAccountPermissionInput {
+    pub account_id: AccountId,
+    pub enabled: bool,
+    pub allow_read: bool,
+    pub allow_triage: bool,
+    pub allow_drafts: bool,
+    #[serde(default)]
+    pub blocked_folders: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderInfoView {
+    pub account_id: AccountId,
+    pub name: String,
+    pub messages_count: u32,
+    pub unseen_count: u32,
+    pub agent_allowed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadFlagSnapshot {
+    pub thread_id: ThreadId,
+    pub archived: bool,
+    pub trashed: bool,
+    pub spam: bool,
+    pub starred: bool,
+    pub unread_count: u32,
+    pub message_reads: Vec<(MessageId, bool)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum AgentUndoPayload {
+    RestoreThreadFlags {
+        states: Vec<ThreadFlagSnapshot>,
+    },
+    ToggleLabel {
+        label_id: LabelId,
+        thread_ids: Vec<ThreadId>,
+        was_added: bool,
+    },
+    CancelSnooze {
+        thread_id: ThreadId,
+        previous_due_at: Option<UnixMs>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentActivityView {
+    pub id: AgentActivityId,
+    pub agent_id: String,
+    pub tool_name: String,
+    pub summary: String,
+    pub account_id: Option<AccountId>,
+    pub thread_id: Option<ThreadId>,
+    pub can_undo: bool,
+    pub undone: bool,
+    pub undone_at: Option<UnixMs>,
+    pub created_at: UnixMs,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentBridgeConfig {
+    #[serde(default = "default_true")]
+    pub mcp_enabled: bool,
+    #[serde(default = "default_sse_port")]
+    pub sse_port: u16,
+    #[serde(default)]
+    pub webhook_enabled: bool,
+    #[serde(default)]
+    pub webhook_url: String,
+    #[serde(default)]
+    pub has_webhook_secret: bool,
+    #[serde(default)]
+    pub ipc_endpoint: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_sse_port() -> u16 {
+    48173
+}
+
+impl Default for AgentBridgeConfig {
+    fn default() -> Self {
+        Self {
+            mcp_enabled: true,
+            sse_port: default_sse_port(),
+            webhook_enabled: false,
+            webhook_url: String::new(),
+            has_webhook_secret: false,
+            ipc_endpoint: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAgentBridgeConfigInput {
+    pub mcp_enabled: bool,
+    pub sse_port: u16,
+    pub webhook_enabled: bool,
+    pub webhook_url: String,
+    #[serde(default)]
+    pub webhook_secret: Option<String>,
+    #[serde(default)]
+    pub clear_webhook_secret: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConfigView {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_ai_base_url")]
+    pub base_url: String,
+    #[serde(default = "default_ai_model")]
+    pub model: String,
+    #[serde(default)]
+    pub has_api_key: bool,
+}
+
+fn default_ai_base_url() -> String {
+    "http://127.0.0.1:11434/v1".to_string()
+}
+
+fn default_ai_model() -> String {
+    "llama3.2".to_string()
+}
+
+impl Default for AiConfigView {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: default_ai_base_url(),
+            model: default_ai_model(),
+            has_api_key: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAiConfigInput {
+    pub enabled: bool,
+    pub base_url: String,
+    pub model: String,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub clear_api_key: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSummaryResult {
+    pub summary: String,
+    pub key_points: Vec<String>,
+    pub action_items: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiAnswerResult {
+    pub answer: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiDraftResult {
+    pub body_text: String,
+    pub staged_draft: Option<DraftView>,
 }

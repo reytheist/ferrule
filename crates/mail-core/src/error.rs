@@ -33,6 +33,8 @@ pub enum CoreError {
     Network { reason: String, retryable: bool },
     #[error("draft conflict (current revision {current_rev})")]
     Conflict { current_rev: u32 },
+    #[error("permission denied: {reason}")]
+    PermissionDenied { reason: String },
     #[error("storage error: {reason}")]
     Storage { reason: String },
     #[error("internal error: {reason}")]

@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  Bot,
   Code2,
+  KeyRound,
   Moon,
   PenTool,
   Plus,
@@ -11,7 +13,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { AccountId, SignatureId } from "../../types/mail";
+import type { AccountId, AgentAccountPermissionView, SignatureId } from "../../types/mail";
 import { plainTextToHtml } from "../compose/RichEditor";
 import type { MailApp, TextSize } from "../shell/useMailApp";
 import { spaceClass } from "../spaces/SpaceSwitcher";
@@ -23,6 +25,32 @@ export function SettingsModal({ app }: { app: MailApp }) {
   const [sigName, setSigName] = useState("");
   const [sigBody, setSigBody] = useState("");
   const [sigDefault, setSigDefault] = useState(true);
+
+  // In-Pane AI settings state
+  const [aiEnabled, setAiEnabled] = useState(app.aiConfig.enabled);
+  const [aiBaseUrl, setAiBaseUrl] = useState(app.aiConfig.baseUrl);
+  const [aiModel, setAiModel] = useState(app.aiConfig.model);
+  const [aiApiKey, setAiApiKey] = useState("");
+
+  // Hermes MCP Bridge & Push state
+  const [mcpEnabled, setMcpEnabled] = useState(app.agentBridgeConfig.mcpEnabled);
+  const [ssePort, setSsePort] = useState(String(app.agentBridgeConfig.ssePort));
+  const [webhookEnabled, setWebhookEnabled] = useState(app.agentBridgeConfig.webhookEnabled);
+  const [webhookUrl, setWebhookUrl] = useState(app.agentBridgeConfig.webhookUrl);
+  const [webhookSecret, setWebhookSecret] = useState("");
+
+  useEffect(() => {
+    setAiEnabled(app.aiConfig.enabled);
+    setAiBaseUrl(app.aiConfig.baseUrl);
+    setAiModel(app.aiConfig.model);
+  }, [app.aiConfig]);
+
+  useEffect(() => {
+    setMcpEnabled(app.agentBridgeConfig.mcpEnabled);
+    setSsePort(String(app.agentBridgeConfig.ssePort));
+    setWebhookEnabled(app.agentBridgeConfig.webhookEnabled);
+    setWebhookUrl(app.agentBridgeConfig.webhookUrl);
+  }, [app.agentBridgeConfig]);
 
   if (!app.settingsOpen) return null;
 
@@ -59,6 +87,63 @@ export function SettingsModal({ app }: { app: MailApp }) {
     setBusy(true);
     try {
       await app.setDeveloperToolsEnabled(!devTools);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveAiSettings(clearKey = false): Promise<void> {
+    setBusy(true);
+    try {
+      await app.saveAiConfig({
+        enabled: aiEnabled,
+        baseUrl: aiBaseUrl.trim(),
+        model: aiModel.trim(),
+        apiKey: clearKey ? null : aiApiKey.trim() || null,
+        clearApiKey: clearKey,
+      });
+      setAiApiKey("");
+    } catch {
+      // Toast already shown by useMailApp
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveBridgeSettings(clearSecret = false): Promise<void> {
+    setBusy(true);
+    try {
+      const parsedPort = Number.parseInt(ssePort, 10);
+      await app.saveAgentBridgeConfig({
+        mcpEnabled,
+        ssePort: Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : 48173,
+        webhookEnabled,
+        webhookUrl: webhookUrl.trim(),
+        webhookSecret: clearSecret ? null : webhookSecret.trim() || null,
+        clearWebhookSecret: clearSecret,
+      });
+      setWebhookSecret("");
+    } catch {
+      // Toast already shown by useMailApp
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updatePerm(
+    perm: AgentAccountPermissionView,
+    patch: Partial<Pick<AgentAccountPermissionView, "enabled" | "allowRead" | "allowTriage" | "allowDrafts" | "blockedFolders">>,
+  ): Promise<void> {
+    setBusy(true);
+    try {
+      await app.saveAgentPermission({
+        accountId: perm.accountId,
+        enabled: patch.enabled ?? perm.enabled,
+        allowRead: patch.allowRead ?? perm.allowRead,
+        allowTriage: patch.allowTriage ?? perm.allowTriage,
+        allowDrafts: patch.allowDrafts ?? perm.allowDrafts,
+        blockedFolders: patch.blockedFolders ?? perm.blockedFolders,
+      });
     } finally {
       setBusy(false);
     }
@@ -314,7 +399,117 @@ export function SettingsModal({ app }: { app: MailApp }) {
           </section>
 
           <section className="settings-section">
-            <div className="settings-section-title">Developer Tools &amp; Agent Bridge</div>
+            <div className="settings-section-title">
+              <Sparkles style={{ width: 12, height: 12, marginRight: 5, verticalAlign: "-1px" }} />
+              In-Pane AI (OpenAI-Compatible)
+            </div>
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <span className="settings-row-label">Enable In-Pane AI</span>
+                <span className="hint-text">
+                  Thread summaries, selection Q&amp;A, and 1-click reply draft staging. Points at
+                  Hermes, Ollama, or any OpenAI-compatible API.
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={aiEnabled}
+                aria-label="Enable In-Pane AI"
+                disabled={busy}
+                className={`toggle-switch${aiEnabled ? " on" : ""}`}
+                onClick={() => setAiEnabled((v) => !v)}
+              >
+                <span className="toggle-thumb" />
+              </button>
+            </div>
+            <div className="ai-settings-grid">
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="btn compact"
+                  onClick={() => {
+                    setAiBaseUrl("http://127.0.0.1:11434/v1");
+                    setAiModel("llama3.2");
+                  }}
+                >
+                  Ollama Local
+                </button>
+                <button
+                  type="button"
+                  className="btn compact"
+                  onClick={() => {
+                    setAiBaseUrl("http://127.0.0.1:8080/v1");
+                    setAiModel("hermes");
+                  }}
+                >
+                  Hermes Local
+                </button>
+                <button
+                  type="button"
+                  className="btn compact"
+                  onClick={() => {
+                    setAiBaseUrl("https://api.openai.com/v1");
+                    setAiModel("gpt-4o-mini");
+                  }}
+                >
+                  OpenAI
+                </button>
+              </div>
+              <input
+                className="input"
+                placeholder="Base URL (e.g. http://127.0.0.1:11434/v1)"
+                value={aiBaseUrl}
+                onChange={(e) => setAiBaseUrl(e.target.value)}
+              />
+              <input
+                className="input"
+                placeholder="Model (e.g. llama3.2, gpt-4o-mini)"
+                value={aiModel}
+                onChange={(e) => setAiModel(e.target.value)}
+              />
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input
+                  className="input"
+                  type="password"
+                  placeholder={
+                    app.aiConfig.hasApiKey
+                      ? "API key saved in OS keychain (enter to replace)"
+                      : "Optional API key (stored strictly in OS keychain)"
+                  }
+                  value={aiApiKey}
+                  onChange={(e) => setAiApiKey(e.target.value)}
+                />
+                {app.aiConfig.hasApiKey && (
+                  <button
+                    type="button"
+                    className="btn compact"
+                    disabled={busy}
+                    onClick={() => void saveAiSettings(true)}
+                  >
+                    Clear Key
+                  </button>
+                )}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className="hint-text" style={{ flex: 1, display: "flex", alignItems: "center", gap: 4 }}>
+                  <KeyRound style={{ width: 11, height: 11 }} />
+                  {app.aiConfig.hasApiKey ? "API key stored in OS keychain" : "No API key stored"}
+                </span>
+                <button
+                  type="button"
+                  className="btn compact primary"
+                  disabled={busy}
+                  onClick={() => void saveAiSettings(false)}
+                >
+                  Save AI Settings
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <div className="settings-section-title">Developer Tools &amp; Hermes MCP Bridge</div>
             <div className="settings-row">
               <div className="settings-row-info">
                 <span className="settings-row-label">
@@ -322,8 +517,8 @@ export function SettingsModal({ app }: { app: MailApp }) {
                   Enable Developer Tools
                 </span>
                 <span className="hint-text">
-                  Unlocks local MCP server controls, AgentPort configuration, and the Agent Draft
-                  Approval Queue.
+                  Unlocks local MCP server controls, per-account/folder permissions, SSE/webhook
+                  event push, and the Agent Activity &amp; Approval Queue.
                 </span>
               </div>
               <button
@@ -343,14 +538,193 @@ export function SettingsModal({ app }: { app: MailApp }) {
               <div className="dev-status-card">
                 <div className="dev-status-head">
                   <Terminal style={{ width: 13, height: 13 }} />
-                  <span>AgentPort &amp; Local MCP</span>
-                  <span className="space-kind-badge staff">Enabled</span>
+                  <span>Single-Writer MCP Bridge (ferrule mcp)</span>
+                  <button
+                    type="button"
+                    className="btn compact"
+                    onClick={() => {
+                      app.closeSettings();
+                      app.openAgentModal();
+                    }}
+                  >
+                    <Bot />
+                    Activity &amp; Approvals ({app.pendingAgentDrafts.length})
+                  </button>
                 </div>
                 <span className="hint-text">
-                  <code>mail_core::agent::AgentPort</code> exposes read, search, and{" "}
-                  <code>stage_draft</code> only. Agent drafts always land in{" "}
-                  <code>PendingApproval</code> and cannot be sent without explicit human approval.
+                  Local IPC: <code>{app.agentBridgeConfig.ipcEndpoint || "auto"}</code> · SSE Push:{" "}
+                  <code>http://127.0.0.1:{app.agentBridgeConfig.ssePort}/events</code>
                 </span>
+                <span className="hint-text">
+                  Point Hermes at <code>ferrule mcp</code> (or <code>ferrule-mcp</code>). Agents
+                  can only read plain text (prompt-injection framed), log undoable triage actions,
+                  and stage drafts in <code>PendingApproval</code>.
+                </span>
+
+                <div className="settings-row">
+                  <span className="settings-row-label">Accept MCP Bridge Connections</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={mcpEnabled}
+                    aria-label="Accept MCP Bridge Connections"
+                    disabled={busy}
+                    className={`toggle-switch${mcpEnabled ? " on" : ""}`}
+                    onClick={() => setMcpEnabled((v) => !v)}
+                  >
+                    <span className="toggle-thumb" />
+                  </button>
+                </div>
+
+                <div className="ai-settings-grid">
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <label className="hint-text" style={{ minWidth: 90 }}>
+                      SSE Port
+                    </label>
+                    <input
+                      className="input"
+                      value={ssePort}
+                      onChange={(e) => setSsePort(e.target.value)}
+                      placeholder="48173"
+                    />
+                  </div>
+                  <div className="settings-row">
+                    <span className="settings-row-label">Localhost Webhook Push</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={webhookEnabled}
+                      aria-label="Localhost Webhook Push"
+                      disabled={busy}
+                      className={`toggle-switch${webhookEnabled ? " on" : ""}`}
+                      onClick={() => setWebhookEnabled((v) => !v)}
+                    >
+                      <span className="toggle-thumb" />
+                    </button>
+                  </div>
+                  <input
+                    className="input"
+                    placeholder="Localhost webhook URL (e.g. http://127.0.0.1:8787/hooks/ferrule)"
+                    value={webhookUrl}
+                    onChange={(e) => setWebhookUrl(e.target.value)}
+                  />
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input
+                      className="input"
+                      type="password"
+                      placeholder={
+                        app.agentBridgeConfig.hasWebhookSecret
+                          ? "Webhook secret saved in OS keychain (enter to replace)"
+                          : "Optional HMAC webhook secret (OS keychain only)"
+                      }
+                      value={webhookSecret}
+                      onChange={(e) => setWebhookSecret(e.target.value)}
+                    />
+                    {app.agentBridgeConfig.hasWebhookSecret && (
+                      <button
+                        type="button"
+                        className="btn compact"
+                        disabled={busy}
+                        onClick={() => void saveBridgeSettings(true)}
+                      >
+                        Clear Secret
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      className="btn compact primary"
+                      disabled={busy}
+                      onClick={() => void saveBridgeSettings(false)}
+                    >
+                      Save Bridge Settings
+                    </button>
+                  </div>
+                </div>
+
+                {app.agentPermissions.length > 0 && (
+                  <div className="agent-perm-list">
+                    <div className="settings-section-title" style={{ marginTop: 6 }}>
+                      Per-Account &amp; Per-Folder Agent Permissions
+                    </div>
+                    {app.agentPermissions.map((perm) => (
+                      <div key={perm.accountId} className="agent-perm-card">
+                        <div className="agent-perm-head">
+                          <strong>{perm.accountLabel}</strong>
+                          <span className="hint-text">{perm.accountEmail}</span>
+                          <span style={{ flex: 1 }} />
+                          <label className="perm-check">
+                            <input
+                              type="checkbox"
+                              checked={perm.enabled}
+                              onChange={(e) => void updatePerm(perm, { enabled: e.target.checked })}
+                            />
+                            Enabled
+                          </label>
+                          <label className="perm-check">
+                            <input
+                              type="checkbox"
+                              checked={perm.allowRead}
+                              disabled={!perm.enabled}
+                              onChange={(e) => void updatePerm(perm, { allowRead: e.target.checked })}
+                            />
+                            Read
+                          </label>
+                          <label className="perm-check">
+                            <input
+                              type="checkbox"
+                              checked={perm.allowTriage}
+                              disabled={!perm.enabled}
+                              onChange={(e) =>
+                                void updatePerm(perm, { allowTriage: e.target.checked })
+                              }
+                            />
+                            Triage
+                          </label>
+                          <label className="perm-check">
+                            <input
+                              type="checkbox"
+                              checked={perm.allowDrafts}
+                              disabled={!perm.enabled}
+                              onChange={(e) =>
+                                void updatePerm(perm, { allowDrafts: e.target.checked })
+                              }
+                            />
+                            Drafts
+                          </label>
+                        </div>
+                        <div className="folder-pill-row">
+                          <span className="hint-text">Folders:</span>
+                          {perm.knownFolders.map((folder) => {
+                            const blocked = perm.blockedFolders.some(
+                              (b) => b.toLowerCase() === folder.toLowerCase(),
+                            );
+                            return (
+                              <button
+                                key={folder}
+                                type="button"
+                                disabled={!perm.enabled || busy}
+                                className={`folder-pill${blocked ? " blocked" : ""}`}
+                                title={blocked ? "Blocked from agent (click to allow)" : "Allowed for agent (click to block)"}
+                                onClick={() => {
+                                  const next = blocked
+                                    ? perm.blockedFolders.filter(
+                                        (b) => b.toLowerCase() !== folder.toLowerCase(),
+                                      )
+                                    : [...perm.blockedFolders, folder];
+                                  void updatePerm(perm, { blockedFolders: next });
+                                }}
+                              >
+                                {folder} {blocked ? "×" : "✓"}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </section>

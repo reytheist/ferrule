@@ -1,10 +1,12 @@
 pub mod agent;
+pub mod ai;
 pub mod auth;
 pub mod calendar;
 pub mod error;
 pub mod events;
 pub mod host;
 pub mod ids;
+pub mod mcp;
 pub mod rules;
 pub mod sanitize;
 pub mod schedule;
@@ -21,17 +23,21 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::broadcast;
 
-use crate::agent::AgentPort;
+use crate::agent::{
+    action_for_destination, build_agent_query, frame_untrusted_email_content,
+    mailbox_view_for_folder, AgentCreateDraftInput, AgentMoveDestination, AgentPort,
+    AgentUpdateDraftInput,
+};
 use crate::auth::{
     BuiltInOAuthDefaults, CredentialKind, OAuthClient, ProviderAuth, ProviderKind, SecretKey,
     SecretStore, SecretString,
 };
 use crate::error::CoreError;
-use crate::events::{Alert, CoreEvent};
+use crate::events::{Alert, CoreEvent, HermesPushEvent};
 use crate::host::{Clock, OsKeychain, SystemClock};
 use crate::ids::{
-    AccountId, AgentId, AttachmentId, DraftId, JobId, LabelId, RuleId, SavedSearchId, SignatureId,
-    TemplateId, ThreadId, UnixMs,
+    AccountId, AgentActivityId, AgentId, AttachmentId, DraftId, JobId, LabelId, MessageId, RuleId,
+    SavedSearchId, SignatureId, TemplateId, ThreadId, UnixMs,
 };
 use crate::schedule::{
     step_follow_up, step_outbox, step_snooze, FollowUpEvent, FollowUpState, OutboxEffect,
@@ -88,6 +94,7 @@ struct MailCoreInner {
     store: store::Store,
     host: Host,
     events: broadcast::Sender<CoreEvent>,
+    hermes_events: broadcast::Sender<HermesPushEvent>,
     token_cache: Mutex<HashMap<AccountId, CachedAccessToken>>,
     sync_manager: SyncManager,
 }
@@ -125,12 +132,14 @@ impl MailCore {
             None => store::Store::open_in_memory()?,
         };
         let (events, _) = broadcast::channel(128);
+        let (hermes_events, _) = broadcast::channel(128);
         Ok(Self {
             inner: Arc::new(MailCoreInner {
                 config,
                 store,
                 host,
                 events,
+                hermes_events,
                 token_cache: Mutex::new(HashMap::new()),
                 sync_manager: SyncManager::new(),
             }),
@@ -162,6 +171,89 @@ impl MailCore {
 
     pub fn subscribe(&self) -> broadcast::Receiver<CoreEvent> {
         self.inner.events.subscribe()
+    }
+
+    pub fn subscribe_hermes_events(&self) -> broadcast::Receiver<HermesPushEvent> {
+        self.inner.hermes_events.subscribe()
+    }
+
+    /// Emit a safe metadata-only Hermes push event if the owning account has agent
+    /// read access enabled.
+    pub fn emit_hermes_event(&self, event: HermesPushEvent) {
+        let allowed = self
+            .inner
+            .store
+            .with_conn(|conn| store::get_account_permission(conn, event.account_id()))
+            .map(|p| p.enabled && p.allow_read)
+            .unwrap_or(false);
+        if allowed {
+            let _ = self.inner.hermes_events.send(event);
+        }
+    }
+
+    /// Emit `new_message` and `new_invite` push events for newly ingested threads.
+    pub(crate) fn notify_hermes_ingested(&self, account_id: AccountId, thread_ids: &[ThreadId]) {
+        if thread_ids.is_empty() {
+            return;
+        }
+        let Ok(perm) = self
+            .inner
+            .store
+            .with_conn(|conn| store::get_account_permission(conn, account_id))
+        else {
+            return;
+        };
+        if !perm.enabled || !perm.allow_read {
+            return;
+        }
+        let events: Vec<HermesPushEvent> = self
+            .inner
+            .store
+            .with_conn(|conn| {
+                let mut out = Vec::new();
+                for &thread_id in thread_ids {
+                    let Some(thread) = store::get_thread(conn, thread_id)? else {
+                        continue;
+                    };
+                    let Some(msg) = store::last_message(conn, thread_id)? else {
+                        continue;
+                    };
+                    let folder = store::get_single_message(conn, msg.id)?
+                        .map(|m| m.folder_name)
+                        .unwrap_or_else(|| "INBOX".to_string());
+                    if !perm.is_folder_allowed(&folder) {
+                        continue;
+                    }
+                    out.push(HermesPushEvent::NewMessage {
+                        account_id,
+                        thread_id,
+                        message_id: msg.id,
+                        from_email: msg.from_email.clone(),
+                        from_name: msg.from_name.clone(),
+                        subject: thread.subject.clone(),
+                        date: msg.date,
+                        folder,
+                    });
+                    for invite in store::load_message_invites(conn, msg.id)? {
+                        out.push(HermesPushEvent::NewInvite {
+                            account_id,
+                            thread_id,
+                            message_id: msg.id,
+                            uid: invite.uid,
+                            summary: invite.summary,
+                            organizer_email: invite.organizer_email,
+                            start_at: invite.start_at,
+                            end_at: invite.end_at,
+                        });
+                    }
+                }
+                Ok(out)
+            })
+            .unwrap_or_default();
+
+        for ev in events {
+            let _ = self.inner.hermes_events.send(ev);
+        }
     }
 
     pub fn agent_port(&self, agent_id: AgentId) -> AgentPort {
@@ -715,7 +807,9 @@ impl MailCore {
         auth: &ProviderAuth,
     ) -> Result<Option<SecretString>, CoreError> {
         match auth.credential_kind() {
-            CredentialKind::Password => self.secret_for(account_id, auth),
+            CredentialKind::Password | CredentialKind::AiApiKey | CredentialKind::WebhookSecret => {
+                self.secret_for(account_id, auth)
+            }
             CredentialKind::OAuthRefreshToken | CredentialKind::OAuthClientSecret => {
                 let now = self.now();
                 if let Ok(cache) = self.inner.token_cache.lock() {
@@ -2295,6 +2389,7 @@ impl MailCore {
                     state: SyncState::Idle { last_ok: Some(now) },
                 });
                 if !touched.is_empty() {
+                    self.notify_hermes_ingested(account_id, &touched);
                     self.emit(CoreEvent::MailChanged {
                         account_id,
                         thread_ids: touched,
@@ -2341,10 +2436,513 @@ impl MailCore {
         Ok(())
     }
 
-    // ---------------------------------------------------------------- agent
+    // ---------------------------------------------------------------- agent & AI (Phase 4)
 
-    /// Read-only plain-text rendering for [`AgentPort`] — no HTML ever crosses.
-    pub(crate) async fn read_thread_plain(&self, thread_id: ThreadId) -> Result<String, CoreError> {
+    pub async fn list_agent_permissions(&self) -> Result<Vec<AgentAccountPermissionView>, CoreError> {
+        self.inner.store.with_conn(store::list_agent_permissions)
+    }
+
+    pub async fn save_agent_permission(
+        &self,
+        input: SaveAgentAccountPermissionInput,
+    ) -> Result<AgentAccountPermissionView, CoreError> {
+        let now = self.now();
+        self.inner
+            .store
+            .with_conn(|conn| store::save_account_permission(conn, &input, now))
+    }
+
+    pub async fn get_agent_bridge_config(&self) -> Result<AgentBridgeConfig, CoreError> {
+        let mut cfg = self.inner.store.with_conn(store::get_bridge_config)?;
+        cfg.has_webhook_secret = self
+            .inner
+            .host
+            .secrets
+            .get(&SecretKey::webhook_secret())?
+            .is_some();
+        cfg.ipc_endpoint = mcp::default_ipc_endpoint();
+        Ok(cfg)
+    }
+
+    pub async fn save_agent_bridge_config(
+        &self,
+        input: SaveAgentBridgeConfigInput,
+    ) -> Result<AgentBridgeConfig, CoreError> {
+        let cleaned_url = mcp::validate_localhost_webhook_url(&input.webhook_url)?;
+        if input.sse_port == 0 {
+            return Err(CoreError::InvalidInput {
+                field: "ssePort".to_string(),
+                reason: "SSE port must be between 1 and 65535".to_string(),
+            });
+        }
+        if input.clear_webhook_secret {
+            self.inner.host.secrets.delete(&SecretKey::webhook_secret())?;
+        } else if let Some(secret) = input.webhook_secret.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            self.inner
+                .host
+                .secrets
+                .put(&SecretKey::webhook_secret(), &SecretString::new(secret))?;
+        }
+        self.inner.store.with_conn(|conn| {
+            store::save_bridge_config(
+                conn,
+                input.mcp_enabled,
+                input.sse_port,
+                input.webhook_enabled,
+                &cleaned_url,
+            )
+        })?;
+        self.get_agent_bridge_config().await
+    }
+
+    pub async fn list_agent_activity(&self, limit: u32) -> Result<Vec<AgentActivityView>, CoreError> {
+        self.inner
+            .store
+            .with_conn(|conn| store::list_agent_activity(conn, limit))
+    }
+
+    /// Reverse an undoable agent mutation in 1 click and mark the activity entry undone.
+    pub async fn undo_agent_activity(
+        &self,
+        activity_id: AgentActivityId,
+    ) -> Result<AgentActivityView, CoreError> {
+        let now = self.now();
+        let entry = self
+            .inner
+            .store
+            .with_conn(|conn| store::get_agent_activity(conn, activity_id))?
+            .ok_or_else(|| CoreError::NotFound {
+                entity: "agent activity".to_string(),
+            })?;
+        if entry.undone {
+            return Ok(entry.to_view());
+        }
+        let Some(payload) = entry.undo_payload else {
+            return Err(CoreError::IllegalState {
+                reason: "this agent action has no undo payload".to_string(),
+            });
+        };
+
+        match payload {
+            AgentUndoPayload::RestoreThreadFlags { states } => {
+                self.inner
+                    .store
+                    .with_conn(|conn| store::restore_thread_flags(conn, &states))?;
+            }
+            AgentUndoPayload::ToggleLabel {
+                label_id,
+                thread_ids,
+                was_added,
+            } => {
+                self.inner.store.with_conn(|conn| {
+                    if store::label_exists(conn, label_id)? {
+                        store::set_thread_label(conn, label_id, &thread_ids, !was_added)?;
+                    }
+                    Ok(())
+                })?;
+            }
+            AgentUndoPayload::CancelSnooze {
+                thread_id,
+                previous_due_at,
+            } => {
+                match previous_due_at {
+                    Some(prev) if prev > now => {
+                        let _ = self.snooze_thread(thread_id, prev).await?;
+                    }
+                    _ => {
+                        let _ = self.unsnooze_thread(thread_id).await;
+                    }
+                }
+            }
+        }
+
+        let updated = self.inner.store.with_conn(|conn| {
+            store::mark_agent_activity_undone(conn, activity_id, now)?;
+            store::get_agent_activity(conn, activity_id)?
+                .map(|r| r.to_view())
+                .ok_or_else(|| CoreError::NotFound {
+                    entity: "agent activity".to_string(),
+                })
+        })?;
+        self.emit(CoreEvent::Resync);
+        self.emit(CoreEvent::AgentActivityChanged);
+        Ok(updated)
+    }
+
+    pub async fn list_pending_agent_drafts(&self) -> Result<Vec<DraftView>, CoreError> {
+        self.inner.store.with_conn(store::list_pending_agent_drafts)
+    }
+
+    pub async fn reject_agent_draft(
+        &self,
+        draft_id: DraftId,
+        reason: String,
+    ) -> Result<(), CoreError> {
+        let now = self.now();
+        self.inner.store.with_conn(|conn| {
+            let draft = store::get_draft(conn, draft_id)?.ok_or_else(|| CoreError::NotFound {
+                entity: "draft".to_string(),
+            })?;
+            if !matches!(draft.origin, DraftOrigin::Agent { .. }) {
+                return Err(CoreError::IllegalState {
+                    reason: "only agent drafts can be rejected".to_string(),
+                });
+            }
+            store::set_draft_state(
+                conn,
+                draft_id,
+                &DraftState::Rejected {
+                    reason: if reason.trim().is_empty() {
+                        "Rejected by user".to_string()
+                    } else {
+                        reason.trim().to_string()
+                    },
+                },
+                now,
+            )
+        })?;
+        self.emit(CoreEvent::DraftChanged { draft_id });
+        self.emit(CoreEvent::AgentActivityChanged);
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------- In-Pane AI
+
+    pub async fn get_ai_config(&self) -> Result<AiConfigView, CoreError> {
+        let mut cfg = self.inner.store.with_conn(store::get_ai_config)?;
+        cfg.has_api_key = self
+            .inner
+            .host
+            .secrets
+            .get(&SecretKey::ai_api_key())?
+            .is_some();
+        Ok(cfg)
+    }
+
+    pub async fn save_ai_config(
+        &self,
+        input: SaveAiConfigInput,
+    ) -> Result<AiConfigView, CoreError> {
+        let base_url = input.base_url.trim();
+        if input.enabled && base_url.is_empty() {
+            return Err(CoreError::InvalidInput {
+                field: "baseUrl".to_string(),
+                reason: "AI base URL is required when AI is enabled".to_string(),
+            });
+        }
+        if !base_url.is_empty() {
+            let parsed = url::Url::parse(base_url).map_err(|e| CoreError::InvalidInput {
+                field: "baseUrl".to_string(),
+                reason: format!("invalid AI base URL: {e}"),
+            })?;
+            if !matches!(parsed.scheme(), "http" | "https") {
+                return Err(CoreError::InvalidInput {
+                    field: "baseUrl".to_string(),
+                    reason: "AI base URL must use http:// or https://".to_string(),
+                });
+            }
+        }
+        if input.clear_api_key {
+            self.inner.host.secrets.delete(&SecretKey::ai_api_key())?;
+        } else if let Some(key) = input.api_key.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            self.inner
+                .host
+                .secrets
+                .put(&SecretKey::ai_api_key(), &SecretString::new(key))?;
+        }
+        self.inner
+            .store
+            .with_conn(|conn| store::save_ai_config(conn, input.enabled, base_url, input.model.trim()))?;
+        self.get_ai_config().await
+    }
+
+    pub async fn ai_summarize_thread(&self, thread_id: ThreadId) -> Result<AiSummaryResult, CoreError> {
+        let cfg = self.get_ai_config().await?;
+        if !cfg.enabled {
+            return Err(CoreError::IllegalState {
+                reason: "In-pane AI is disabled — enable it in Settings".to_string(),
+            });
+        }
+        let api_key = self.inner.host.secrets.get(&SecretKey::ai_api_key())?;
+        let plain = self.read_thread_plain_unframed(thread_id)?;
+        ai::summarize_thread(&cfg.base_url, &cfg.model, api_key.as_ref(), &plain).await
+    }
+
+    pub async fn ai_ask_thread(
+        &self,
+        thread_id: ThreadId,
+        question: String,
+        selected_text: Option<String>,
+    ) -> Result<AiAnswerResult, CoreError> {
+        if question.trim().is_empty() {
+            return Err(CoreError::InvalidInput {
+                field: "question".to_string(),
+                reason: "question is required".to_string(),
+            });
+        }
+        let cfg = self.get_ai_config().await?;
+        if !cfg.enabled {
+            return Err(CoreError::IllegalState {
+                reason: "In-pane AI is disabled — enable it in Settings".to_string(),
+            });
+        }
+        let api_key = self.inner.host.secrets.get(&SecretKey::ai_api_key())?;
+        let plain = self.read_thread_plain_unframed(thread_id)?;
+        ai::ask_thread(
+            &cfg.base_url,
+            &cfg.model,
+            api_key.as_ref(),
+            &plain,
+            &question,
+            selected_text.as_deref(),
+        )
+        .await
+    }
+
+    pub async fn ai_draft_reply(
+        &self,
+        thread_id: ThreadId,
+        instructions: String,
+        stage_for_approval: bool,
+    ) -> Result<AiDraftResult, CoreError> {
+        let cfg = self.get_ai_config().await?;
+        if !cfg.enabled {
+            return Err(CoreError::IllegalState {
+                reason: "In-pane AI is disabled — enable it in Settings".to_string(),
+            });
+        }
+        let api_key = self.inner.host.secrets.get(&SecretKey::ai_api_key())?;
+        let plain = self.read_thread_plain_unframed(thread_id)?;
+        let body_text =
+            ai::draft_reply(&cfg.base_url, &cfg.model, api_key.as_ref(), &plain, &instructions)
+                .await?;
+        let staged_draft = if stage_for_approval {
+            let rationale = if instructions.trim().is_empty() {
+                "Drafted by in-pane AI".to_string()
+            } else {
+                format!("In-pane AI draft: {}", instructions.trim())
+            };
+            Some(
+                self.stage_agent_draft("in-pane-ai", thread_id, body_text.clone(), rationale)
+                    .await?,
+            )
+        } else {
+            None
+        };
+        Ok(AiDraftResult {
+            body_text,
+            staged_draft,
+        })
+    }
+
+    // ---------------------------------------------------------------- agent internal helpers
+
+    fn check_account_perm(
+        &self,
+        account_id: AccountId,
+        need_read: bool,
+        need_triage: bool,
+        need_drafts: bool,
+    ) -> Result<store::AccountPermissionRow, CoreError> {
+        let perm = self
+            .inner
+            .store
+            .with_conn(|conn| store::get_account_permission(conn, account_id))?;
+        if !perm.enabled {
+            return Err(CoreError::PermissionDenied {
+                reason: "agent access is disabled for this account".to_string(),
+            });
+        }
+        if need_read && !perm.allow_read {
+            return Err(CoreError::PermissionDenied {
+                reason: "agent read access is disabled for this account".to_string(),
+            });
+        }
+        if need_triage && !perm.allow_triage {
+            return Err(CoreError::PermissionDenied {
+                reason: "agent triage mutations are disabled for this account".to_string(),
+            });
+        }
+        if need_drafts && !perm.allow_drafts {
+            return Err(CoreError::PermissionDenied {
+                reason: "agent draft staging is disabled for this account".to_string(),
+            });
+        }
+        Ok(perm)
+    }
+
+    fn check_thread_access(
+        &self,
+        thread_id: ThreadId,
+        need_read: bool,
+        need_triage: bool,
+        need_drafts: bool,
+    ) -> Result<AccountId, CoreError> {
+        let (account_id, folders) = self.inner.store.with_conn(|conn| {
+            let thread = store::get_thread(conn, thread_id)?.ok_or(CoreError::NotFound {
+                entity: "thread".to_string(),
+            })?;
+            let folders = store::thread_folders(conn, thread_id)?;
+            Ok((thread.account_id, folders))
+        })?;
+        let perm = self.check_account_perm(account_id, need_read, need_triage, need_drafts)?;
+        if !folders.is_empty() && folders.iter().all(|f| !perm.is_folder_allowed(f)) {
+            return Err(CoreError::PermissionDenied {
+                reason: "agent access is disabled for this thread's folder".to_string(),
+            });
+        }
+        Ok(account_id)
+    }
+
+    fn resolve_agent_threads(
+        &self,
+        mut thread_ids: Vec<ThreadId>,
+        message_ids: Vec<MessageId>,
+    ) -> Result<Vec<ThreadId>, CoreError> {
+        if !message_ids.is_empty() {
+            let from_msgs = self
+                .inner
+                .store
+                .with_conn(|conn| store::resolve_message_thread_ids(conn, &message_ids))?;
+            for tid in from_msgs {
+                if !thread_ids.contains(&tid) {
+                    thread_ids.push(tid);
+                }
+            }
+        }
+        if thread_ids.is_empty() {
+            return Err(CoreError::InvalidInput {
+                field: "thread_ids".to_string(),
+                reason: "at least one thread_id or message_id is required".to_string(),
+            });
+        }
+        Ok(thread_ids)
+    }
+
+    pub(crate) async fn agent_list_accounts(&self) -> Result<Vec<AccountView>, CoreError> {
+        let accounts = self.list_accounts().await?;
+        let mut allowed = Vec::new();
+        for acct in accounts {
+            if let Ok(perm) = self
+                .inner
+                .store
+                .with_conn(|conn| store::get_account_permission(conn, acct.id))
+            {
+                if perm.enabled {
+                    allowed.push(acct);
+                }
+            }
+        }
+        Ok(allowed)
+    }
+
+    pub(crate) async fn agent_list_folders(
+        &self,
+        account_id: Option<AccountId>,
+    ) -> Result<Vec<FolderInfoView>, CoreError> {
+        let target_ids: Vec<AccountId> = match account_id {
+            Some(id) => {
+                self.check_account_perm(id, true, false, false)?;
+                vec![id]
+            }
+            None => self
+                .agent_list_accounts()
+                .await?
+                .into_iter()
+                .map(|a| a.id)
+                .collect(),
+        };
+        self.inner.store.with_conn(|conn| {
+            let mut out = Vec::new();
+            for id in target_ids {
+                let perm = store::get_account_permission(conn, id)?;
+                if !perm.enabled || !perm.allow_read {
+                    continue;
+                }
+                for folder in store::list_account_folders(conn, id, &perm)? {
+                    if folder.agent_allowed {
+                        out.push(folder);
+                    }
+                }
+            }
+            Ok(out)
+        })
+    }
+
+    pub(crate) async fn agent_list_messages(
+        &self,
+        account_id: Option<AccountId>,
+        folder: Option<&str>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<ThreadSummary>, CoreError> {
+        if let Some(id) = account_id {
+            let perm = self.check_account_perm(id, true, false, false)?;
+            if let Some(f) = folder {
+                if !perm.is_folder_allowed(f) {
+                    return Err(CoreError::PermissionDenied {
+                        reason: format!("agent access is disabled for folder '{f}'"),
+                    });
+                }
+            }
+        }
+        let view = mailbox_view_for_folder(folder);
+        let query = build_agent_query(account_id, view, limit, offset);
+        let items = self.list_threads(query).await?.items;
+        self.filter_permitted_summaries(items)
+    }
+
+    pub(crate) async fn agent_search_messages(
+        &self,
+        text: &str,
+        account_id: Option<AccountId>,
+        limit: u32,
+    ) -> Result<Vec<ThreadSummary>, CoreError> {
+        if let Some(id) = account_id {
+            self.check_account_perm(id, true, false, false)?;
+        }
+        let query = build_agent_query(
+            account_id,
+            MailboxView::Search {
+                text: text.to_string(),
+            },
+            limit,
+            0,
+        );
+        let items = self.list_threads(query).await?.items;
+        self.filter_permitted_summaries(items)
+    }
+
+    fn filter_permitted_summaries(
+        &self,
+        items: Vec<ThreadSummary>,
+    ) -> Result<Vec<ThreadSummary>, CoreError> {
+        self.inner.store.with_conn(|conn| {
+            let mut perm_cache: HashMap<AccountId, store::AccountPermissionRow> = HashMap::new();
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                let perm = match perm_cache.get(&item.account_id) {
+                    Some(p) => p,
+                    None => {
+                        let p = store::get_account_permission(conn, item.account_id)?;
+                        perm_cache.insert(item.account_id, p);
+                        perm_cache.get(&item.account_id).unwrap()
+                    }
+                };
+                if !perm.enabled || !perm.allow_read {
+                    continue;
+                }
+                let folders = store::thread_folders(conn, item.id)?;
+                if !folders.is_empty() && folders.iter().all(|f| !perm.is_folder_allowed(f)) {
+                    continue;
+                }
+                out.push(item);
+            }
+            Ok(out)
+        })
+    }
+
+    fn read_thread_plain_unframed(&self, thread_id: ThreadId) -> Result<String, CoreError> {
         self.inner.store.with_conn(|conn| {
             let thread = store::get_thread(conn, thread_id)?.ok_or(CoreError::NotFound {
                 entity: "thread".to_string(),
@@ -2365,6 +2963,421 @@ impl MailCore {
         })
     }
 
+    /// Read-only plain-text rendering of one message for [`AgentPort`] — no HTML ever
+    /// crosses, and content is wrapped in prompt-injection framing.
+    pub(crate) async fn agent_read_message_plain(
+        &self,
+        message_id: MessageId,
+    ) -> Result<String, CoreError> {
+        let msg = self
+            .inner
+            .store
+            .with_conn(|conn| store::get_single_message(conn, message_id))?
+            .ok_or_else(|| CoreError::NotFound {
+                entity: "message".to_string(),
+            })?;
+        let perm = self.check_account_perm(msg.account_id, true, false, false)?;
+        if !perm.is_folder_allowed(&msg.folder_name) {
+            return Err(CoreError::PermissionDenied {
+                reason: format!("agent access is disabled for folder '{}'", msg.folder_name),
+            });
+        }
+        let from = match &msg.from_name {
+            Some(name) => format!("{name} <{}>", msg.from_email),
+            None => msg.from_email.clone(),
+        };
+        let date = chrono::DateTime::from_timestamp_millis(msg.date.0)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_else(|| msg.date.0.to_string());
+        let raw = format!(
+            "Message-ID: {}\nThread-ID: {}\nFolder: {}\nDate: {}\nFrom: {}\nTo: {}\nSubject: {}\n\n{}",
+            msg.id,
+            msg.thread_id,
+            msg.folder_name,
+            date,
+            from,
+            msg.to.join(", "),
+            msg.subject,
+            msg.body_text
+        );
+        Ok(frame_untrusted_email_content(&raw))
+    }
+
+    /// Read-only plain-text rendering of a thread for [`AgentPort`] — no HTML ever
+    /// crosses, and content is wrapped in prompt-injection framing.
+    pub(crate) async fn agent_read_thread_plain(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<String, CoreError> {
+        self.check_thread_access(thread_id, true, false, false)?;
+        let raw = self.read_thread_plain_unframed(thread_id)?;
+        Ok(frame_untrusted_email_content(&raw))
+    }
+
+    pub(crate) async fn agent_create_draft(
+        &self,
+        agent_id: &str,
+        input: AgentCreateDraftInput,
+    ) -> Result<DraftView, CoreError> {
+        if let Some(thread_id) = input.reply_to_thread {
+            self.check_thread_access(thread_id, false, false, true)?;
+            return self
+                .stage_agent_draft(agent_id, thread_id, input.body_text, input.rationale)
+                .await;
+        }
+        let account_id = match input.account_id {
+            Some(id) => id,
+            None => self
+                .agent_list_accounts()
+                .await?
+                .into_iter()
+                .next()
+                .map(|a| a.id)
+                .ok_or_else(|| CoreError::NotFound {
+                    entity: "permitted account".to_string(),
+                })?,
+        };
+        self.check_account_perm(account_id, false, false, true)?;
+
+        let now = self.now();
+        let view = self.inner.store.with_conn(|conn| {
+            store::get_account(conn, account_id)?.ok_or(CoreError::NotFound {
+                entity: "account".to_string(),
+            })?;
+            let identity =
+                store::primary_identity(conn, account_id)?.ok_or(CoreError::NotFound {
+                    entity: "identity".to_string(),
+                })?;
+            let draft_id = store::insert_draft(
+                conn,
+                &store::InsertDraft {
+                    account_id,
+                    from_identity_id: identity.id,
+                    from_locked: false,
+                    reply_to_thread: None,
+                    to: input.to,
+                    cc: input.cc,
+                    bcc: Vec::new(),
+                    subject: input.subject,
+                    body_text: input.body_text,
+                    body_html: None,
+                    origin: DraftOrigin::Agent {
+                        agent_id: agent_id.to_string(),
+                        rationale: input.rationale,
+                    },
+                    state: DraftState::PendingApproval,
+                    updated_at: now,
+                },
+            )?;
+            let draft = store::get_draft(conn, draft_id)?.ok_or(CoreError::Internal {
+                reason: "draft disappeared after insert".to_string(),
+            })?;
+            let view = store::draft_view(conn, &draft)?;
+            let _ = store::insert_agent_activity(
+                conn,
+                &store::NewAgentActivity {
+                    agent_id,
+                    tool_name: "create_draft",
+                    summary: format!("Staged draft \u{201c}{}\u{201d} for approval", view.subject),
+                    account_id: Some(account_id),
+                    thread_id: None,
+                    undo_payload: None,
+                    created_at: now,
+                },
+            );
+            Ok(view)
+        })?;
+        self.emit(CoreEvent::DraftChanged { draft_id: view.id });
+        self.emit(CoreEvent::Attention {
+            alert: Alert::ApprovalRequested { draft_id: view.id },
+        });
+        self.emit(CoreEvent::AgentActivityChanged);
+        Ok(view)
+    }
+
+    pub(crate) async fn agent_update_draft(
+        &self,
+        agent_id: &str,
+        input: AgentUpdateDraftInput,
+    ) -> Result<DraftView, CoreError> {
+        let now = self.now();
+        let existing_account = self.inner.store.with_conn(|conn| {
+            store::get_draft(conn, input.draft_id)?
+                .map(|d| d.account_id)
+                .ok_or_else(|| CoreError::NotFound {
+                    entity: "draft".to_string(),
+                })
+        })?;
+        self.check_account_perm(existing_account, false, false, true)?;
+        let view = self.inner.store.with_conn(|conn| {
+            let updated = store::update_pending_agent_draft(
+                conn,
+                &store::UpdateAgentDraftParams {
+                    draft_id: input.draft_id,
+                    to: input.to,
+                    cc: input.cc,
+                    subject: input.subject,
+                    body_text: input.body_text,
+                    rationale: input.rationale,
+                    updated_at: now,
+                },
+            )?;
+            let _ = store::insert_agent_activity(
+                conn,
+                &store::NewAgentActivity {
+                    agent_id,
+                    tool_name: "update_draft",
+                    summary: format!("Updated staged draft \u{201c}{}\u{201d}", updated.subject),
+                    account_id: Some(updated.account_id),
+                    thread_id: updated.reply_to_thread,
+                    undo_payload: None,
+                    created_at: now,
+                },
+            );
+            Ok(updated)
+        })?;
+        self.emit(CoreEvent::DraftChanged { draft_id: view.id });
+        self.emit(CoreEvent::AgentActivityChanged);
+        Ok(view)
+    }
+
+    pub(crate) async fn agent_mark_messages(
+        &self,
+        agent_id: &str,
+        thread_ids: Vec<ThreadId>,
+        message_ids: Vec<MessageId>,
+        read: Option<bool>,
+        starred: Option<bool>,
+    ) -> Result<Vec<ThreadId>, CoreError> {
+        if read.is_none() && starred.is_none() {
+            return Err(CoreError::InvalidInput {
+                field: "read/starred".to_string(),
+                reason: "specify at least one of read or starred".to_string(),
+            });
+        }
+        let resolved = self.resolve_agent_threads(thread_ids, message_ids)?;
+        let mut first_account = None;
+        for &tid in &resolved {
+            let acct = self.check_thread_access(tid, false, true, false)?;
+            if first_account.is_none() {
+                first_account = Some(acct);
+            }
+        }
+        let snapshots = self
+            .inner
+            .store
+            .with_conn(|conn| store::snapshot_thread_flags(conn, &resolved))?;
+
+        let mut updated = Vec::new();
+        if let Some(r) = read {
+            let outcome = self
+                .act_on_threads(MailAction::MarkRead { read: r }, resolved.clone())
+                .await?;
+            updated = outcome.updated_ids;
+        }
+        if let Some(s) = starred {
+            let outcome = self
+                .act_on_threads(MailAction::Star { on: s }, resolved.clone())
+                .await?;
+            if updated.is_empty() {
+                updated = outcome.updated_ids;
+            }
+        }
+
+        let mut parts = Vec::new();
+        if let Some(r) = read {
+            parts.push(if r { "read" } else { "unread" });
+        }
+        if let Some(s) = starred {
+            parts.push(if s { "starred" } else { "unstarred" });
+        }
+        let summary = format!(
+            "Marked {} thread{} {}",
+            resolved.len(),
+            if resolved.len() == 1 { "" } else { "s" },
+            parts.join(" & ")
+        );
+        let now = self.now();
+        self.inner.store.with_conn(|conn| {
+            store::insert_agent_activity(
+                conn,
+                &store::NewAgentActivity {
+                    agent_id,
+                    tool_name: "mark_messages",
+                    summary,
+                    account_id: first_account,
+                    thread_id: resolved.first().copied(),
+                    undo_payload: Some(AgentUndoPayload::RestoreThreadFlags { states: snapshots }),
+                    created_at: now,
+                },
+            )
+        })?;
+        self.emit(CoreEvent::AgentActivityChanged);
+        Ok(updated)
+    }
+
+    pub(crate) async fn agent_move_messages(
+        &self,
+        agent_id: &str,
+        thread_ids: Vec<ThreadId>,
+        message_ids: Vec<MessageId>,
+        destination: AgentMoveDestination,
+    ) -> Result<Vec<ThreadId>, CoreError> {
+        let resolved = self.resolve_agent_threads(thread_ids, message_ids)?;
+        let mut first_account = None;
+        for &tid in &resolved {
+            let acct = self.check_thread_access(tid, false, true, false)?;
+            if first_account.is_none() {
+                first_account = Some(acct);
+            }
+        }
+        let snapshots = self
+            .inner
+            .store
+            .with_conn(|conn| store::snapshot_thread_flags(conn, &resolved))?;
+        let action = action_for_destination(destination);
+        let outcome = self.act_on_threads(action, resolved.clone()).await?;
+        let dest_label = match destination {
+            AgentMoveDestination::Inbox => "Inbox",
+            AgentMoveDestination::Archive => "Archive",
+            AgentMoveDestination::Trash => "Trash",
+            AgentMoveDestination::Spam => "Spam",
+        };
+        let now = self.now();
+        self.inner.store.with_conn(|conn| {
+            store::insert_agent_activity(
+                conn,
+                &store::NewAgentActivity {
+                    agent_id,
+                    tool_name: "move_messages",
+                    summary: format!(
+                        "Moved {} thread{} to {}",
+                        resolved.len(),
+                        if resolved.len() == 1 { "" } else { "s" },
+                        dest_label
+                    ),
+                    account_id: first_account,
+                    thread_id: resolved.first().copied(),
+                    undo_payload: Some(AgentUndoPayload::RestoreThreadFlags { states: snapshots }),
+                    created_at: now,
+                },
+            )
+        })?;
+        self.emit(CoreEvent::AgentActivityChanged);
+        Ok(outcome.updated_ids)
+    }
+
+    pub(crate) async fn agent_label_messages(
+        &self,
+        agent_id: &str,
+        label_id: LabelId,
+        thread_ids: Vec<ThreadId>,
+        message_ids: Vec<MessageId>,
+        add: bool,
+    ) -> Result<Vec<ThreadId>, CoreError> {
+        let resolved = self.resolve_agent_threads(thread_ids, message_ids)?;
+        let mut first_account = None;
+        for &tid in &resolved {
+            let acct = self.check_thread_access(tid, false, true, false)?;
+            if first_account.is_none() {
+                first_account = Some(acct);
+            }
+        }
+        self.label_threads(label_id, resolved.clone(), add).await?;
+        let now = self.now();
+        self.inner.store.with_conn(|conn| {
+            store::insert_agent_activity(
+                conn,
+                &store::NewAgentActivity {
+                    agent_id,
+                    tool_name: "label_messages",
+                    summary: format!(
+                        "{} label on {} thread{}",
+                        if add { "Applied" } else { "Removed" },
+                        resolved.len(),
+                        if resolved.len() == 1 { "" } else { "s" }
+                    ),
+                    account_id: first_account,
+                    thread_id: resolved.first().copied(),
+                    undo_payload: Some(AgentUndoPayload::ToggleLabel {
+                        label_id,
+                        thread_ids: resolved.clone(),
+                        was_added: add,
+                    }),
+                    created_at: now,
+                },
+            )
+        })?;
+        self.emit(CoreEvent::AgentActivityChanged);
+        Ok(resolved)
+    }
+
+    pub(crate) async fn agent_snooze_thread(
+        &self,
+        agent_id: &str,
+        thread_id: ThreadId,
+        until: UnixMs,
+    ) -> Result<ThreadId, CoreError> {
+        let account_id = self.check_thread_access(thread_id, false, true, false)?;
+        let prev_due = self
+            .inner
+            .store
+            .with_conn(|conn| Ok(store::live_snooze_for_thread(conn, thread_id)?.map(|j| j.due_at)))?;
+        let _ = self.snooze_thread(thread_id, until).await?;
+        let now = self.now();
+        self.inner.store.with_conn(|conn| {
+            store::insert_agent_activity(
+                conn,
+                &store::NewAgentActivity {
+                    agent_id,
+                    tool_name: "snooze_thread",
+                    summary: "Snoozed thread".to_string(),
+                    account_id: Some(account_id),
+                    thread_id: Some(thread_id),
+                    undo_payload: Some(AgentUndoPayload::CancelSnooze {
+                        thread_id,
+                        previous_due_at: prev_due,
+                    }),
+                    created_at: now,
+                },
+            )
+        })?;
+        self.emit(CoreEvent::AgentActivityChanged);
+        Ok(thread_id)
+    }
+
+    pub(crate) async fn agent_archive_thread(
+        &self,
+        agent_id: &str,
+        thread_id: ThreadId,
+    ) -> Result<ThreadId, CoreError> {
+        let account_id = self.check_thread_access(thread_id, false, true, false)?;
+        let snapshots = self
+            .inner
+            .store
+            .with_conn(|conn| store::snapshot_thread_flags(conn, &[thread_id]))?;
+        let _ = self
+            .act_on_threads(MailAction::Archive, vec![thread_id])
+            .await?;
+        let now = self.now();
+        self.inner.store.with_conn(|conn| {
+            store::insert_agent_activity(
+                conn,
+                &store::NewAgentActivity {
+                    agent_id,
+                    tool_name: "archive_thread",
+                    summary: "Archived thread".to_string(),
+                    account_id: Some(account_id),
+                    thread_id: Some(thread_id),
+                    undo_payload: Some(AgentUndoPayload::RestoreThreadFlags { states: snapshots }),
+                    created_at: now,
+                },
+            )
+        })?;
+        self.emit(CoreEvent::AgentActivityChanged);
+        Ok(thread_id)
+    }
+
     /// Stage an agent draft in `PendingApproval`. There is deliberately no send path
     /// here; only [`MailCore::approve_agent_draft`] (human) can queue it.
     pub(crate) async fn stage_agent_draft(
@@ -2374,6 +3387,7 @@ impl MailCore {
         body_text: String,
         rationale: String,
     ) -> Result<DraftView, CoreError> {
+        self.check_thread_access(thread_id, false, false, true)?;
         let now = self.now();
         let view = self.inner.store.with_conn(|conn| {
             let thread = store::get_thread(conn, thread_id)?.ok_or(CoreError::NotFound {
@@ -2427,13 +3441,27 @@ impl MailCore {
             let draft = store::get_draft(conn, draft_id)?.ok_or(CoreError::Internal {
                 reason: "draft disappeared after insert".to_string(),
             })?;
-            store::draft_view(conn, &draft)
+            let view = store::draft_view(conn, &draft)?;
+            let _ = store::insert_agent_activity(
+                conn,
+                &store::NewAgentActivity {
+                    agent_id,
+                    tool_name: "create_draft",
+                    summary: format!("Staged reply draft for \u{201c}{}\u{201d}", thread.subject),
+                    account_id: Some(thread.account_id),
+                    thread_id: Some(thread_id),
+                    undo_payload: None,
+                    created_at: now,
+                },
+            );
+            Ok(view)
         })?;
 
         self.emit(CoreEvent::DraftChanged { draft_id: view.id });
         self.emit(CoreEvent::Attention {
             alert: Alert::ApprovalRequested { draft_id: view.id },
         });
+        self.emit(CoreEvent::AgentActivityChanged);
         Ok(view)
     }
 }

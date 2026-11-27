@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Archive,
+  Bot,
   CalendarClock,
   CalendarDays,
   CalendarPlus,
+  Check,
   ChevronDown,
   ChevronLeft,
   Clock,
@@ -17,6 +19,7 @@ import {
   Paperclip,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Star,
   Trash2,
   Type,
@@ -35,6 +38,7 @@ import type { MailApp } from "../shell/useMailApp";
 import { spaceClass } from "../spaces/SpaceSwitcher";
 import { anchorBelow } from "../ui/anchor";
 import { formatFull, initialsOf } from "../ui/format";
+import { AiAssistPanel } from "./AiAssistPanel";
 import { applyReaderTextSize } from "./readerTextSize";
 
 function formatSize(bytes: number): string {
@@ -470,6 +474,7 @@ function ReplyDock({ app, thread }: { app: MailApp; thread: ThreadView }) {
 
 export function ReadingPane({ app }: { app: MailApp }) {
   const [previewAttachment, setPreviewAttachment] = useState<AttachmentData | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
   const thread = app.thread;
 
   if (!thread) {
@@ -494,6 +499,7 @@ export function ReadingPane({ app }: { app: MailApp }) {
   const isSenderVip =
     latestSenderEmail !== "" &&
     app.vipSenders.some((v) => v.address.toLowerCase() === latestSenderEmail.toLowerCase());
+  const threadPendingDrafts = app.pendingAgentDrafts.filter((d) => d.replyToThread === thread.id);
 
   return (
     <main className="read-col">
@@ -584,10 +590,21 @@ export function ReadingPane({ app }: { app: MailApp }) {
                 ? "Text: M"
                 : "Text: L"}
           </button>
+          <button
+            className={`t-btn${aiOpen ? " on" : ""}`}
+            onClick={() => setAiOpen((v) => !v)}
+            title="Toggle In-Pane AI (summary, selection Q&A, draft staging)"
+          >
+            <Sparkles />
+            AI
+          </button>
         </div>
 
         <div className="read-split-body">
           <div className="read-scroll">
+            {aiOpen && (
+              <AiAssistPanel app={app} thread={thread} onClose={() => setAiOpen(false)} />
+            )}
             <div className="read-header">
               <div className="read-subject">{thread.subject}</div>
               <div className="thread-meta-row">
@@ -625,6 +642,51 @@ export function ReadingPane({ app }: { app: MailApp }) {
             {current && (
               <MessageBubble app={app} message={current} onPreview={setPreviewAttachment} />
             )}
+
+            {threadPendingDrafts.map((draft) => (
+              <div key={draft.id} className="agent-draft-banner">
+                <div className="agent-draft-head">
+                  <Bot style={{ width: 13, height: 13, color: "var(--app-accent)" }} />
+                  <strong>
+                    Staged draft by {draft.origin.kind === "agent" ? draft.origin.agentId : "agent"}
+                  </strong>
+                  <span className="kbd">Pending Approval</span>
+                </div>
+                {draft.origin.kind === "agent" && draft.origin.rationale && (
+                  <div className="agent-rationale">Rationale: {draft.origin.rationale}</div>
+                )}
+                <pre className="agent-draft-preview">{draft.bodyText}</pre>
+                <div className="agent-draft-actions">
+                  <button
+                    type="button"
+                    className="btn compact primary"
+                    onClick={() =>
+                      void app.approveAgentDraft(draft.id, { kind: "undoable", undoSecs: 7 })
+                    }
+                  >
+                    <Check />
+                    Approve &amp; Send
+                  </button>
+                  <button
+                    type="button"
+                    className="btn compact"
+                    onClick={() => {
+                      app.setReplyText(draft.bodyText);
+                      app.focusReply();
+                    }}
+                  >
+                    Edit in Reply
+                  </button>
+                  <button
+                    type="button"
+                    className="btn compact"
+                    onClick={() => void app.rejectAgentDraft(draft.id, "Rejected in reader")}
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 

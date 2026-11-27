@@ -4910,3 +4910,245 @@
   background: color-mix(in srgb, var(--app-accent) 15%, transparent);
   color: var(--app-accent);
 }
+
+
+/* ── Phase 4: In-Pane AI, Agent Activity Log & MCP Bridge Permissions ─────── */
+
+.ai-assist-panel {
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-assist-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: calc(12px * var(--chrome-font-scale));
+}
+
+.ai-assist-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-disabled-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ai-card {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border-soft);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: calc(11.5px * var(--chrome-font-scale));
+  font-weight: 600;
+  color: var(--app-ink);
+}
+
+.ai-summary-out p {
+  margin: 0 0 6px;
+  font-size: calc(12px * var(--chrome-font-scale));
+  line-height: 1.45;
+}
+
+.ai-summary-out ul {
+  margin: 4px 0;
+  padding-left: 16px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
+  color: var(--app-ink-2);
+}
+
+.ai-actions-list {
+  margin-top: 4px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
+}
+
+.ai-excerpt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: var(--app-surface-2);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: calc(11px * var(--chrome-font-scale));
+  color: var(--app-ink-2);
+}
+
+.ai-answer {
+  background: var(--app-surface-2);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: calc(12px * var(--chrome-font-scale));
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.ai-error {
+  background: color-mix(in srgb, var(--app-danger, #e5534b) 14%, transparent);
+  color: var(--app-danger, #e5534b);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: calc(11.5px * var(--chrome-font-scale));
+}
+
+.ai-settings-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 6px;
+}
+
+.agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-draft-banner {
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-accent);
+  border-radius: var(--app-radius);
+  padding: 10px 12px;
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-draft-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: calc(12px * var(--chrome-font-scale));
+}
+
+.agent-rationale {
+  font-size: calc(11px * var(--chrome-font-scale));
+  color: var(--app-ink-2);
+  font-style: italic;
+}
+
+.agent-draft-preview {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--font-body);
+  font-size: calc(12px * var(--chrome-font-scale));
+  line-height: 1.45;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border-soft);
+  border-radius: 6px;
+  padding: 8px 10px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.agent-draft-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.activity-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border-soft);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.activity-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.activity-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(11px * var(--chrome-font-scale));
+}
+
+.activity-summary {
+  font-size: calc(12px * var(--chrome-font-scale));
+  color: var(--app-ink);
+}
+
+.agent-perm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-perm-card {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border-soft);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-perm-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: calc(11.5px * var(--chrome-font-scale));
+}
+
+.perm-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: calc(11px * var(--chrome-font-scale));
+  color: var(--app-ink-2);
+}
+
+.folder-pill-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.folder-pill {
+  font-size: calc(10.5px * var(--chrome-font-scale));
+  padding: 2px 7px;
+  border-radius: 99px;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface-2);
+  color: var(--app-ink);
+  cursor: pointer;
+}
+
+.folder-pill.blocked {
+  opacity: 0.55;
+  text-decoration: line-through;
+}

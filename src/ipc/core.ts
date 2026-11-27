@@ -10,6 +10,14 @@ import type {
   AccountView,
   ActionOutcome,
   AddInviteToCalendarInput,
+  AgentAccountPermissionView,
+  AgentActivityId,
+  AgentActivityView,
+  AgentBridgeConfig,
+  AiAnswerResult,
+  AiConfigView,
+  AiDraftResult,
+  AiSummaryResult,
   AppSettings,
   AttachmentData,
   AttachmentId,
@@ -39,6 +47,9 @@ import type {
   RemoteContent,
   RsvpInviteInput,
   RuleId,
+  SaveAgentAccountPermissionInput,
+  SaveAgentBridgeConfigInput,
+  SaveAiConfigInput,
   SaveCalendarEventInput,
   SaveIcsOverlayInput,
   SaveLabelInput,
@@ -418,6 +429,99 @@ export async function findAvailabilitySlots(
 ): Promise<AvailabilitySlot[]> {
   if (!isTauriRuntime()) return mock.findAvailabilitySlots(query);
   return invoke<AvailabilitySlot[]>("find_availability_slots", { query });
+}
+
+// ── Phase 4: Hermes MCP Bridge, Agent Activity, Pending Drafts & In-Pane AI ──
+
+export async function listAgentPermissions(): Promise<AgentAccountPermissionView[]> {
+  if (!isTauriRuntime()) return mock.listAgentPermissions();
+  return invoke<AgentAccountPermissionView[]>("list_agent_permissions");
+}
+
+export async function saveAgentPermission(
+  input: SaveAgentAccountPermissionInput,
+): Promise<AgentAccountPermissionView> {
+  if (!isTauriRuntime()) return mock.saveAgentPermission(input);
+  return invoke<AgentAccountPermissionView>("save_agent_permission", { input });
+}
+
+export async function getAgentBridgeConfig(): Promise<AgentBridgeConfig> {
+  if (!isTauriRuntime()) return mock.getAgentBridgeConfig();
+  return invoke<AgentBridgeConfig>("get_agent_bridge_config");
+}
+
+export async function saveAgentBridgeConfig(
+  input: SaveAgentBridgeConfigInput,
+): Promise<AgentBridgeConfig> {
+  if (!isTauriRuntime()) return mock.saveAgentBridgeConfig(input);
+  return invoke<AgentBridgeConfig>("save_agent_bridge_config", { input });
+}
+
+export async function listAgentActivity(limit = 50): Promise<AgentActivityView[]> {
+  if (!isTauriRuntime()) return mock.listAgentActivity(limit);
+  return invoke<AgentActivityView[]>("list_agent_activity", { limit });
+}
+
+export async function undoAgentActivity(
+  activityId: AgentActivityId,
+): Promise<AgentActivityView> {
+  if (!isTauriRuntime()) return mock.undoAgentActivity(activityId);
+  return invoke<AgentActivityView>("undo_agent_activity", { activityId });
+}
+
+export async function listPendingAgentDrafts(): Promise<DraftView[]> {
+  if (!isTauriRuntime()) return mock.listPendingAgentDrafts();
+  return invoke<DraftView[]>("list_pending_agent_drafts");
+}
+
+export async function approveAgentDraft(
+  draftId: DraftId,
+  mode: SendMode,
+): Promise<SendReceipt> {
+  if (!isTauriRuntime()) return mock.approveAgentDraft(draftId, mode);
+  return invoke<SendReceipt>("approve_agent_draft", { draftId, mode });
+}
+
+export async function rejectAgentDraft(draftId: DraftId, reason: string): Promise<void> {
+  if (!isTauriRuntime()) return mock.rejectAgentDraft(draftId, reason);
+  return invoke<void>("reject_agent_draft", { draftId, reason });
+}
+
+export async function getAiConfig(): Promise<AiConfigView> {
+  if (!isTauriRuntime()) return mock.getAiConfig();
+  return invoke<AiConfigView>("get_ai_config");
+}
+
+export async function saveAiConfig(input: SaveAiConfigInput): Promise<AiConfigView> {
+  if (!isTauriRuntime()) return mock.saveAiConfig(input);
+  return invoke<AiConfigView>("save_ai_config", { input });
+}
+
+export async function aiSummarizeThread(threadId: ThreadId): Promise<AiSummaryResult> {
+  if (!isTauriRuntime()) return mock.aiSummarizeThread(threadId);
+  return invoke<AiSummaryResult>("ai_summarize_thread", { threadId });
+}
+
+export async function aiAskThread(
+  threadId: ThreadId,
+  question: string,
+  selectedText: string | null,
+): Promise<AiAnswerResult> {
+  if (!isTauriRuntime()) return mock.aiAskThread(threadId, question, selectedText);
+  return invoke<AiAnswerResult>("ai_ask_thread", { threadId, question, selectedText });
+}
+
+export async function aiDraftReply(
+  threadId: ThreadId,
+  instructions: string,
+  stageForApproval: boolean,
+): Promise<AiDraftResult> {
+  if (!isTauriRuntime()) return mock.aiDraftReply(threadId, instructions, stageForApproval);
+  return invoke<AiDraftResult>("ai_draft_reply", {
+    threadId,
+    instructions,
+    stageForApproval,
+  });
 }
 
 export async function onMailEvent(handler: (event: CoreEvent) => void): Promise<() => void> {

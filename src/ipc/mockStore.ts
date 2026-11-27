@@ -2070,3 +2070,191 @@ export async function deleteRule(id: import("../types/mail").RuleId): Promise<vo
 export async function runRuleNow(id: import("../types/mail").RuleId): Promise<number> {
   return mockRules.some((r) => r.id === id) ? 0 : 0;
 }
+
+// ── Phase 4 Mock Implementations (Browser Preview) ──────────────────────────
+
+const mockAgentPerms = new Map<string, import("../types/mail").SaveAgentAccountPermissionInput>();
+let mockBridgeConfig: import("../types/mail").AgentBridgeConfig = {
+  mcpEnabled: true,
+  ssePort: 48173,
+  webhookEnabled: false,
+  webhookUrl: "",
+  hasWebhookSecret: false,
+  ipcEndpoint: "\\\\.\\pipe\\ferrule-mcp-preview",
+};
+let mockAiConfig: import("../types/mail").AiConfigView = {
+  enabled: true,
+  baseUrl: "http://127.0.0.1:11434/v1",
+  model: "llama3.2",
+  hasApiKey: false,
+};
+const mockAgentActivity: import("../types/mail").AgentActivityView[] = [];
+
+export async function listAgentPermissions(): Promise<
+  import("../types/mail").AgentAccountPermissionView[]
+> {
+  return state.accounts.map((a) => {
+    const saved = mockAgentPerms.get(a.id);
+    return {
+      accountId: a.id,
+      accountLabel: a.displayName,
+      accountEmail: a.email,
+      enabled: saved?.enabled ?? true,
+      allowRead: saved?.allowRead ?? true,
+      allowTriage: saved?.allowTriage ?? true,
+      allowDrafts: saved?.allowDrafts ?? true,
+      blockedFolders: saved?.blockedFolders ?? [],
+      knownFolders: ["INBOX", "Sent", "Archive", "Trash", "Spam"],
+    };
+  });
+}
+
+export async function saveAgentPermission(
+  input: import("../types/mail").SaveAgentAccountPermissionInput,
+): Promise<import("../types/mail").AgentAccountPermissionView> {
+  mockAgentPerms.set(input.accountId, { ...input });
+  const list = await listAgentPermissions();
+  return list.find((p) => p.accountId === input.accountId) ?? list[0]!;
+}
+
+export async function getAgentBridgeConfig(): Promise<import("../types/mail").AgentBridgeConfig> {
+  return { ...mockBridgeConfig };
+}
+
+export async function saveAgentBridgeConfig(
+  input: import("../types/mail").SaveAgentBridgeConfigInput,
+): Promise<import("../types/mail").AgentBridgeConfig> {
+  mockBridgeConfig = {
+    ...mockBridgeConfig,
+    mcpEnabled: input.mcpEnabled,
+    ssePort: input.ssePort,
+    webhookEnabled: input.webhookEnabled,
+    webhookUrl: input.webhookUrl,
+    hasWebhookSecret: input.clearWebhookSecret
+      ? false
+      : Boolean(input.webhookSecret?.trim()) || mockBridgeConfig.hasWebhookSecret,
+  };
+  return { ...mockBridgeConfig };
+}
+
+export async function listAgentActivity(
+  limit: number,
+): Promise<import("../types/mail").AgentActivityView[]> {
+  return mockAgentActivity.slice(0, limit);
+}
+
+export async function undoAgentActivity(
+  activityId: import("../types/mail").AgentActivityId,
+): Promise<import("../types/mail").AgentActivityView> {
+  const item = mockAgentActivity.find((a) => a.id === activityId);
+  if (!item) throw new Error("Agent activity not found");
+  item.undone = true;
+  item.canUndo = false;
+  item.undoneAt = Date.now();
+  return { ...item };
+}
+
+export async function listPendingAgentDrafts(): Promise<import("../types/mail").DraftView[]> {
+  return Array.from(state.drafts.values()).filter(
+    (d) => d.origin.kind === "agent" && d.state.kind === "pendingApproval",
+  );
+}
+
+export async function approveAgentDraft(
+  draftId: import("../types/mail").DraftId,
+  mode: import("../types/mail").SendMode,
+): Promise<import("../types/mail").SendReceipt> {
+  const draft = state.drafts.get(draftId);
+  if (!draft) throw new Error("Draft not found");
+  draft.state = { kind: "editing" };
+  return sendDraft(draftId, mode);
+}
+
+export async function rejectAgentDraft(
+  draftId: import("../types/mail").DraftId,
+  reason: string,
+): Promise<void> {
+  const draft = state.drafts.get(draftId);
+  if (draft) {
+    draft.state = { kind: "rejected", reason: reason || "Rejected by user" };
+  }
+}
+
+export async function getAiConfig(): Promise<import("../types/mail").AiConfigView> {
+  return { ...mockAiConfig };
+}
+
+export async function saveAiConfig(
+  input: import("../types/mail").SaveAiConfigInput,
+): Promise<import("../types/mail").AiConfigView> {
+  mockAiConfig = {
+    enabled: input.enabled,
+    baseUrl: input.baseUrl,
+    model: input.model,
+    hasApiKey: input.clearApiKey ? false : Boolean(input.apiKey?.trim()) || mockAiConfig.hasApiKey,
+  };
+  return { ...mockAiConfig };
+}
+
+export async function aiSummarizeThread(
+  threadId: import("../types/mail").ThreadId,
+): Promise<import("../types/mail").AiSummaryResult> {
+  const t = state.threads.find((th) => th.id === threadId);
+  const lastSnippet = t?.messages[t.messages.length - 1]?.snippet ?? "";
+  return {
+    summary: t
+      ? `Summary of "${t.subject}" from ${t.senderName}: ${lastSnippet}`
+      : "No thread selected.",
+    keyPoints: t ? [`Sender: ${t.senderName}`, `${t.messages.length} message(s) in thread`] : [],
+    actionItems: ["Review and reply if needed"],
+  };
+}
+
+export async function aiAskThread(
+  threadId: import("../types/mail").ThreadId,
+  question: string,
+  selectedText: string | null,
+): Promise<import("../types/mail").AiAnswerResult> {
+  const t = state.threads.find((th) => th.id === threadId);
+  const lastSnippet = t?.messages[t.messages.length - 1]?.snippet ?? "";
+  const excerptNote = selectedText ? ` (excerpt: "${selectedText.slice(0, 60)}")` : "";
+  return {
+    answer: t
+      ? `Preview answer for "${question}"${excerptNote} based on "${t.subject}": ${lastSnippet}`
+      : "No thread selected.",
+  };
+}
+
+export async function aiDraftReply(
+  threadId: import("../types/mail").ThreadId,
+  instructions: string,
+  stageForApproval: boolean,
+): Promise<import("../types/mail").AiDraftResult> {
+  const t = state.threads.find((th) => th.id === threadId);
+  const bodyText = `Hi ${t?.senderName ?? "there"},\n\nThanks for reaching out${instructions ? ` — ${instructions}` : ""}.\n\nBest,\nRey`;
+  let stagedDraft: import("../types/mail").DraftView | null = null;
+  if (stageForApproval && t) {
+    const acct = state.accounts.find((a) => a.id === t.accountId) ?? state.accounts[0];
+    if (acct) {
+      const id = newDraftId();
+      stagedDraft = {
+        id,
+        accountId: acct.id,
+        spaceColor: acct.color,
+        fromIdentity: acct.identities[0]!,
+        fromLocked: true,
+        replyToThread: t.id,
+        to: [t.senderEmail],
+        cc: [],
+        bcc: [],
+        subject: t.subject.startsWith("Re:") ? t.subject : `Re: ${t.subject}`,
+        bodyText,
+        rev: 1,
+        origin: { kind: "agent", agentId: "in-pane-ai", rationale: instructions || "In-pane AI draft" },
+        state: { kind: "pendingApproval" },
+      };
+      state.drafts.set(id, stagedDraft);
+    }
+  }
+  return { bodyText, stagedDraft };
+}

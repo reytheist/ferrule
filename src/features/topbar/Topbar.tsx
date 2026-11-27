@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Moon, PenLine, Plus, RefreshCw, Search, Settings, Sun } from "lucide-react";
+import { Bot, Moon, PenLine, Plus, RefreshCw, Search, Settings, Sun } from "lucide-react";
 import type { MailApp } from "../shell/useMailApp";
 import { FerruleGlyph } from "../ui/FerruleGlyph";
 
@@ -73,6 +73,21 @@ export function Topbar({ app }: { app: MailApp }) {
           <RefreshCw />
           Sync Now
         </button>
+        {(app.settings.developerToolsEnabled ||
+          app.pendingAgentDrafts.length > 0 ||
+          app.agentActivity.length > 0) && (
+          <button
+            className="ghost-btn"
+            onClick={app.openAgentModal}
+            title="Hermes Agent Activity & Pending Approval Drafts"
+          >
+            <Bot />
+            Agent
+            {app.pendingAgentDrafts.length > 0 && (
+              <span className="kbd">{app.pendingAgentDrafts.length}</span>
+            )}
+          </button>
+        )}
         <button
           className="icon-btn"
           onClick={app.toggleTheme}

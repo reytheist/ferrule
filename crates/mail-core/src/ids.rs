@@ -72,6 +72,7 @@ define_id!(SavedSearchId);
 define_id!(RuleId);
 define_id!(CalendarEventId);
 define_id!(IcsOverlayId);
+define_id!(AgentActivityId);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

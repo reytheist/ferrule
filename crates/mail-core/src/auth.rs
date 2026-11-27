@@ -85,6 +85,8 @@ pub enum CredentialKind {
     Password,
     OAuthRefreshToken,
     OAuthClientSecret,
+    AiApiKey,
+    WebhookSecret,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -209,11 +211,27 @@ pub struct SecretKey {
 }
 
 impl SecretKey {
+    pub fn ai_api_key() -> Self {
+        Self {
+            account_id: AccountId::derive(uuid::Uuid::NAMESPACE_URL, b"ferrule:ai-api-key"),
+            kind: CredentialKind::AiApiKey,
+        }
+    }
+
+    pub fn webhook_secret() -> Self {
+        Self {
+            account_id: AccountId::derive(uuid::Uuid::NAMESPACE_URL, b"ferrule:webhook-secret"),
+            kind: CredentialKind::WebhookSecret,
+        }
+    }
+
     pub fn storage_id(&self) -> String {
         let suffix = match self.kind {
             CredentialKind::Password => "password",
             CredentialKind::OAuthRefreshToken => "oauth-refresh",
             CredentialKind::OAuthClientSecret => "oauth-client-secret",
+            CredentialKind::AiApiKey => "ai-api-key",
+            CredentialKind::WebhookSecret => "webhook-secret",
         };
         format!("ferrule:v1:{}:{suffix}", self.account_id)
     }

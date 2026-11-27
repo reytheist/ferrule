@@ -534,6 +534,9 @@ async fn run_sync_turn(
                 }
                 Ok(touched)
             })?;
+            if !touched.is_empty() {
+                core.notify_hermes_ingested(account_id, &touched);
+            }
             for tid in touched {
                 if !all_touched.contains(&tid) {
                     all_touched.push(tid);

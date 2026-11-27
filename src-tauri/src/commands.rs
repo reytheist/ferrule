@@ -8,16 +8,19 @@ use mail_core::calendar::{
 };
 use mail_core::error::CoreError;
 use mail_core::ids::{
-    AccountId, AttachmentId, CalendarEventId, DraftId, IcsOverlayId, JobId, LabelId, RuleId,
-    SavedSearchId, SignatureId, TemplateId, ThreadId, UnixMs,
+    AccountId, AgentActivityId, AttachmentId, CalendarEventId, DraftId, IcsOverlayId, JobId,
+    LabelId, RuleId, SavedSearchId, SignatureId, TemplateId, ThreadId, UnixMs,
 };
 use mail_core::types::{
-    AccountView, ActionOutcome, AppSettings, AttachmentData, CreateDraftInput, DraftView, JobView,
-    LabelView, MailAction, MailRuleView, MailboxCounts, NewAccountInput, OAuthSignInInput,
-    RemoteContent, SaveLabelInput, SaveMailRuleInput, SaveSavedSearchInput, SaveSignatureInput,
-    SaveTemplateInput, SavedOAuthClients, SavedSearchView, Scope, ScreenerDecision,
-    ScreenerSenderView, SendMode, SendReceipt, SignatureView, TemplateView, ThreadPage,
-    ThreadQuery, ThreadView, UndoOutcome, UpdateAccountInput, VipSenderView,
+    AccountView, ActionOutcome, AgentAccountPermissionView, AgentActivityView, AgentBridgeConfig,
+    AiAnswerResult, AiConfigView, AiDraftResult, AiSummaryResult, AppSettings, AttachmentData,
+    CreateDraftInput, DraftView, JobView, LabelView, MailAction, MailRuleView, MailboxCounts,
+    NewAccountInput, OAuthSignInInput, RemoteContent, SaveAgentAccountPermissionInput,
+    SaveAgentBridgeConfigInput, SaveAiConfigInput, SaveLabelInput, SaveMailRuleInput,
+    SaveSavedSearchInput, SaveSignatureInput, SaveTemplateInput, SavedOAuthClients,
+    SavedSearchView, Scope, ScreenerDecision, ScreenerSenderView, SendMode, SendReceipt,
+    SignatureView, TemplateView, ThreadPage, ThreadQuery, ThreadView, UndoOutcome,
+    UpdateAccountInput, VipSenderView,
 };
 use mail_core::MailCore;
 use tauri::Manager;
@@ -534,4 +537,119 @@ pub async fn find_availability_slots(
     query: AvailabilityQuery,
 ) -> Result<Vec<AvailabilitySlot>, CoreError> {
     core.find_availability_slots(query).await
+}
+
+// ── Phase 4: Hermes MCP Bridge, Agent Activity, Pending Drafts & In-Pane AI ──
+
+#[tauri::command]
+pub async fn list_agent_permissions(
+    core: tauri::State<'_, MailCore>,
+) -> Result<Vec<AgentAccountPermissionView>, CoreError> {
+    core.list_agent_permissions().await
+}
+
+#[tauri::command]
+pub async fn save_agent_permission(
+    core: tauri::State<'_, MailCore>,
+    input: SaveAgentAccountPermissionInput,
+) -> Result<AgentAccountPermissionView, CoreError> {
+    core.save_agent_permission(input).await
+}
+
+#[tauri::command]
+pub async fn get_agent_bridge_config(
+    core: tauri::State<'_, MailCore>,
+) -> Result<AgentBridgeConfig, CoreError> {
+    core.get_agent_bridge_config().await
+}
+
+#[tauri::command]
+pub async fn save_agent_bridge_config(
+    core: tauri::State<'_, MailCore>,
+    input: SaveAgentBridgeConfigInput,
+) -> Result<AgentBridgeConfig, CoreError> {
+    core.save_agent_bridge_config(input).await
+}
+
+#[tauri::command]
+pub async fn list_agent_activity(
+    core: tauri::State<'_, MailCore>,
+    limit: Option<u32>,
+) -> Result<Vec<AgentActivityView>, CoreError> {
+    core.list_agent_activity(limit.unwrap_or(50)).await
+}
+
+#[tauri::command]
+pub async fn undo_agent_activity(
+    core: tauri::State<'_, MailCore>,
+    activity_id: AgentActivityId,
+) -> Result<AgentActivityView, CoreError> {
+    core.undo_agent_activity(activity_id).await
+}
+
+#[tauri::command]
+pub async fn list_pending_agent_drafts(
+    core: tauri::State<'_, MailCore>,
+) -> Result<Vec<DraftView>, CoreError> {
+    core.list_pending_agent_drafts().await
+}
+
+#[tauri::command]
+pub async fn approve_agent_draft(
+    core: tauri::State<'_, MailCore>,
+    draft_id: DraftId,
+    mode: SendMode,
+) -> Result<SendReceipt, CoreError> {
+    core.approve_agent_draft(draft_id, mode).await
+}
+
+#[tauri::command]
+pub async fn reject_agent_draft(
+    core: tauri::State<'_, MailCore>,
+    draft_id: DraftId,
+    reason: String,
+) -> Result<(), CoreError> {
+    core.reject_agent_draft(draft_id, reason).await
+}
+
+#[tauri::command]
+pub async fn get_ai_config(core: tauri::State<'_, MailCore>) -> Result<AiConfigView, CoreError> {
+    core.get_ai_config().await
+}
+
+#[tauri::command]
+pub async fn save_ai_config(
+    core: tauri::State<'_, MailCore>,
+    input: SaveAiConfigInput,
+) -> Result<AiConfigView, CoreError> {
+    core.save_ai_config(input).await
+}
+
+#[tauri::command]
+pub async fn ai_summarize_thread(
+    core: tauri::State<'_, MailCore>,
+    thread_id: ThreadId,
+) -> Result<AiSummaryResult, CoreError> {
+    core.ai_summarize_thread(thread_id).await
+}
+
+#[tauri::command]
+pub async fn ai_ask_thread(
+    core: tauri::State<'_, MailCore>,
+    thread_id: ThreadId,
+    question: String,
+    selected_text: Option<String>,
+) -> Result<AiAnswerResult, CoreError> {
+    core.ai_ask_thread(thread_id, question, selected_text).await
+}
+
+#[tauri::command]
+pub async fn ai_draft_reply(
+    core: tauri::State<'_, MailCore>,
+    thread_id: ThreadId,
+    instructions: String,
+    stage_for_approval: bool,
+) -> Result<AiDraftResult, CoreError> {
+    core.ai_draft_reply(thread_id, instructions, stage_for_approval)
+        .await
 }

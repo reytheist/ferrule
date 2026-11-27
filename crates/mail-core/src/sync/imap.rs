@@ -752,7 +752,9 @@ pub(crate) fn plan_for(
 ) -> FetchPlan {
     let endpoint = auth.imap_endpoint();
     let auth_mode = match auth.credential_kind() {
-        CredentialKind::Password => ImapAuthMode::Login,
+        CredentialKind::Password | CredentialKind::AiApiKey | CredentialKind::WebhookSecret => {
+            ImapAuthMode::Login
+        }
         CredentialKind::OAuthRefreshToken | CredentialKind::OAuthClientSecret => {
             ImapAuthMode::XOAuth2
         }

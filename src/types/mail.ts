@@ -14,6 +14,7 @@ export type SavedSearchId = Brand<string, "SavedSearchId">;
 export type RuleId = Brand<string, "RuleId">;
 export type CalendarEventId = Brand<string, "CalendarEventId">;
 export type IcsOverlayId = Brand<string, "IcsOverlayId">;
+export type AgentActivityId = Brand<string, "AgentActivityId">;
 export type UnixMs = number;
 
 export type SpaceColor =
@@ -591,6 +592,90 @@ export interface AvailabilitySlot {
   label: string;
 }
 
+// ── Phase 4: Hermes MCP Bridge, Agent Permissions, Activity Log & In-Pane AI ──
+
+export interface AgentAccountPermissionView {
+  accountId: AccountId;
+  accountLabel: string;
+  accountEmail: string;
+  enabled: boolean;
+  allowRead: boolean;
+  allowTriage: boolean;
+  allowDrafts: boolean;
+  blockedFolders: string[];
+  knownFolders: string[];
+}
+
+export interface SaveAgentAccountPermissionInput {
+  accountId: AccountId;
+  enabled: boolean;
+  allowRead: boolean;
+  allowTriage: boolean;
+  allowDrafts: boolean;
+  blockedFolders: string[];
+}
+
+export interface AgentActivityView {
+  id: AgentActivityId;
+  agentId: string;
+  toolName: string;
+  summary: string;
+  accountId: AccountId | null;
+  threadId: ThreadId | null;
+  canUndo: boolean;
+  undone: boolean;
+  undoneAt: UnixMs | null;
+  createdAt: UnixMs;
+}
+
+export interface AgentBridgeConfig {
+  mcpEnabled: boolean;
+  ssePort: number;
+  webhookEnabled: boolean;
+  webhookUrl: string;
+  hasWebhookSecret: boolean;
+  ipcEndpoint: string;
+}
+
+export interface SaveAgentBridgeConfigInput {
+  mcpEnabled: boolean;
+  ssePort: number;
+  webhookEnabled: boolean;
+  webhookUrl: string;
+  webhookSecret?: string | null;
+  clearWebhookSecret?: boolean;
+}
+
+export interface AiConfigView {
+  enabled: boolean;
+  baseUrl: string;
+  model: string;
+  hasApiKey: boolean;
+}
+
+export interface SaveAiConfigInput {
+  enabled: boolean;
+  baseUrl: string;
+  model: string;
+  apiKey?: string | null;
+  clearApiKey?: boolean;
+}
+
+export interface AiSummaryResult {
+  summary: string;
+  keyPoints: string[];
+  actionItems: string[];
+}
+
+export interface AiAnswerResult {
+  answer: string;
+}
+
+export interface AiDraftResult {
+  bodyText: string;
+  stagedDraft: DraftView | null;
+}
+
 // ── Core Domain Events (mail://event) ───────────────────────────────────────
 
 export type CoreEvent =
@@ -599,5 +684,6 @@ export type CoreEvent =
   | { kind: "jobChanged"; job: JobView }
   | { kind: "draftChanged"; draftId: DraftId }
   | { kind: "attention"; alert: { kind: string } }
+  | { kind: "agentActivityChanged" }
   | { kind: "calendarChanged" }
   | { kind: "resync" };

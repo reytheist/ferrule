@@ -96,6 +96,16 @@ pub fn run() {
             // durable SMTP submission worker.
             core.start_background_services();
 
+            // Start the single-writer local MCP IPC server (Windows named pipe / Unix
+            // domain socket) and localhost SSE + optional webhook event push services.
+            let ipc_core = core.clone();
+            let push_core = core.clone();
+            tauri::async_runtime::spawn(async move {
+                let endpoint = mail_core::mcp::default_ipc_endpoint();
+                drop(mail_core::mcp::spawn_ipc_server(ipc_core, endpoint));
+                mail_core::mcp::spawn_push_services(push_core);
+            });
+
             // Periodic refresh for enabled read-only personal .ics overlays (~14 min).
             let ics_core = core.clone();
             tauri::async_runtime::spawn(async move {
@@ -239,6 +249,20 @@ pub fn run() {
             commands::refresh_ics_overlay,
             commands::list_overlay_busy_blocks,
             commands::find_availability_slots,
+            commands::list_agent_permissions,
+            commands::save_agent_permission,
+            commands::get_agent_bridge_config,
+            commands::save_agent_bridge_config,
+            commands::list_agent_activity,
+            commands::undo_agent_activity,
+            commands::list_pending_agent_drafts,
+            commands::approve_agent_draft,
+            commands::reject_agent_draft,
+            commands::get_ai_config,
+            commands::save_ai_config,
+            commands::ai_summarize_thread,
+            commands::ai_ask_thread,
+            commands::ai_draft_reply,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Ferrule");

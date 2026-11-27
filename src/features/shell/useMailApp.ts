@@ -4,6 +4,10 @@ import {
   addAccount as addAccountCommand,
   addInviteToCalendar as addInviteToCalendarCommand,
   addVipSender as addVipSenderCommand,
+  aiAskThread as aiAskThreadCommand,
+  aiDraftReply as aiDraftReplyCommand,
+  aiSummarizeThread as aiSummarizeThreadCommand,
+  approveAgentDraft as approveAgentDraftCommand,
   cancelSend,
   createDraft,
   deleteCalendarEvent as deleteCalendarEventCommand,
@@ -15,15 +19,20 @@ import {
   deleteTemplate,
   dismissFollowUp,
   downloadAttachment as downloadAttachmentCommand,
+  getAgentBridgeConfig,
+  getAiConfig,
   getSettings,
   isTauriRuntime,
   labelThreads as labelThreadsCommand,
   listAccounts,
+  listAgentActivity,
+  listAgentPermissions,
   listCalendarEvents,
   listIcsOverlays,
   listJobs,
   listLabels,
   listOverlayBusyBlocks,
+  listPendingAgentDrafts,
   listRules,
   listSavedSearches,
   listScreenerSenders,
@@ -38,10 +47,14 @@ import {
   quickAddCalendarEvent as quickAddCalendarEventCommand,
   reauthOAuthAccount as reauthOAuthAccountCommand,
   refreshIcsOverlay as refreshIcsOverlayCommand,
+  rejectAgentDraft as rejectAgentDraftCommand,
   removeAccount as removeAccountCommand,
   removeVipSender as removeVipSenderCommand,
   rsvpCalendarInvite as rsvpCalendarInviteCommand,
   runRuleNow as runRuleNowCommand,
+  saveAgentBridgeConfig as saveAgentBridgeConfigCommand,
+  saveAgentPermission as saveAgentPermissionCommand,
+  saveAiConfig as saveAiConfigCommand,
   saveCalendarEvent as saveCalendarEventCommand,
   saveIcsOverlay as saveIcsOverlayCommand,
   saveLabel as saveLabelCommand,
@@ -57,6 +70,7 @@ import {
   snoozeThread as snoozeThreadCommand,
   syncAccount,
   tickScheduler,
+  undoAgentActivity as undoAgentActivityCommand,
   unsnoozeThread,
   updateAccount as updateAccountCommand,
   updateSettings as updateSettingsCommand,
@@ -65,6 +79,14 @@ import type {
   AccountId,
   AccountView,
   AddInviteToCalendarInput,
+  AgentAccountPermissionView,
+  AgentActivityId,
+  AgentActivityView,
+  AgentBridgeConfig,
+  AiAnswerResult,
+  AiConfigView,
+  AiDraftResult,
+  AiSummaryResult,
   AppSettings,
   AttachmentData,
   AttachmentId,
@@ -72,6 +94,8 @@ import type {
   CalendarEventView,
   CalendarOccurrence,
   CreateDraftInput,
+  DraftId,
+  DraftView,
   IcsOverlayId,
   IcsOverlayView,
   InboxCategory,
@@ -89,6 +113,9 @@ import type {
   RemoteContent,
   RsvpInviteInput,
   RuleId,
+  SaveAgentAccountPermissionInput,
+  SaveAgentBridgeConfigInput,
+  SaveAiConfigInput,
   SaveCalendarEventInput,
   SaveIcsOverlayInput,
   SaveLabelInput,
@@ -266,6 +293,12 @@ export interface MailApp {
   icsOverlays: IcsOverlayView[];
   overlayBusyBlocks: OverlayBusyBlock[];
   selectedCalendarEvent: CalendarEventView | null;
+  agentPermissions: AgentAccountPermissionView[];
+  agentBridgeConfig: AgentBridgeConfig;
+  agentActivity: AgentActivityView[];
+  pendingAgentDrafts: DraftView[];
+  aiConfig: AiConfigView;
+  agentModalOpen: boolean;
 
   toggleTheme(): void;
   setTheme(next: Theme): void;
@@ -358,6 +391,17 @@ export interface MailApp {
   persistIcsOverlay(input: SaveIcsOverlayInput): Promise<IcsOverlayView>;
   removeIcsOverlay(id: IcsOverlayId): Promise<void>;
   syncIcsOverlay(id: IcsOverlayId): Promise<void>;
+  openAgentModal(): void;
+  closeAgentModal(): void;
+  saveAgentPermission(input: SaveAgentAccountPermissionInput): Promise<void>;
+  saveAgentBridgeConfig(input: SaveAgentBridgeConfigInput): Promise<void>;
+  undoAgentActivity(activityId: AgentActivityId): Promise<void>;
+  approveAgentDraft(draftId: DraftId, mode: SendMode): Promise<void>;
+  rejectAgentDraft(draftId: DraftId, reason: string): Promise<void>;
+  saveAiConfig(input: SaveAiConfigInput): Promise<void>;
+  aiSummarizeThread(threadId: ThreadId): Promise<AiSummaryResult>;
+  aiAskThread(threadId: ThreadId, question: string, selectedText: string | null): Promise<AiAnswerResult>;
+  aiDraftReply(threadId: ThreadId, instructions: string, stageForApproval: boolean): Promise<AiDraftResult>;
 }
 
 export function useMailApp(): MailApp {
@@ -424,6 +468,24 @@ export function useMailApp(): MailApp {
   const [selectedCalendarEvent, setSelectedCalendarEvent] = useState<CalendarEventView | null>(
     null,
   );
+  const [agentPermissions, setAgentPermissions] = useState<AgentAccountPermissionView[]>([]);
+  const [agentBridgeConfig, setAgentBridgeConfig] = useState<AgentBridgeConfig>({
+    mcpEnabled: true,
+    ssePort: 48173,
+    webhookEnabled: false,
+    webhookUrl: "",
+    hasWebhookSecret: false,
+    ipcEndpoint: "",
+  });
+  const [agentActivity, setAgentActivity] = useState<AgentActivityView[]>([]);
+  const [pendingAgentDrafts, setPendingAgentDrafts] = useState<DraftView[]>([]);
+  const [aiConfig, setAiConfig] = useState<AiConfigView>({
+    enabled: false,
+    baseUrl: "http://127.0.0.1:11434/v1",
+    model: "llama3.2",
+    hasApiKey: false,
+  });
+  const [agentModalOpen, setAgentModalOpen] = useState(false);
 
   const toastSeq = useRef(0);
   const insertSeq = useRef(0);
@@ -488,6 +550,11 @@ export function useMailApp(): MailApp {
       nextRules,
       nextClients,
       nextSettings,
+      nextAgentPerms,
+      nextBridgeCfg,
+      nextAgentActivity,
+      nextPendingDrafts,
+      nextAiCfg,
     ] = await Promise.all([
       listAccounts(),
       listJobs(),
@@ -500,6 +567,11 @@ export function useMailApp(): MailApp {
       listRules(),
       savedOAuthClientsCommand(),
       getSettings(),
+      listAgentPermissions(),
+      getAgentBridgeConfig(),
+      listAgentActivity(50),
+      listPendingAgentDrafts(),
+      getAiConfig(),
     ]);
     setAccounts(nextAccounts);
     setJobs(nextJobs);
@@ -512,6 +584,11 @@ export function useMailApp(): MailApp {
     setRules(nextRules);
     setSavedOAuthClients(nextClients);
     setSettings(nextSettings);
+    setAgentPermissions(nextAgentPerms);
+    setAgentBridgeConfig(nextBridgeCfg);
+    setAgentActivity(nextAgentActivity);
+    setPendingAgentDrafts(nextPendingDrafts);
+    setAiConfig(nextAiCfg);
     jobsSignature.current = nextJobs.map((j) => `${j.id}:${j.state}`).join("|");
     await reloadCalendarMeta();
     return { accounts: nextAccounts, settings: nextSettings };
@@ -687,8 +764,21 @@ export function useMailApp(): MailApp {
           lastAutoSyncAtRef.current = Date.now();
           scheduleMailRefresh();
         }
-      } else if (event.kind === "mailChanged" || event.kind === "resync") {
+      } else if (
+        event.kind === "mailChanged" ||
+        event.kind === "resync" ||
+        event.kind === "agentActivityChanged" ||
+        event.kind === "draftChanged"
+      ) {
         scheduleMailRefresh();
+        void Promise.all([listAgentActivity(50), listPendingAgentDrafts()])
+          .then(([act, drafts]) => {
+            if (!disposed) {
+              setAgentActivity(act);
+              setPendingAgentDrafts(drafts);
+            }
+          })
+          .catch(() => undefined);
       } else if (event.kind === "calendarChanged") {
         scheduleCalendarRefresh();
       }
@@ -1707,6 +1797,104 @@ export function useMailApp(): MailApp {
     }
   }
 
+  async function saveAgentPermission(input: SaveAgentAccountPermissionInput): Promise<void> {
+    try {
+      await saveAgentPermissionCommand(input);
+      setAgentPermissions(await listAgentPermissions());
+      showToast("Agent permissions updated");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function saveAgentBridgeConfig(input: SaveAgentBridgeConfigInput): Promise<void> {
+    try {
+      const updated = await saveAgentBridgeConfigCommand(input);
+      setAgentBridgeConfig(updated);
+      showToast("Hermes MCP bridge settings saved");
+    } catch (err) {
+      showToast(friendlyError(err));
+      throw err;
+    }
+  }
+
+  async function undoAgentActivity(activityId: AgentActivityId): Promise<void> {
+    try {
+      await undoAgentActivityCommand(activityId);
+      setAgentActivity(await listAgentActivity(50));
+      await reload(scope, view);
+      showToast("Agent action undone");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function approveAgentDraft(draftId: DraftId, mode: SendMode): Promise<void> {
+    try {
+      const receipt = await approveAgentDraftCommand(draftId, mode);
+      setPendingAgentDrafts(await listPendingAgentDrafts());
+      await reloadMeta();
+      await reload(scope, view);
+      showToast("Agent draft approved & queued", {
+        durationMs: 7000,
+        onUndo: async () => {
+          await cancelSend(receipt.jobId);
+          setPendingAgentDrafts(await listPendingAgentDrafts());
+          await reloadMeta();
+          showToast("Send cancelled — draft returned to Pending Approval");
+        },
+      });
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function rejectAgentDraft(draftId: DraftId, reason: string): Promise<void> {
+    try {
+      await rejectAgentDraftCommand(draftId, reason);
+      setPendingAgentDrafts(await listPendingAgentDrafts());
+      showToast("Agent draft rejected");
+    } catch (err) {
+      showToast(friendlyError(err));
+    }
+  }
+
+  async function saveAiConfig(input: SaveAiConfigInput): Promise<void> {
+    try {
+      const updated = await saveAiConfigCommand(input);
+      setAiConfig(updated);
+      showToast("In-pane AI settings saved");
+    } catch (err) {
+      showToast(friendlyError(err));
+      throw err;
+    }
+  }
+
+  async function aiSummarizeThread(threadId: ThreadId): Promise<AiSummaryResult> {
+    return aiSummarizeThreadCommand(threadId);
+  }
+
+  async function aiAskThread(
+    threadId: ThreadId,
+    question: string,
+    selectedText: string | null,
+  ): Promise<AiAnswerResult> {
+    return aiAskThreadCommand(threadId, question, selectedText);
+  }
+
+  async function aiDraftReply(
+    threadId: ThreadId,
+    instructions: string,
+    stageForApproval: boolean,
+  ): Promise<AiDraftResult> {
+    const res = await aiDraftReplyCommand(threadId, instructions, stageForApproval);
+    if (stageForApproval && res.stagedDraft) {
+      setPendingAgentDrafts(await listPendingAgentDrafts());
+      setAgentActivity(await listAgentActivity(50));
+    }
+    return res;
+  }
+
   return {
     booting,
     error,
@@ -1755,6 +1943,12 @@ export function useMailApp(): MailApp {
     icsOverlays,
     overlayBusyBlocks,
     selectedCalendarEvent,
+    agentPermissions,
+    agentBridgeConfig,
+    agentActivity,
+    pendingAgentDrafts,
+    aiConfig,
+    agentModalOpen,
     toggleTheme: () => setTheme((prev) => (prev === "dark" ? "light" : "dark")),
     setTheme,
     toggleLayout: () => setLayout((prev) => (prev === "split" ? "classic" : "split")),
@@ -1849,5 +2043,16 @@ export function useMailApp(): MailApp {
     persistIcsOverlay,
     removeIcsOverlay,
     syncIcsOverlay,
+    openAgentModal: () => setAgentModalOpen(true),
+    closeAgentModal: () => setAgentModalOpen(false),
+    saveAgentPermission,
+    saveAgentBridgeConfig,
+    undoAgentActivity,
+    approveAgentDraft,
+    rejectAgentDraft,
+    saveAiConfig,
+    aiSummarizeThread,
+    aiAskThread,
+    aiDraftReply,
   };
 }

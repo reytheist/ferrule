@@ -1,4 +1,5 @@
 import { AddAccountModal } from "./features/accounts/AddAccountModal";
+import { AgentActivityModal } from "./features/agent/AgentActivityModal";
 import { CalendarView } from "./features/calendar/CalendarView";
 import { CommandBar } from "./features/command-bar/CommandBar";
 import { ComposeModal } from "./features/compose/ComposeModal";
@@ -77,6 +78,7 @@ export function App() {
       {app.settingsOpen && <SettingsModal app={app} />}
       {app.screenerOpen && <ScreenerModal app={app} />}
       {app.rulesOpen && <RulesModal app={app} />}
+      {app.agentModalOpen && <AgentActivityModal app={app} />}
       <SchedulePopover app={app} />
       <UndoToast app={app} />
     </div>
