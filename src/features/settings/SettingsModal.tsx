@@ -553,7 +553,10 @@ export function SettingsModal({ app }: { app: MailApp }) {
                 </div>
                 <span className="hint-text">
                   Local IPC: <code>{app.agentBridgeConfig.ipcEndpoint || "auto"}</code> · SSE Push:{" "}
-                  <code>http://127.0.0.1:{app.agentBridgeConfig.ssePort}/events</code>
+                  <code>
+                    http://127.0.0.1:{app.agentBridgeConfig.ssePort}/events
+                    {app.agentBridgeConfig.sseToken ? `?token=${app.agentBridgeConfig.sseToken}` : ""}
+                  </code>
                 </span>
                 <span className="hint-text">
                   Point Hermes at <code>ferrule mcp</code> (or <code>ferrule-mcp</code>). Agents

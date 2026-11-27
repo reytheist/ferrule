@@ -774,7 +774,7 @@ pub struct AgentActivityView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentBridgeConfig {
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub mcp_enabled: bool,
     #[serde(default = "default_sse_port")]
     pub sse_port: u16,
@@ -786,10 +786,8 @@ pub struct AgentBridgeConfig {
     pub has_webhook_secret: bool,
     #[serde(default)]
     pub ipc_endpoint: String,
-}
-
-fn default_true() -> bool {
-    true
+    #[serde(default)]
+    pub sse_token: String,
 }
 
 fn default_sse_port() -> u16 {
@@ -799,12 +797,13 @@ fn default_sse_port() -> u16 {
 impl Default for AgentBridgeConfig {
     fn default() -> Self {
         Self {
-            mcp_enabled: true,
+            mcp_enabled: false,
             sse_port: default_sse_port(),
             webhook_enabled: false,
             webhook_url: String::new(),
             has_webhook_secret: false,
             ipc_endpoint: String::new(),
+            sse_token: String::new(),
         }
     }
 }

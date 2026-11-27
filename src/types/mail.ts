@@ -635,6 +635,7 @@ export interface AgentBridgeConfig {
   webhookUrl: string;
   hasWebhookSecret: boolean;
   ipcEndpoint: string;
+  sseToken: string;
 }
 
 export interface SaveAgentBridgeConfigInput {

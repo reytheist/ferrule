@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use crate::agent::{
     action_for_destination, build_agent_query, frame_untrusted_email_content,
@@ -95,6 +95,8 @@ struct MailCoreInner {
     host: Host,
     events: broadcast::Sender<CoreEvent>,
     hermes_events: broadcast::Sender<HermesPushEvent>,
+    sse_token: String,
+    sse_port_tx: watch::Sender<u16>,
     token_cache: Mutex<HashMap<AccountId, CachedAccessToken>>,
     sync_manager: SyncManager,
 }
@@ -133,6 +135,12 @@ impl MailCore {
         };
         let (events, _) = broadcast::channel(128);
         let (hermes_events, _) = broadcast::channel(128);
+        let initial_sse_port = store
+            .with_conn(store::get_bridge_config)
+            .map(|c| c.sse_port)
+            .unwrap_or(48173);
+        let (sse_port_tx, _) = watch::channel(initial_sse_port);
+        let sse_token = uuid::Uuid::new_v4().simple().to_string();
         Ok(Self {
             inner: Arc::new(MailCoreInner {
                 config,
@@ -140,6 +148,8 @@ impl MailCore {
                 host,
                 events,
                 hermes_events,
+                sse_token,
+                sse_port_tx,
                 token_cache: Mutex::new(HashMap::new()),
                 sync_manager: SyncManager::new(),
             }),
@@ -175,6 +185,24 @@ impl MailCore {
 
     pub fn subscribe_hermes_events(&self) -> broadcast::Receiver<HermesPushEvent> {
         self.inner.hermes_events.subscribe()
+    }
+
+    pub fn sse_token(&self) -> &str {
+        &self.inner.sse_token
+    }
+
+    pub fn subscribe_sse_port(&self) -> watch::Receiver<u16> {
+        self.inner.sse_port_tx.subscribe()
+    }
+
+    /// Fail-closed check for whether the local MCP bridge & push services are enabled.
+    /// Reads SQLite directly without touching `SecretStore`, returning `false` on any error.
+    pub fn is_mcp_bridge_enabled(&self) -> bool {
+        self.inner
+            .store
+            .with_conn(store::get_bridge_config)
+            .map(|c| c.mcp_enabled)
+            .unwrap_or(false)
     }
 
     /// Emit a safe metadata-only Hermes push event if the owning account has agent
@@ -2461,6 +2489,7 @@ impl MailCore {
             .get(&SecretKey::webhook_secret())?
             .is_some();
         cfg.ipc_endpoint = mcp::default_ipc_endpoint();
+        cfg.sse_token = self.inner.sse_token.clone();
         Ok(cfg)
     }
 
@@ -2492,6 +2521,14 @@ impl MailCore {
                 &cleaned_url,
             )
         })?;
+        self.inner.sse_port_tx.send_if_modified(|current| {
+            if *current != input.sse_port {
+                *current = input.sse_port;
+                true
+            } else {
+                false
+            }
+        });
         self.get_agent_bridge_config().await
     }
 
@@ -2501,7 +2538,8 @@ impl MailCore {
             .with_conn(|conn| store::list_agent_activity(conn, limit))
     }
 
-    /// Reverse an undoable agent mutation in 1 click and mark the activity entry undone.
+    /// Reverse an undoable agent mutation in 1 click, atomically claiming the entry and
+    /// enqueueing compensating IMAP offline actions so remote state stays in sync.
     pub async fn undo_agent_activity(
         &self,
         activity_id: AgentActivityId,
@@ -2517,17 +2555,94 @@ impl MailCore {
         if entry.undone {
             return Ok(entry.to_view());
         }
-        let Some(payload) = entry.undo_payload else {
+        if entry.undo_payload.is_none() {
             return Err(CoreError::IllegalState {
                 reason: "this agent action has no undo payload".to_string(),
             });
+        }
+
+        // Atomically claim `undone = 0 -> 1` so concurrent duplicate undo calls cannot double-replay.
+        let Some(claimed) = self
+            .inner
+            .store
+            .with_conn(|conn| store::claim_agent_activity_undo(conn, activity_id, now))?
+        else {
+            return self
+                .inner
+                .store
+                .with_conn(|conn| store::get_agent_activity(conn, activity_id))?
+                .map(|r| r.to_view())
+                .ok_or_else(|| CoreError::NotFound {
+                    entity: "agent activity".to_string(),
+                });
         };
 
+        let Some(payload) = claimed.undo_payload.clone() else {
+            return Ok(claimed.to_view());
+        };
+
+        let mut accounts_to_flush: Vec<AccountId> = Vec::new();
         match payload {
             AgentUndoPayload::RestoreThreadFlags { states } => {
-                self.inner
-                    .store
-                    .with_conn(|conn| store::restore_thread_flags(conn, &states))?;
+                accounts_to_flush = self.inner.store.with_conn(|conn| {
+                    let tids: Vec<ThreadId> = states.iter().map(|s| s.thread_id).collect();
+                    let before_undo = store::snapshot_thread_flags(conn, &tids)?;
+                    let pairs = store::thread_account_pairs(conn, &tids)?;
+                    store::restore_thread_flags(conn, &states)?;
+
+                    // Enqueue compensating IMAP offline actions for every flag that changed.
+                    let mut flush_accounts = Vec::new();
+                    for target in &states {
+                        let Some(cur) = before_undo.iter().find(|c| c.thread_id == target.thread_id)
+                        else {
+                            continue;
+                        };
+                        let Some(&(acct_id, _)) =
+                            pairs.iter().find(|(_, tid)| *tid == target.thread_id)
+                        else {
+                            continue;
+                        };
+                        let pair = [(acct_id, target.thread_id)];
+                        if cur.archived != target.archived {
+                            let act = if target.archived {
+                                MailAction::Archive
+                            } else {
+                                MailAction::Unarchive
+                            };
+                            let _ = store::enqueue_offline_actions(conn, &pair, &act, now);
+                        }
+                        if cur.trashed != target.trashed {
+                            let act = if target.trashed {
+                                MailAction::Trash
+                            } else {
+                                MailAction::Unarchive
+                            };
+                            let _ = store::enqueue_offline_actions(conn, &pair, &act, now);
+                        }
+                        if cur.spam != target.spam {
+                            let act = if target.spam {
+                                MailAction::ReportSpam
+                            } else {
+                                MailAction::Unarchive
+                            };
+                            let _ = store::enqueue_offline_actions(conn, &pair, &act, now);
+                        }
+                        if cur.starred != target.starred {
+                            let act = MailAction::Star { on: target.starred };
+                            let _ = store::enqueue_offline_actions(conn, &pair, &act, now);
+                        }
+                        let cur_read = cur.unread_count == 0;
+                        let target_read = target.unread_count == 0;
+                        if cur_read != target_read {
+                            let act = MailAction::MarkRead { read: target_read };
+                            let _ = store::enqueue_offline_actions(conn, &pair, &act, now);
+                        }
+                        if !flush_accounts.contains(&acct_id) {
+                            flush_accounts.push(acct_id);
+                        }
+                    }
+                    Ok(flush_accounts)
+                })?;
             }
             AgentUndoPayload::ToggleLabel {
                 label_id,
@@ -2556,17 +2671,14 @@ impl MailCore {
             }
         }
 
-        let updated = self.inner.store.with_conn(|conn| {
-            store::mark_agent_activity_undone(conn, activity_id, now)?;
-            store::get_agent_activity(conn, activity_id)?
-                .map(|r| r.to_view())
-                .ok_or_else(|| CoreError::NotFound {
-                    entity: "agent activity".to_string(),
-                })
-        })?;
+        for acct_id in accounts_to_flush {
+            self.inner
+                .sync_manager
+                .send_command(acct_id, ActorCommand::FlushActions);
+        }
         self.emit(CoreEvent::Resync);
         self.emit(CoreEvent::AgentActivityChanged);
-        Ok(updated)
+        Ok(claimed.to_view())
     }
 
     pub async fn list_pending_agent_drafts(&self) -> Result<Vec<DraftView>, CoreError> {
@@ -2660,7 +2772,7 @@ impl MailCore {
         let cfg = self.get_ai_config().await?;
         if !cfg.enabled {
             return Err(CoreError::IllegalState {
-                reason: "In-pane AI is disabled — enable it in Settings".to_string(),
+                reason: "In-pane AI is disabled: enable it in Settings".to_string(),
             });
         }
         let api_key = self.inner.host.secrets.get(&SecretKey::ai_api_key())?;
@@ -2683,7 +2795,7 @@ impl MailCore {
         let cfg = self.get_ai_config().await?;
         if !cfg.enabled {
             return Err(CoreError::IllegalState {
-                reason: "In-pane AI is disabled — enable it in Settings".to_string(),
+                reason: "In-pane AI is disabled: enable it in Settings".to_string(),
             });
         }
         let api_key = self.inner.host.secrets.get(&SecretKey::ai_api_key())?;
@@ -2708,7 +2820,7 @@ impl MailCore {
         let cfg = self.get_ai_config().await?;
         if !cfg.enabled {
             return Err(CoreError::IllegalState {
-                reason: "In-pane AI is disabled — enable it in Settings".to_string(),
+                reason: "In-pane AI is disabled: enable it in Settings".to_string(),
             });
         }
         let api_key = self.inner.host.secrets.get(&SecretKey::ai_api_key())?;
@@ -3169,33 +3281,41 @@ impl MailCore {
             .with_conn(|conn| store::snapshot_thread_flags(conn, &resolved))?;
 
         let mut updated = Vec::new();
+        let mut applied_parts: Vec<&'static str> = Vec::new();
+        let mut second_err: Option<CoreError> = None;
+
         if let Some(r) = read {
             let outcome = self
                 .act_on_threads(MailAction::MarkRead { read: r }, resolved.clone())
                 .await?;
             updated = outcome.updated_ids;
+            applied_parts.push(if r { "read" } else { "unread" });
         }
         if let Some(s) = starred {
-            let outcome = self
+            match self
                 .act_on_threads(MailAction::Star { on: s }, resolved.clone())
-                .await?;
-            if updated.is_empty() {
-                updated = outcome.updated_ids;
+                .await
+            {
+                Ok(outcome) => {
+                    if updated.is_empty() {
+                        updated = outcome.updated_ids;
+                    }
+                    applied_parts.push(if s { "starred" } else { "unstarred" });
+                }
+                Err(err) => {
+                    if applied_parts.is_empty() {
+                        return Err(err);
+                    }
+                    second_err = Some(err);
+                }
             }
         }
 
-        let mut parts = Vec::new();
-        if let Some(r) = read {
-            parts.push(if r { "read" } else { "unread" });
-        }
-        if let Some(s) = starred {
-            parts.push(if s { "starred" } else { "unstarred" });
-        }
         let summary = format!(
             "Marked {} thread{} {}",
             resolved.len(),
             if resolved.len() == 1 { "" } else { "s" },
-            parts.join(" & ")
+            applied_parts.join(" & ")
         );
         let now = self.now();
         self.inner.store.with_conn(|conn| {
@@ -3213,6 +3333,9 @@ impl MailCore {
             )
         })?;
         self.emit(CoreEvent::AgentActivityChanged);
+        if let Some(err) = second_err {
+            return Err(err);
+        }
         Ok(updated)
     }
 

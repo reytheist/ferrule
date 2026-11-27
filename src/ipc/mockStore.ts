@@ -2075,12 +2075,13 @@ export async function runRuleNow(id: import("../types/mail").RuleId): Promise<nu
 
 const mockAgentPerms = new Map<string, import("../types/mail").SaveAgentAccountPermissionInput>();
 let mockBridgeConfig: import("../types/mail").AgentBridgeConfig = {
-  mcpEnabled: true,
+  mcpEnabled: false,
   ssePort: 48173,
   webhookEnabled: false,
   webhookUrl: "",
   hasWebhookSecret: false,
   ipcEndpoint: "\\\\.\\pipe\\ferrule-mcp-preview",
+  sseToken: "preview-sse-token",
 };
 let mockAiConfig: import("../types/mail").AiConfigView = {
   enabled: true,
@@ -2231,7 +2232,7 @@ export async function aiDraftReply(
   stageForApproval: boolean,
 ): Promise<import("../types/mail").AiDraftResult> {
   const t = state.threads.find((th) => th.id === threadId);
-  const bodyText = `Hi ${t?.senderName ?? "there"},\n\nThanks for reaching out${instructions ? ` — ${instructions}` : ""}.\n\nBest,\nRey`;
+  const bodyText = `Hi ${t?.senderName ?? "there"},\n\nThanks for reaching out${instructions ? `: ${instructions}` : ""}.\n\nBest,\nRey`;
   let stagedDraft: import("../types/mail").DraftView | null = null;
   if (stageForApproval && t) {
     const acct = state.accounts.find((a) => a.id === t.accountId) ?? state.accounts[0];

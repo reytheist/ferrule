@@ -339,17 +339,23 @@ pub(crate) fn get_agent_activity(
     )
 }
 
-pub(crate) fn mark_agent_activity_undone(
+/// Atomically claim an undoable agent activity entry (`undone = 0 -> 1`).
+/// Returns `Ok(Some(row))` if this call claimed it, or `Ok(None)` if it was already undone.
+pub(crate) fn claim_agent_activity_undo(
     conn: &mut Connection,
     id: AgentActivityId,
     now: UnixMs,
-) -> Result<(), CoreError> {
-    conn.execute(
-        "UPDATE agent_activity_log SET undone = 1, undone_at = ?2 WHERE id = ?1",
-        params![id_to_blob(id.as_bytes()), now.0],
-    )
-    .sq()?;
-    Ok(())
+) -> Result<Option<AgentActivityRow>, CoreError> {
+    let changed = conn
+        .execute(
+            "UPDATE agent_activity_log SET undone = 1, undone_at = ?2 WHERE id = ?1 AND undone = 0",
+            params![id_to_blob(id.as_bytes()), now.0],
+        )
+        .sq()?;
+    if changed == 0 {
+        return Ok(None);
+    }
+    get_agent_activity(conn, id)
 }
 
 /// Capture exact thread + message read flags before a triage mutation so it can be
@@ -621,6 +627,7 @@ pub(crate) fn get_bridge_config(conn: &mut Connection) -> Result<AgentBridgeConf
                 webhook_url: stored.webhook_url,
                 has_webhook_secret: false,
                 ipc_endpoint: String::new(),
+                sse_token: String::new(),
             })
         }
         None => Ok(AgentBridgeConfig::default()),

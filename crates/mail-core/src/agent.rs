@@ -82,7 +82,7 @@ pub enum AgentMoveDestination {
 }
 
 /// Capability handle for MCP agents (Hermes, local scripts, etc.).
-/// Intentionally exposes read / search / undoable triage / draft-staging only —
+/// Intentionally exposes read / search / undoable triage / draft-staging only,
 /// never `send` or `approve`.
 #[derive(Clone)]
 pub struct AgentPort {

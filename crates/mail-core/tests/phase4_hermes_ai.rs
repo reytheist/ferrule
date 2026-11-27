@@ -8,7 +8,7 @@ use mail_core::host::ManualClock;
 use mail_core::ids::{AgentId, UnixMs};
 use mail_core::mcp::{
     format_sse_frame, handle_mcp_request_line, send_ipc_request_once, sign_webhook_payload,
-    spawn_ipc_server, validate_localhost_webhook_url,
+    spawn_ipc_server, spawn_push_services, validate_localhost_webhook_url,
 };
 use mail_core::types::{
     DraftOrigin, DraftState, InboxCategory, MailboxView, SaveAgentAccountPermissionInput,
@@ -250,6 +250,10 @@ async fn mcp_protocol_all_15_tools_and_single_writer_ipc_roundtrip() {
     }
 
     // 5. Undo every undoable triage mutation in reverse chronological order
+    let pending_before_undo = core
+        .pending_offline_actions(first_acct)
+        .await
+        .expect("pending actions");
     let activity = core.list_agent_activity(20).await.expect("activity");
     let undoable_ids: Vec<_> = activity.iter().filter(|a| a.can_undo).map(|a| a.id).collect();
     assert_eq!(undoable_ids.len(), 4);
@@ -258,6 +262,12 @@ async fn mcp_protocol_all_15_tools_and_single_writer_ipc_roundtrip() {
         assert!(undone.undone);
         assert!(!undone.can_undo);
     }
+    // Undo must enqueue compensating IMAP offline actions so remote server state stays in sync.
+    let pending_after_undo = core
+        .pending_offline_actions(first_acct)
+        .await
+        .expect("pending actions after undo");
+    assert!(pending_after_undo > pending_before_undo);
 
     // Thread is back in Inbox and un-snoozed after undoing archive + snooze!
     let back_in_inbox = core
@@ -277,6 +287,20 @@ async fn mcp_protocol_all_15_tools_and_single_writer_ipc_roundtrip() {
     assert!(back_in_inbox.iter().any(|t| t.id == thread_id));
 
     // 6. Single-writer local IPC server roundtrip (named pipe on Windows / Unix socket on Unix)
+    // Default is opt-in (disabled); enable MCP bridge explicitly before connecting.
+    assert!(!core.is_mcp_bridge_enabled());
+    core.save_agent_bridge_config(SaveAgentBridgeConfigInput {
+        mcp_enabled: true,
+        sse_port: 48173,
+        webhook_enabled: false,
+        webhook_url: String::new(),
+        webhook_secret: None,
+        clear_webhook_secret: false,
+    })
+    .await
+    .expect("enable bridge");
+    assert!(core.is_mcp_bridge_enabled());
+
     let unique = uuid::Uuid::now_v7();
     #[cfg(windows)]
     let endpoint = format!(r"\\.\pipe\ferrule-mcp-test-{unique}");
@@ -296,6 +320,113 @@ async fn mcp_protocol_all_15_tools_and_single_writer_ipc_roundtrip() {
     assert_eq!(ipc_resp["id"], 99);
     assert_eq!(ipc_resp["result"]["isError"], false);
     handle.abort();
+}
+
+#[tokio::test]
+async fn sse_requires_auth_host_check_kill_switch_and_live_rebinds_port() {
+    let (core, _secrets) = test_core();
+
+    // Pick two free ephemeral ports by binding and dropping listeners.
+    let port1 = {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let port2 = {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        l.local_addr().unwrap().port()
+    };
+
+    // Configure initial SSE port while mcp_enabled stays false (default opt-in).
+    core.save_agent_bridge_config(SaveAgentBridgeConfigInput {
+        mcp_enabled: false,
+        sse_port: port1,
+        webhook_enabled: false,
+        webhook_url: String::new(),
+        webhook_secret: None,
+        clear_webhook_secret: false,
+    })
+    .await
+    .expect("save initial port");
+
+    spawn_push_services(core.clone());
+    tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+
+    async fn raw_http(port: u16, req: &str) -> String {
+        let mut s = tokio::net::TcpStream::connect(format!("127.0.0.1:{port}"))
+            .await
+            .expect("connect sse");
+        s.write_all(req.as_bytes()).await.unwrap();
+        let mut buf = [0u8; 512];
+        let n = s.read(&mut buf).await.unwrap();
+        String::from_utf8_lossy(&buf[..n]).to_string()
+    }
+
+    // 1. Disabled bridge returns 403 Forbidden even with valid token & Host.
+    let token = core.sse_token().to_string();
+    let resp_disabled = raw_http(
+        port1,
+        &format!("GET /events?token={token} HTTP/1.1\r\nHost: 127.0.0.1:{port1}\r\n\r\n"),
+    )
+    .await;
+    assert!(resp_disabled.starts_with("HTTP/1.1 403"), "{resp_disabled}");
+
+    // 2. Enable bridge: non-loopback Host is rejected (DNS rebinding guard).
+    core.save_agent_bridge_config(SaveAgentBridgeConfigInput {
+        mcp_enabled: true,
+        sse_port: port1,
+        webhook_enabled: false,
+        webhook_url: String::new(),
+        webhook_secret: None,
+        clear_webhook_secret: false,
+    })
+    .await
+    .expect("enable bridge");
+
+    let resp_bad_host = raw_http(
+        port1,
+        &format!("GET /events?token={token} HTTP/1.1\r\nHost: evil.example:{port1}\r\n\r\n"),
+    )
+    .await;
+    assert!(resp_bad_host.starts_with("HTTP/1.1 403"), "{resp_bad_host}");
+
+    // 3. Missing/wrong token returns 401 Unauthorized.
+    let resp_unauth = raw_http(
+        port1,
+        &format!("GET /events HTTP/1.1\r\nHost: 127.0.0.1:{port1}\r\n\r\n"),
+    )
+    .await;
+    assert!(resp_unauth.starts_with("HTTP/1.1 401"), "{resp_unauth}");
+
+    // 4. Valid bearer token + loopback Host returns 200 text/event-stream.
+    let resp_ok = raw_http(
+        port1,
+        &format!(
+            "GET /events HTTP/1.1\r\nHost: 127.0.0.1:{port1}\r\nAuthorization: Bearer {token}\r\n\r\n"
+        ),
+    )
+    .await;
+    assert!(resp_ok.starts_with("HTTP/1.1 200"), "{resp_ok}");
+    assert!(resp_ok.contains("text/event-stream"), "{resp_ok}");
+
+    // 5. Live SSE port rebind without restart.
+    core.save_agent_bridge_config(SaveAgentBridgeConfigInput {
+        mcp_enabled: true,
+        sse_port: port2,
+        webhook_enabled: false,
+        webhook_url: String::new(),
+        webhook_secret: None,
+        clear_webhook_secret: false,
+    })
+    .await
+    .expect("rebind port");
+    tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+
+    let resp_rebound = raw_http(
+        port2,
+        &format!("GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port2}\r\n\r\n"),
+    )
+    .await;
+    assert!(resp_rebound.starts_with("HTTP/1.1 200"), "{resp_rebound}");
 }
 
 #[tokio::test]

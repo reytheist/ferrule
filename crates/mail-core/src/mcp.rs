@@ -62,7 +62,13 @@ pub fn default_ipc_endpoint() -> String {
                 return format!("{trimmed}/ferrule-mcp.sock");
             }
         }
-        format!("/tmp/ferrule-mcp-{suffix}.sock")
+        if let Ok(home) = std::env::var("HOME") {
+            let trimmed = home.trim();
+            if !trimmed.is_empty() {
+                return format!("{trimmed}/.local/share/ferrule/ferrule-mcp.sock");
+            }
+        }
+        format!("/run/user/ferrule-mcp-{suffix}.sock")
     }
 }
 
@@ -714,11 +720,7 @@ where
         if trimmed.is_empty() {
             continue;
         }
-        let bridge_enabled = core
-            .get_agent_bridge_config()
-            .await
-            .map(|c| c.mcp_enabled)
-            .unwrap_or(true);
+        let bridge_enabled = core.is_mcp_bridge_enabled();
         let reply = if !bridge_enabled {
             let id = serde_json::from_str::<Value>(trimmed)
                 .ok()
@@ -754,10 +756,13 @@ pub fn spawn_ipc_server(core: MailCore, endpoint: String) -> tokio::task::JoinHa
         loop {
             let mut opts = ServerOptions::new();
             opts.first_pipe_instance(first);
-            first = false;
             let server = match opts.create(&endpoint) {
-                Ok(s) => s,
-                Err(_) => {
+                Ok(s) => {
+                    first = false;
+                    s
+                }
+                Err(err) => {
+                    eprintln!("ferrule mcp ipc bind failed on {endpoint}: {err}");
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     continue;
                 }
@@ -778,12 +783,33 @@ pub fn spawn_ipc_server(core: MailCore, endpoint: String) -> tokio::task::JoinHa
     use tokio::net::UnixListener;
 
     tokio::spawn(async move {
-        let _ = std::fs::remove_file(&endpoint);
-        let listener = match UnixListener::bind(&endpoint) {
+        let path = std::path::Path::new(&endpoint);
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                if let Err(err) = std::fs::create_dir_all(parent) {
+                    eprintln!("ferrule mcp ipc mkdir failed for {}: {err}", parent.display());
+                    return;
+                }
+                let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+            }
+        }
+        if path.exists() {
+            if let Err(err) = std::fs::remove_file(path) {
+                eprintln!("ferrule mcp ipc remove stale socket failed on {endpoint}: {err}");
+                return;
+            }
+        }
+        let listener = match UnixListener::bind(path) {
             Ok(l) => l,
-            Err(_) => return,
+            Err(err) => {
+                eprintln!("ferrule mcp ipc bind failed on {endpoint}: {err}");
+                return;
+            }
         };
-        let _ = std::fs::set_permissions(&endpoint, std::fs::Permissions::from_mode(0o600));
+        if let Err(err) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+            eprintln!("ferrule mcp ipc chmod 0600 failed on {endpoint}: {err}");
+            return;
+        }
         loop {
             match listener.accept().await {
                 Ok((stream, _)) => {
@@ -905,28 +931,45 @@ pub async fn send_ipc_request_once(endpoint: &str, request_line: &str) -> Result
 // ── Local SSE Event Stream + Localhost Webhook Push ─────────────────────────
 
 /// Start the localhost-only SSE server (`127.0.0.1:<port>/events`) and the
-/// optional localhost webhook POST dispatcher.
+/// optional localhost webhook POST dispatcher. Automatically rebinds when `sse_port`
+/// changes in Settings.
 pub fn spawn_push_services(core: MailCore) {
-    // 1. Local SSE server on 127.0.0.1:<sse_port>
+    // 1. Local SSE server on 127.0.0.1:<sse_port> with live rebind on config update
     let sse_core = core.clone();
     tokio::spawn(async move {
-        let port = sse_core
-            .get_agent_bridge_config()
-            .await
-            .map(|c| c.sse_port)
-            .unwrap_or(48173);
-        let addr = format!("127.0.0.1:{port}");
-        let Ok(listener) = tokio::net::TcpListener::bind(&addr).await else {
-            return;
-        };
+        let mut port_rx = sse_core.subscribe_sse_port();
         loop {
-            let Ok((socket, _)) = listener.accept().await else {
-                continue;
+            let port = *port_rx.borrow_and_update();
+            let addr = format!("127.0.0.1:{port}");
+            let listener = match tokio::net::TcpListener::bind(&addr).await {
+                Ok(l) => l,
+                Err(err) => {
+                    eprintln!("ferrule sse bind failed on {addr}: {err}");
+                    if port_rx.changed().await.is_err() {
+                        break;
+                    }
+                    continue;
+                }
             };
-            let conn_core = sse_core.clone();
-            tokio::spawn(async move {
-                handle_sse_connection(conn_core, socket).await;
-            });
+            loop {
+                tokio::select! {
+                    changed = port_rx.changed() => {
+                        if changed.is_err() {
+                            return;
+                        }
+                        break;
+                    }
+                    accepted = listener.accept() => {
+                        if let Ok((socket, _)) = accepted {
+                            let conn_core = sse_core.clone();
+                            tokio::spawn(async move {
+                                handle_sse_connection(conn_core, socket).await;
+                            });
+                        }
+                    }
+                }
+            }
+            drop(listener);
         }
     });
 
@@ -942,6 +985,9 @@ pub fn spawn_push_services(core: MailCore) {
             let Some(client) = client.as_ref() else {
                 continue;
             };
+            if !hook_core.is_mcp_bridge_enabled() {
+                continue;
+            }
             let Ok(cfg) = hook_core.get_agent_bridge_config().await else {
                 continue;
             };
@@ -967,15 +1013,71 @@ pub fn spawn_push_services(core: MailCore) {
     });
 }
 
+fn is_loopback_host(host_header: &str) -> bool {
+    let trimmed = host_header.trim().to_ascii_lowercase();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let host_only = if let Some(rest) = trimmed.strip_prefix('[') {
+        rest.split(']').next().unwrap_or("")
+    } else {
+        trimmed.split(':').next().unwrap_or("")
+    };
+    matches!(host_only, "127.0.0.1" | "localhost" | "::1")
+}
+
+fn extract_bearer_or_query_token<'a>(req_str: &'a str, target: &'a str) -> Option<&'a str> {
+    for line in req_str.lines().skip(1) {
+        if let Some((k, v)) = line.split_once(':') {
+            if k.trim().eq_ignore_ascii_case("authorization") {
+                if let Some(tok) = v.trim().strip_prefix("Bearer ") {
+                    let t = tok.trim();
+                    if !t.is_empty() {
+                        return Some(t);
+                    }
+                }
+            }
+        }
+    }
+    if let Some((_, query)) = target.split_once('?') {
+        for pair in query.split('&') {
+            if let Some((k, v)) = pair.split_once('=') {
+                if k == "token" && !v.trim().is_empty() {
+                    return Some(v.trim());
+                }
+            }
+        }
+    }
+    None
+}
+
 async fn handle_sse_connection(core: MailCore, mut socket: tokio::net::TcpStream) {
-    let mut buf = [0u8; 2048];
+    let mut buf = [0u8; 4096];
     let n = match tokio::io::AsyncReadExt::read(&mut socket, &mut buf).await {
         Ok(n) if n > 0 => n,
         _ => return,
     };
     let req_str = String::from_utf8_lossy(&buf[..n]);
     let first_line = req_str.lines().next().unwrap_or("");
-    let path = first_line.split_whitespace().nth(1).unwrap_or("/");
+    let raw_target = first_line.split_whitespace().nth(1).unwrap_or("/");
+    let path = raw_target.split('?').next().unwrap_or("/");
+
+    // Reject non-loopback Host headers to prevent DNS rebinding.
+    let host_ok = req_str
+        .lines()
+        .skip(1)
+        .find_map(|line| {
+            let (k, v) = line.split_once(':')?;
+            k.trim().eq_ignore_ascii_case("host").then_some(v)
+        })
+        .map(is_loopback_host)
+        .unwrap_or(false);
+    if !host_ok {
+        let _ = socket
+            .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .await;
+        return;
+    }
 
     if path == "/health" {
         let body = r#"{"status":"ok"}"#;
@@ -995,6 +1097,21 @@ async fn handle_sse_connection(core: MailCore, mut socket: tokio::net::TcpStream
         return;
     }
 
+    if !core.is_mcp_bridge_enabled() {
+        let _ = socket
+            .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .await;
+        return;
+    }
+
+    let provided_token = extract_bearer_or_query_token(&req_str, raw_target);
+    if provided_token != Some(core.sse_token()) {
+        let _ = socket
+            .write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .await;
+        return;
+    }
+
     let headers = "HTTP/1.1 200 OK\r\n\
                    Content-Type: text/event-stream\r\n\
                    Cache-Control: no-cache\r\n\
@@ -1009,11 +1126,17 @@ async fn handle_sse_connection(core: MailCore, mut socket: tokio::net::TcpStream
     loop {
         tokio::select! {
             _ = keepalive.tick() => {
+                if !core.is_mcp_bridge_enabled() {
+                    break;
+                }
                 if socket.write_all(b": keep-alive\n\n").await.is_err() {
                     break;
                 }
             }
             ev = rx.recv() => {
+                if !core.is_mcp_bridge_enabled() {
+                    break;
+                }
                 match ev {
                     Ok(event) => {
                         if let Some(frame) = format_sse_frame(&event) {

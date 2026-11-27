@@ -470,12 +470,13 @@ export function useMailApp(): MailApp {
   );
   const [agentPermissions, setAgentPermissions] = useState<AgentAccountPermissionView[]>([]);
   const [agentBridgeConfig, setAgentBridgeConfig] = useState<AgentBridgeConfig>({
-    mcpEnabled: true,
+    mcpEnabled: false,
     ssePort: 48173,
     webhookEnabled: false,
     webhookUrl: "",
     hasWebhookSecret: false,
     ipcEndpoint: "",
+    sseToken: "",
   });
   const [agentActivity, setAgentActivity] = useState<AgentActivityView[]>([]);
   const [pendingAgentDrafts, setPendingAgentDrafts] = useState<DraftView[]>([]);
@@ -1841,7 +1842,7 @@ export function useMailApp(): MailApp {
           await cancelSend(receipt.jobId);
           setPendingAgentDrafts(await listPendingAgentDrafts());
           await reloadMeta();
-          showToast("Send cancelled — draft returned to Pending Approval");
+          showToast("Send cancelled: draft returned to Pending Approval");
         },
       });
     } catch (err) {
