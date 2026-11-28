@@ -21,6 +21,14 @@ ship-target: commit locally on master (push to origin when approved)
 - Keep Vite ignores for `**/target/**`, `**/src-tauri/**`, `**/crates/**` in `vite.config.ts` to prevent Windows `EBUSY` errors during `pnpm tauri dev`.
 - Keep all IMAP/SMTP provider presets (iCloud, Yahoo, Fastmail, Zoho, GMX, IONOS, custom) in `src/features/accounts/imapPresets.ts`.
 
+## Versioning
+
+- Stay on `0.x.y` until the owner explicitly decides Ferrule is feature-complete for a `1.0.0` release. Never bump to `1.0.0` without explicit owner approval.
+- **Patch (`x.y.Z`):** bug fixes, UI polish, IMAP/SMTP/parser fixes, security hardening, dependency/performance updates, and non-breaking SQLite indexes.
+- **Minor (`x.Y.0`):** new user-facing features or roadmap phases, new additive `ferrule mcp` tools or SSE/webhook event types, additive SQLite migrations (upgrading `ferrule.db` in place), and (pre-1.0) deliberate scope pivots/removals that preserve existing personal accounts and mail.
+- **Major (`X.0.0`, post-1.0):** breaking changes to `ferrule mcp` tool contracts, SSE/webhook payloads or auth/signature format, breaking SQLite or OS keychain (`ferrule:v1:...`) migrations, or dropping a supported platform/runtime.
+- Keep the version synchronized across `Cargo.toml`, `Cargo.lock` (via `cargo check --workspace`), `package.json`, and `src-tauri/tauri.conf.json`.
+
 ## Agent skills
 
 ### Issue tracker
