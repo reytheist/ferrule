@@ -686,3 +686,47 @@ async fn run_sync_turn(
 
     Ok(primary_folder)
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{CoreConfig, Host, MailCore};
+
+    /// Regression test for the 0.4.0 Windows startup panic: Tauri's `setup` hook runs on
+    /// the main OS thread outside any Tokio runtime context, so `start_background_services`
+    /// must be awaited inside a Tokio runtime (e.g., via `tauri::async_runtime::spawn`).
+    #[test]
+    fn start_background_services_from_non_tokio_thread_via_runtime_spawn() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("build test tokio runtime");
+
+        let core = MailCore::open(CoreConfig::default(), Host::desktop())
+            .expect("open in-memory mail core");
+
+        // Confirm we are on a plain OS thread with no active Tokio runtime.
+        assert!(
+            tokio::runtime::Handle::try_current().is_err(),
+            "test must run outside an ambient Tokio runtime"
+        );
+
+        let bg_core = core.clone();
+        let handle = rt.spawn(async move {
+            bg_core.start_background_services().await;
+            // Calling twice should remain idempotent.
+            bg_core.start_background_services().await;
+        });
+
+        rt.block_on(handle).expect("background services task must not panic");
+        assert!(
+            *core
+                .inner
+                .sync_manager
+                .smtp_started
+                .lock()
+                .expect("smtp_started lock"),
+            "SMTP submission worker should be marked started"
+        );
+    }
+}

@@ -157,8 +157,10 @@ impl MailCore {
     }
 
     /// Start background per-account async IMAP sync actors and the dedicated durable
-    /// SMTP submission worker. Call once on desktop startup.
-    pub fn start_background_services(&self) {
+    /// SMTP submission worker. Must be awaited inside a Tokio runtime (for example,
+    /// inside `tauri::async_runtime::spawn` on desktop startup, since Tauri's `setup`
+    /// hook runs on the main UI thread outside any Tokio runtime context).
+    pub async fn start_background_services(&self) {
         self.inner.sync_manager.start_smtp_worker(self.clone());
         if let Ok(accounts) = self.inner.store.with_conn(store::list_account_rows) {
             for account in accounts {
