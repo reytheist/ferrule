@@ -896,90 +896,115 @@ impl MailCore {
         let now = self.now();
         self.inner
             .store
-            .with_conn(|conn| store::list_threads(conn, &query, now))
+            .with_read_conn(|conn| store::list_threads(conn, &query, now))
     }
 
     pub async fn mailbox_counts(&self, scope: Scope) -> Result<MailboxCounts, CoreError> {
         let now = self.now();
         self.inner
             .store
-            .with_conn(|conn| store::mailbox_counts(conn, &scope, now))
+            .with_read_conn(|conn| store::mailbox_counts(conn, &scope, now))
     }
 
     /// Sanitizes every message body on read (no stale sanitized copies), marks the
     /// thread read, and reports trackers + unsubscribe options per message.
+    ///
+    /// Reads run on the dedicated WAL reader connection and HTML sanitization runs
+    /// outside any SQLite lock so clicking between messages stays responsive even
+    /// during active background IMAP sync.
     pub async fn open_thread(
         &self,
         thread_id: ThreadId,
         remote_content: RemoteContent,
     ) -> Result<ThreadView, CoreError> {
-        let (view, changed, account_id, headers_only_ids) = self.inner.store.with_conn(|conn| {
-            let thread = store::get_thread(conn, thread_id)?.ok_or(CoreError::NotFound {
-                entity: "thread".to_string(),
-            })?;
-            let account =
-                store::get_account(conn, thread.account_id)?.ok_or(CoreError::NotFound {
-                    entity: "account".to_string(),
+        let (thread, account, messages, snoozed_until, follow_up_due, msg_extras) =
+            self.inner.store.with_read_conn(|conn| {
+                let thread = store::get_thread(conn, thread_id)?.ok_or(CoreError::NotFound {
+                    entity: "thread".to_string(),
                 })?;
-            let messages = store::load_messages(conn, thread_id)?;
-            let changed = store::mark_thread_read(conn, thread_id)?;
-            let snoozed_until = store::live_snooze_for_thread(conn, thread_id)?.map(|j| j.due_at);
-            let follow_up_due =
-                store::live_follow_up_for_thread(conn, thread_id)?.map(|j| j.due_at);
+                let account =
+                    store::get_account(conn, thread.account_id)?.ok_or(CoreError::NotFound {
+                        entity: "account".to_string(),
+                    })?;
+                let messages = store::load_messages(conn, thread_id)?;
+                let snoozed_until =
+                    store::live_snooze_for_thread(conn, thread_id)?.map(|j| j.due_at);
+                let follow_up_due =
+                    store::live_follow_up_for_thread(conn, thread_id)?.map(|j| j.due_at);
 
-            let mut out = Vec::with_capacity(messages.len());
-            let mut headers_only_ids = Vec::new();
-            for message in &messages {
-                if message.body_state == "headers_only" {
-                    headers_only_ids.push(message.id);
+                let mut msg_extras = Vec::with_capacity(messages.len());
+                for message in &messages {
+                    let att_rows = store::list_message_attachments(conn, message.id)?;
+                    let invites = store::load_message_invites(conn, message.id)?;
+                    msg_extras.push((att_rows, invites));
                 }
-                let att_rows = store::list_message_attachments(conn, message.id)?;
-                let raw = match &message.raw_html {
-                    Some(html) => sync::inline_cid_images(html, &att_rows),
-                    None => sanitize::text_to_html(&message.body_text),
-                };
-                let doc = sanitize::sanitize_html(&raw, remote_content);
-                let invites = store::load_message_invites(conn, message.id)?;
-                let attachments: Vec<AttachmentMeta> = att_rows
-                    .iter()
-                    .filter(|a| !a.is_inline || a.content_id.is_none())
-                    .map(store::AttachmentRow::to_meta)
-                    .collect();
-                out.push(MessageView {
-                    id: message.id,
-                    from_name: message.from_name.clone(),
-                    from_email: message.from_email.clone(),
-                    to: message.to.clone(),
-                    cc: message.cc.clone(),
-                    date: message.date,
-                    snippet: message.snippet.clone(),
-                    body_srcdoc: doc.srcdoc.into_inner(),
-                    body_text: message.body_text.clone(),
-                    privacy: doc.privacy,
-                    attachments,
-                    unsubscribe: message.unsub.clone(),
-                    invites,
-                });
-            }
 
-            Ok((
-                ThreadView {
-                    id: thread.id,
-                    account_id: thread.account_id,
-                    account_label: account.display_name,
-                    account_color: account.color,
-                    account_email: account.email,
-                    subject: thread.subject,
-                    starred: thread.starred,
+                Ok((
+                    thread,
+                    account,
+                    messages,
                     snoozed_until,
                     follow_up_due,
-                    messages: out,
-                },
-                changed,
-                thread.account_id,
-                headers_only_ids,
-            ))
-        })?;
+                    msg_extras,
+                ))
+            })?;
+
+        // Sanitize HTML and inline CID images outside any SQLite lock.
+        let mut out = Vec::with_capacity(messages.len());
+        let mut headers_only_ids = Vec::new();
+        for (message, (att_rows, invites)) in messages.into_iter().zip(msg_extras) {
+            if message.body_state == "headers_only" {
+                headers_only_ids.push(message.id);
+            }
+            let raw = match &message.raw_html {
+                Some(html) => sync::inline_cid_images(html, &att_rows),
+                None => sanitize::text_to_html(&message.body_text),
+            };
+            let doc = sanitize::sanitize_html(&raw, remote_content);
+            let attachments: Vec<AttachmentMeta> = att_rows
+                .iter()
+                .filter(|a| !a.is_inline || a.content_id.is_none())
+                .map(store::AttachmentRow::to_meta)
+                .collect();
+            out.push(MessageView {
+                id: message.id,
+                from_name: message.from_name,
+                from_email: message.from_email,
+                to: message.to,
+                cc: message.cc,
+                date: message.date,
+                snippet: message.snippet,
+                body_srcdoc: doc.srcdoc.into_inner(),
+                body_text: message.body_text,
+                privacy: doc.privacy,
+                attachments,
+                unsubscribe: message.unsub,
+                invites,
+            });
+        }
+
+        let account_id = thread.account_id;
+        let view = ThreadView {
+            id: thread.id,
+            account_id,
+            account_label: account.display_name,
+            account_color: account.color,
+            account_email: account.email,
+            subject: thread.subject,
+            starred: thread.starred,
+            snoozed_until,
+            follow_up_due,
+            messages: out,
+        };
+
+        // Only acquire the writer lock when the thread actually has unread messages.
+        let changed = if thread.unread_count > 0 {
+            self.inner
+                .store
+                .with_conn(|conn| store::mark_thread_read(conn, thread_id))?
+        } else {
+            false
+        };
 
         for mid in headers_only_ids {
             self.inner
@@ -2398,8 +2423,24 @@ impl MailCore {
 
         match fetched {
             Ok(window) => {
-                let touched = self.inner.store.with_conn(|conn| {
-                    let touched = store::ingest_messages(conn, account_id, window.messages, now)?;
+                let mut prepared = store::prepare_ingest_messages(window.messages);
+                let mut touched: Vec<ThreadId> = Vec::new();
+                while !prepared.is_empty() {
+                    let take = prepared.len().min(25);
+                    let chunk: Vec<_> = prepared.drain(..take).collect();
+                    let chunk_touched = self.inner.store.with_conn(|conn| {
+                        store::ingest_prepared_messages(conn, account_id, chunk, now)
+                    })?;
+                    for tid in chunk_touched {
+                        if !touched.contains(&tid) {
+                            touched.push(tid);
+                        }
+                    }
+                    if !prepared.is_empty() {
+                        tokio::task::yield_now().await;
+                    }
+                }
+                self.inner.store.with_conn(|conn| {
                     store::update_folder_high_uid(
                         conn,
                         account_id,
@@ -2412,7 +2453,7 @@ impl MailCore {
                         account_id,
                         &SyncState::Idle { last_ok: Some(now) },
                     )?;
-                    Ok(touched)
+                    Ok(())
                 })?;
                 self.emit(CoreEvent::SyncChanged {
                     account_id,

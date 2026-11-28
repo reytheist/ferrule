@@ -21,6 +21,7 @@ pub(crate) struct ThreadRow {
     pub account_id: AccountId,
     pub subject: String,
     pub starred: bool,
+    pub unread_count: u32,
 }
 
 pub(crate) struct MessageRow {
@@ -80,6 +81,7 @@ fn map_thread(row: &Row<'_>) -> Result<ThreadRow, CoreError> {
         account_id: row_id(row, 1, AccountId::from_bytes)?,
         subject: row.get(2).sq()?,
         starred: row.get::<_, i64>(3).sq()? != 0,
+        unread_count: row.get::<_, i64>(4).sq()?.max(0) as u32,
     })
 }
 
@@ -88,7 +90,7 @@ const THREAD_COLS: &str =
     "t.id, t.account_id, t.subject, t.snippet, t.sender_name, t.sender_email, t.last_at, t.unread_count, t.message_count, t.has_attachments, t.starred, t.category, t.trackers_blocked";
 
 /// Columns `open_thread` needs for one thread.
-const THREAD_COLS_SINGLE: &str = "t.id, t.account_id, t.subject, t.starred";
+const THREAD_COLS_SINGLE: &str = "t.id, t.account_id, t.subject, t.starred, t.unread_count";
 
 pub(crate) fn get_thread(
     conn: &mut Connection,
@@ -844,7 +846,27 @@ pub(crate) fn upgrade_message_body(
     Ok(Some(thread_id))
 }
 
+/// Run `f` inside a single SQLite `BEGIN IMMEDIATE` transaction, rolling back on
+/// error or unwind so batch sync writes commit once instead of per-statement.
+fn with_immediate_tx<T>(
+    conn: &mut Connection,
+    f: impl FnOnce(&mut Connection) -> Result<T, CoreError>,
+) -> Result<T, CoreError> {
+    conn.execute_batch("BEGIN IMMEDIATE").sq()?;
+    match f(conn) {
+        Ok(value) => {
+            conn.execute_batch("COMMIT").sq()?;
+            Ok(value)
+        }
+        Err(err) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(err)
+        }
+    }
+}
+
 /// Reconcile `\Seen` flags from a periodic full flag pass against local messages in `folder`.
+/// Wrapped in a single SQLite transaction so flag updates do not perform per-thread autocommits.
 pub(crate) fn sync_folder_seen_flags(
     conn: &mut Connection,
     account_id: AccountId,
@@ -852,174 +874,211 @@ pub(crate) fn sync_folder_seen_flags(
     seen_uids: &[u32],
     unseen_uids: &[u32],
 ) -> Result<Vec<ThreadId>, CoreError> {
-    let mut touched = Vec::new();
-    for (uids, is_read) in [(seen_uids, 1i64), (unseen_uids, 0i64)] {
-        for chunk in uids.chunks(200) {
-            if chunk.is_empty() {
-                continue;
-            }
-            let placeholders = in_clause(chunk.len());
-            let mut params_vec: Vec<Value> = Vec::with_capacity(chunk.len() + 3);
-            params_vec.push(Value::Integer(is_read));
-            params_vec.push(Value::Blob(id_to_blob(account_id.as_bytes())));
-            params_vec.push(Value::Text(folder.to_string()));
-            for &uid in chunk {
-                params_vec.push(Value::Integer(i64::from(uid)));
-            }
-            let select_sql = format!(
-                "SELECT DISTINCT thread_id FROM message
-                 WHERE account_id = ?2 AND folder_name = ?3 AND is_read != ?1 AND imap_uid IN ({placeholders})"
-            );
-            let mut stmt = conn.prepare(&select_sql).sq()?;
-            let rows = stmt
-                .query_map(params_from_iter(params_vec.iter()), |r| {
-                    r.get::<_, Vec<u8>>(0)
-                })
-                .sq()?;
-            let mut batch_threads = Vec::new();
-            for row in rows {
-                let bytes = row.sq()?;
-                batch_threads.push(blob_to_id(&bytes, ThreadId::from_bytes)?);
-            }
-            drop(stmt);
-            if !batch_threads.is_empty() {
-                let update_sql = format!(
-                    "UPDATE message SET is_read = ?1
-                     WHERE account_id = ?2 AND folder_name = ?3 AND imap_uid IN ({placeholders})"
+    with_immediate_tx(conn, |conn| {
+        let mut touched = Vec::new();
+        for (uids, is_read) in [(seen_uids, 1i64), (unseen_uids, 0i64)] {
+            for chunk in uids.chunks(200) {
+                if chunk.is_empty() {
+                    continue;
+                }
+                let placeholders = in_clause(chunk.len());
+                let mut params_vec: Vec<Value> = Vec::with_capacity(chunk.len() + 3);
+                params_vec.push(Value::Integer(is_read));
+                params_vec.push(Value::Blob(id_to_blob(account_id.as_bytes())));
+                params_vec.push(Value::Text(folder.to_string()));
+                for &uid in chunk {
+                    params_vec.push(Value::Integer(i64::from(uid)));
+                }
+                let select_sql = format!(
+                    "SELECT DISTINCT thread_id FROM message
+                     WHERE account_id = ?2 AND folder_name = ?3 AND is_read != ?1 AND imap_uid IN ({placeholders})"
                 );
-                conn.execute(&update_sql, params_from_iter(params_vec.iter()))
+                let mut stmt = conn.prepare(&select_sql).sq()?;
+                let rows = stmt
+                    .query_map(params_from_iter(params_vec.iter()), |r| {
+                        r.get::<_, Vec<u8>>(0)
+                    })
                     .sq()?;
-                for tid in batch_threads {
-                    refresh_thread_summary(conn, tid)?;
-                    if !touched.contains(&tid) {
-                        touched.push(tid);
+                let mut batch_threads = Vec::new();
+                for row in rows {
+                    let bytes = row.sq()?;
+                    batch_threads.push(blob_to_id(&bytes, ThreadId::from_bytes)?);
+                }
+                drop(stmt);
+                if !batch_threads.is_empty() {
+                    let update_sql = format!(
+                        "UPDATE message SET is_read = ?1
+                         WHERE account_id = ?2 AND folder_name = ?3 AND imap_uid IN ({placeholders})"
+                    );
+                    conn.execute(&update_sql, params_from_iter(params_vec.iter()))
+                        .sq()?;
+                    for tid in batch_threads {
+                        refresh_thread_summary(conn, tid)?;
+                        if !touched.contains(&tid) {
+                            touched.push(tid);
+                        }
                     }
                 }
             }
         }
-    }
-    Ok(touched)
+        Ok(touched)
+    })
 }
 
-/// Ingest parsed IMAP messages: upsert threads, insert messages + FTS rows + attachments,
-/// refresh derived columns. Message-level dedup makes re-sync idempotent.
-pub(crate) fn ingest_messages(
+/// CPU-preprocessed message ready for fast transactional SQLite insertion without
+/// running HTML tracker detection or `.ics` parsing while holding the DB mutex.
+pub(crate) struct PreparedIngestMessage {
+    pub incoming: IngestMessage,
+    pub trackers: u32,
+    pub parsed_invites: Vec<crate::calendar::ParsedIcsEvent>,
+}
+
+/// Precompute HTML tracker counts and `.ics` invites outside any SQLite lock.
+pub(crate) fn prepare_ingest_messages(
+    messages: Vec<IngestMessage>,
+) -> Vec<PreparedIngestMessage> {
+    messages
+        .into_iter()
+        .map(|incoming| {
+            let trackers = incoming
+                .raw_html
+                .as_deref()
+                .map(|html| detect_trackers(html).len() as u32)
+                .unwrap_or(0);
+            let parsed_invites = incoming
+                .ics_payloads
+                .iter()
+                .flat_map(|payload| crate::calendar::parse_ics(payload))
+                .collect();
+            PreparedIngestMessage {
+                incoming,
+                trackers,
+                parsed_invites,
+            }
+        })
+        .collect()
+}
+
+/// Ingest pre-processed messages inside a single SQLite transaction so sync batches
+/// commit once instead of issuing hundreds of autocommit fsyncs while holding the DB lock.
+/// Message-level dedup makes re-sync idempotent.
+pub(crate) fn ingest_prepared_messages(
     conn: &mut Connection,
     account_id: AccountId,
-    messages: Vec<IngestMessage>,
+    messages: Vec<PreparedIngestMessage>,
     now: UnixMs,
 ) -> Result<Vec<ThreadId>, CoreError> {
-    let mut touched: Vec<ThreadId> = Vec::new();
-    for incoming in messages {
-        let date = incoming.date.unwrap_or(now);
-        let decision = crate::store::get_sender_decision(conn, &incoming.from_email)?;
-        let effective_category = match decision {
-            Some(crate::types::ScreenerDecision::Inbox) => InboxCategory::Primary,
-            Some(crate::types::ScreenerDecision::PaperTrail) => InboxCategory::Receipts,
-            Some(crate::types::ScreenerDecision::Feed) => InboxCategory::Newsletters,
-            _ => incoming.category,
-        };
-        let thread_id = upsert_thread(
-            conn,
-            &NewThread {
-                id: ThreadId::fresh(),
-                account_id,
-                remote_key: &incoming.thread_key,
-                subject: &incoming.subject,
-                snippet: &incoming.snippet,
-                sender_name: &incoming.from_name.clone().unwrap_or_default(),
-                sender_email: &incoming.from_email,
-                last_at: date,
-                category: effective_category,
-            },
-        )?;
-        if matches!(decision, Some(crate::types::ScreenerDecision::Blocked)) {
-            conn.execute(
-                "UPDATE thread SET spam = 1, archived = 0, trashed = 0 WHERE id = ?1",
-                params![id_to_blob(thread_id.as_bytes())],
-            )
-            .sq()?;
-        }
-        let msg_id = MessageId::fresh();
-        let inserted = insert_message(
-            conn,
-            &NewMessage {
-                id: msg_id,
-                account_id,
-                thread_id,
-                message_id_hdr: incoming.message_id_hdr.clone(),
-                in_reply_to: incoming.in_reply_to.clone(),
-                from_name: incoming.from_name.clone(),
-                from_email: incoming.from_email.clone(),
-                to: incoming.to.clone(),
-                cc: incoming.cc.clone(),
-                subject: incoming.subject.clone(),
-                date,
-                snippet: incoming.snippet.clone(),
-                is_read: incoming.is_read,
-                body_text: incoming.body_text.clone(),
-                raw_html: incoming.raw_html.clone(),
-                unsub: incoming.unsub.clone(),
-                trackers: incoming
-                    .raw_html
-                    .as_deref()
-                    .map(|html| detect_trackers(html).len() as u32)
-                    .unwrap_or(0),
-            },
-        )?;
-        if inserted {
-            let body_state = if incoming.headers_only {
-                "headers_only"
-            } else {
-                "full"
+    if messages.is_empty() {
+        return Ok(Vec::new());
+    }
+    with_immediate_tx(conn, |conn| {
+        let mut touched: Vec<ThreadId> = Vec::new();
+        for prepared in messages {
+            let incoming = prepared.incoming;
+            let date = incoming.date.unwrap_or(now);
+            let decision = crate::store::get_sender_decision(conn, &incoming.from_email)?;
+            let effective_category = match decision {
+                Some(crate::types::ScreenerDecision::Inbox) => InboxCategory::Primary,
+                Some(crate::types::ScreenerDecision::PaperTrail) => InboxCategory::Receipts,
+                Some(crate::types::ScreenerDecision::Feed) => InboxCategory::Newsletters,
+                _ => incoming.category,
             };
-            conn.execute(
-                "UPDATE message SET folder_name = ?2, imap_uid = ?3, body_state = ?4 WHERE id = ?1",
-                params![
-                    id_to_blob(msg_id.as_bytes()),
-                    incoming.folder_name,
-                    incoming.imap_uid.map(i64::from),
-                    body_state,
-                ],
-            )
-            .sq()?;
-            if !incoming.attachments.is_empty() {
-                let att_rows: Vec<crate::store::NewAttachment> = incoming
-                    .attachments
-                    .iter()
-                    .map(|a| crate::store::NewAttachment {
-                        id: crate::ids::AttachmentId::fresh(),
-                        message_id: msg_id,
-                        account_id,
-                        filename: a.filename.clone(),
-                        mime: a.mime.clone(),
-                        size: a.size,
-                        content_id: a.content_id.clone(),
-                        is_inline: a.is_inline,
-                        part_id: a.part_id.clone(),
-                        data: a.data.clone(),
-                    })
-                    .collect();
-                crate::store::insert_attachments(conn, &att_rows)?;
-                refresh_thread_summary(conn, thread_id)?;
+            let thread_id = upsert_thread(
+                conn,
+                &NewThread {
+                    id: ThreadId::fresh(),
+                    account_id,
+                    remote_key: &incoming.thread_key,
+                    subject: &incoming.subject,
+                    snippet: &incoming.snippet,
+                    sender_name: &incoming.from_name.clone().unwrap_or_default(),
+                    sender_email: &incoming.from_email,
+                    last_at: date,
+                    category: effective_category,
+                },
+            )?;
+            if matches!(decision, Some(crate::types::ScreenerDecision::Blocked)) {
+                conn.execute(
+                    "UPDATE thread SET spam = 1, archived = 0, trashed = 0 WHERE id = ?1",
+                    params![id_to_blob(thread_id.as_bytes())],
+                )
+                .sq()?;
             }
-            for payload in &incoming.ics_payloads {
-                for parsed in crate::calendar::parse_ics(payload) {
-                    crate::store::upsert_message_invite(conn, msg_id, &parsed)?;
+            let msg_id = MessageId::fresh();
+            let inserted = insert_message(
+                conn,
+                &NewMessage {
+                    id: msg_id,
+                    account_id,
+                    thread_id,
+                    message_id_hdr: incoming.message_id_hdr.clone(),
+                    in_reply_to: incoming.in_reply_to.clone(),
+                    from_name: incoming.from_name.clone(),
+                    from_email: incoming.from_email.clone(),
+                    to: incoming.to.clone(),
+                    cc: incoming.cc.clone(),
+                    subject: incoming.subject.clone(),
+                    date,
+                    snippet: incoming.snippet.clone(),
+                    is_read: incoming.is_read,
+                    body_text: incoming.body_text.clone(),
+                    raw_html: incoming.raw_html.clone(),
+                    unsub: incoming.unsub.clone(),
+                    trackers: prepared.trackers,
+                },
+            )?;
+            if inserted {
+                let body_state = if incoming.headers_only {
+                    "headers_only"
+                } else {
+                    "full"
+                };
+                conn.execute(
+                    "UPDATE message SET folder_name = ?2, imap_uid = ?3, body_state = ?4 WHERE id = ?1",
+                    params![
+                        id_to_blob(msg_id.as_bytes()),
+                        incoming.folder_name,
+                        incoming.imap_uid.map(i64::from),
+                        body_state,
+                    ],
+                )
+                .sq()?;
+                if !incoming.attachments.is_empty() {
+                    let att_rows: Vec<crate::store::NewAttachment> = incoming
+                        .attachments
+                        .iter()
+                        .map(|a| crate::store::NewAttachment {
+                            id: crate::ids::AttachmentId::fresh(),
+                            message_id: msg_id,
+                            account_id,
+                            filename: a.filename.clone(),
+                            mime: a.mime.clone(),
+                            size: a.size,
+                            content_id: a.content_id.clone(),
+                            is_inline: a.is_inline,
+                            part_id: a.part_id.clone(),
+                            data: a.data.clone(),
+                        })
+                        .collect();
+                    crate::store::insert_attachments(conn, &att_rows)?;
+                    refresh_thread_summary(conn, thread_id)?;
+                }
+                for parsed in &prepared.parsed_invites {
+                    crate::store::upsert_message_invite(conn, msg_id, parsed)?;
+                }
+                let eval_target = crate::rules::RuleEvalTarget {
+                    from_email: &incoming.from_email,
+                    from_name: incoming.from_name.as_deref(),
+                    subject: &incoming.subject,
+                    body_text: &incoming.body_text,
+                    has_attachments: incoming.attachments.iter().any(|a| !a.is_inline),
+                };
+                crate::store::apply_enabled_rules_to_thread(conn, thread_id, &eval_target)?;
+                if !touched.contains(&thread_id) {
+                    touched.push(thread_id);
                 }
             }
-            let eval_target = crate::rules::RuleEvalTarget {
-                from_email: &incoming.from_email,
-                from_name: incoming.from_name.as_deref(),
-                subject: &incoming.subject,
-                body_text: &incoming.body_text,
-                has_attachments: incoming.attachments.iter().any(|a| !a.is_inline),
-            };
-            crate::store::apply_enabled_rules_to_thread(conn, thread_id, &eval_target)?;
-            if !touched.contains(&thread_id) {
-                touched.push(thread_id);
-            }
         }
-    }
-    Ok(touched)
+        Ok(touched)
+    })
 }

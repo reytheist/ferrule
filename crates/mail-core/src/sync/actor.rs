@@ -32,6 +32,7 @@ use crate::MailCore;
 const SLICE_MAX_DURATION: Duration = Duration::from_secs(2);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(240);
 const FLAG_PASS_INTERVAL_MS: i64 = 15 * 60 * 1000; // 15 minutes
+const INGEST_CHUNK_SIZE: usize = 25;
 
 #[derive(Debug)]
 pub(crate) enum ActorCommand {
@@ -500,7 +501,26 @@ async fn run_sync_turn(
                 ..base_plan.clone()
             };
             let fetched = imap::fetch_window_on_session(session, &folder_plan).await?;
-            let touched = core.inner.store.with_conn(|conn| {
+            // Precompute HTML tracker counts & .ics invites outside the SQLite lock,
+            // then commit in small transactional chunks so foreground writes never stall.
+            let mut prepared = store::prepare_ingest_messages(fetched.messages);
+            let mut touched: Vec<crate::ids::ThreadId> = Vec::new();
+            while !prepared.is_empty() {
+                let take = prepared.len().min(INGEST_CHUNK_SIZE);
+                let chunk: Vec<_> = prepared.drain(..take).collect();
+                let chunk_touched = core.inner.store.with_conn(|conn| {
+                    store::ingest_prepared_messages(conn, account_id, chunk, now)
+                })?;
+                for tid in chunk_touched {
+                    if !touched.contains(&tid) {
+                        touched.push(tid);
+                    }
+                }
+                if !prepared.is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            }
+            core.inner.store.with_conn(|conn| {
                 store::update_folder_status(
                     conn,
                     account_id,
@@ -513,7 +533,6 @@ async fn run_sync_turn(
                     },
                     now,
                 )?;
-                let touched = store::ingest_messages(conn, account_id, fetched.messages, now)?;
                 if fetched.high_uid > 0 {
                     store::update_folder_high_uid(
                         conn,
@@ -532,7 +551,7 @@ async fn run_sync_turn(
                         fetched.low_uid <= 1,
                     )?;
                 }
-                Ok(touched)
+                Ok(())
             })?;
             if !touched.is_empty() {
                 core.notify_hermes_ingested(account_id, &touched);
@@ -585,17 +604,41 @@ async fn run_sync_turn(
                             .await
                     {
                         let bg_now = bg_core.now();
-                        if let Ok(touched) = bg_core.inner.store.with_conn(|conn| {
-                            let t = store::ingest_messages(conn, account_id, msgs, bg_now)?;
-                            store::update_folder_backfill(
-                                conn,
-                                account_id,
-                                &bg_plan.folder,
-                                i64::from(new_low),
-                                done,
-                            )?;
-                            Ok(t)
-                        }) {
+                        let mut prepared = store::prepare_ingest_messages(msgs);
+                        let mut touched = Vec::new();
+                        let mut ok = true;
+                        while !prepared.is_empty() {
+                            let take = prepared.len().min(INGEST_CHUNK_SIZE);
+                            let chunk: Vec<_> = prepared.drain(..take).collect();
+                            match bg_core.inner.store.with_conn(|conn| {
+                                store::ingest_prepared_messages(conn, account_id, chunk, bg_now)
+                            }) {
+                                Ok(chunk_touched) => {
+                                    for tid in chunk_touched {
+                                        if !touched.contains(&tid) {
+                                            touched.push(tid);
+                                        }
+                                    }
+                                }
+                                Err(_) => {
+                                    ok = false;
+                                    break;
+                                }
+                            }
+                            if !prepared.is_empty() {
+                                tokio::task::yield_now().await;
+                            }
+                        }
+                        if ok {
+                            let _ = bg_core.inner.store.with_conn(|conn| {
+                                store::update_folder_backfill(
+                                    conn,
+                                    account_id,
+                                    &bg_plan.folder,
+                                    i64::from(new_low),
+                                    done,
+                                )
+                            });
                             if !touched.is_empty() {
                                 bg_core.emit(CoreEvent::MailChanged {
                                     account_id,

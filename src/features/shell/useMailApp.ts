@@ -690,7 +690,6 @@ export function useMailApp(): MailApp {
         if (cancelled || requestTheme !== themeRef.current) return;
         setThread(next);
         void reload(scope, view).catch(() => undefined);
-        void reloadMeta().catch(() => undefined);
       })
       .catch((err: unknown) => {
         if (!cancelled) showToast(friendlyError(err));
@@ -698,7 +697,7 @@ export function useMailApp(): MailApp {
     return () => {
       cancelled = true;
     };
-  }, [selectedId, remoteContent, theme, reload, reloadMeta, scope, view, showToast]);
+  }, [selectedId, remoteContent, theme, reload, scope, view, showToast]);
 
   // Scheduler heartbeat: wake snoozes, fire due sends, refresh on change.
   useEffect(() => {

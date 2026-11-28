@@ -29,7 +29,7 @@ pub(crate) use workflow::*;
 use std::path::Path;
 use std::sync::Mutex;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -61,6 +61,10 @@ const MIGRATION_0012_PHASE4: &str = include_str!("0012_phase4_agent_ai.sql");
 
 pub(crate) struct Store {
     conn: Mutex<Connection>,
+    /// Dedicated read-only WAL connection for file-backed databases so UI reads
+    /// (`open_thread`, `list_threads`, `mailbox_counts`) never block behind a
+    /// background sync write transaction. `None` for in-memory test databases.
+    read_conn: Option<Mutex<Connection>>,
 }
 
 impl Store {
@@ -75,7 +79,21 @@ impl Store {
         let conn = Connection::open(path).map_err(|e| CoreError::Storage {
             reason: format!("open sqlite: {e}"),
         })?;
-        Self::init(conn)
+        let mut store = Self::init(conn)?;
+        let reader = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|e| CoreError::Storage {
+            reason: format!("open sqlite reader: {e}"),
+        })?;
+        reader
+            .execute_batch("PRAGMA busy_timeout = 5000; PRAGMA query_only = ON;")
+            .map_err(|e| CoreError::Storage {
+                reason: format!("configure sqlite reader: {e}"),
+            })?;
+        store.read_conn = Some(Mutex::new(reader));
+        Ok(store)
     }
 
     pub(crate) fn open_in_memory() -> Result<Self, CoreError> {
@@ -86,6 +104,10 @@ impl Store {
     }
 
     fn init(mut conn: Connection) -> Result<Self, CoreError> {
+        conn.execute_batch("PRAGMA busy_timeout = 5000; PRAGMA synchronous = NORMAL;")
+            .map_err(|e| CoreError::Storage {
+                reason: format!("configure sqlite writer: {e}"),
+            })?;
         // Runs every open: idempotent DDL plus connection-scoped pragmas (WAL, FKs, mmap).
         conn.execute_batch(MIGRATION_0001)
             .map_err(|e| CoreError::Storage {
@@ -165,6 +187,7 @@ impl Store {
         purge_legacy_demo_data(&mut conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            read_conn: None,
         })
     }
 
@@ -174,6 +197,19 @@ impl Store {
     ) -> Result<T, CoreError> {
         let mut guard = self.conn.lock().map_err(|_| CoreError::Internal {
             reason: "sqlite mutex poisoned".to_string(),
+        })?;
+        f(&mut guard)
+    }
+
+    /// Execute a read-only query on the dedicated WAL reader connection when available,
+    /// avoiding contention with background sync write transactions.
+    pub(crate) fn with_read_conn<T>(
+        &self,
+        f: impl FnOnce(&mut Connection) -> Result<T, CoreError>,
+    ) -> Result<T, CoreError> {
+        let mutex = self.read_conn.as_ref().unwrap_or(&self.conn);
+        let mut guard = mutex.lock().map_err(|_| CoreError::Internal {
+            reason: "sqlite reader mutex poisoned".to_string(),
         })?;
         f(&mut guard)
     }
@@ -387,4 +423,62 @@ pub(crate) fn save_app_settings(
     )
     .sq()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Barrier};
+
+    /// Regression test: on a file-backed WAL database, `with_read_conn` (used by
+    /// `open_thread`, `list_threads`, and `mailbox_counts`) must complete concurrently
+    /// without deadlocking or blocking even while `with_conn` holds the writer mutex.
+    #[test]
+    fn wal_reader_does_not_block_while_writer_mutex_is_held() {
+        let dir = std::env::temp_dir().join(format!("ferrule-wal-test-{}", uuid::Uuid::new_v4()));
+        let db_path = dir.join("ferrule.db");
+        let store = Arc::new(Store::open(&db_path).expect("open file-backed store"));
+
+        let entered_writer = Arc::new(Barrier::new(2));
+        let reader_finished = Arc::new(Barrier::new(2));
+
+        let writer_store = store.clone();
+        let w_entered = entered_writer.clone();
+        let w_done = reader_finished.clone();
+        let writer = std::thread::spawn(move || {
+            writer_store
+                .with_conn(|conn| {
+                    let tx = conn.transaction().sq()?;
+                    tx.execute(
+                        "INSERT INTO app_setting (key, value_json) VALUES ('wal_test', 'true')
+                         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
+                        [],
+                    )
+                    .sq()?;
+                    // Signal reader while holding both the writer mutex and an open write tx.
+                    w_entered.wait();
+                    w_done.wait();
+                    tx.commit().sq()?;
+                    Ok(())
+                })
+                .expect("writer tx succeeds");
+        });
+
+        // Wait until writer holds the writer mutex and an active SQLite write transaction.
+        entered_writer.wait();
+
+        // Reader must succeed immediately on the dedicated WAL reader connection.
+        let count: i64 = store
+            .with_read_conn(|conn| {
+                conn.query_row("SELECT COUNT(*) FROM app_setting", [], |r| r.get(0))
+                    .sq()
+            })
+            .expect("reader query succeeds concurrently");
+        assert!(count >= 0);
+
+        reader_finished.wait();
+        writer.join().expect("writer thread joins cleanly");
+        drop(store);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
